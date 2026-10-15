@@ -128,4 +128,30 @@ for those glyphs. This was preview font coverage, not corrupted terminal output.
 The existing terminal logo geometry/fallback checks pass. No new real-terminal
 font compatibility or provider inference verification is claimed. Default-model
 shader generation, read-only permissions and versioned/audited handoffs are tested
-with a fixture invoker; live shader generation has not been exercised.
+with a fixture invoker; the subsequent live test is recorded below.
+
+
+### Live default-model shader creation
+
+On 2026-10-15, an isolated CLI-created `shader-demo` project used the user's
+explicitly selected default runtime: Codex `gpt-6.1-sol` / `high`, via the real
+`codex-cli 0.162.1` app-server. `arena shader create` generated a sparse dot-ripple
+background with an approximately 30-second cycle. The first attempt passed the
+HLSL-profile compiler, displayed its preview and applied through a recoverable
+transaction. The source hash matched the journal; task/result envelopes shared a
+correlation ID; the previous source remained in the transaction. No workflow head
+or ordinary workflow run was started.
+
+A real PTY session opened the saved arena and recorded 61 frames over 30.5 seconds.
+All 61 frames differed; 239 background cells differed at the 15-second comparison.
+All 852 non-dot foreground cells retained their text and color throughout. Resize
+checks at 60×18, 8×4 and 120×32 retained the prompt, and `/quit` exited cleanly.
+The recording renders actual terminal cell output with a Braille-capable font for
+the logo; it is not a screenshot of a particular terminal emulator. The live call
+reported 19,591 input and 823 output tokens (20,414 total).
+
+This verifies the CLI generation → validation → application → animated graph path
+for this Codex runtime. TUI `/shader` preview/apply still has fixture coverage rather
+than a separate live generation call. Other provider shader generation and broader
+multi-provider milestones remain unverified. Readiness still reports catalog/version
+drift separately from this successful inference result.
