@@ -8,6 +8,8 @@ This repository is defining and building Agent Arena, a local-first coordinator 
 - Workflow definitions and agent profiles are generated and validated by Arena. Treat `.arena/*.arena.json` and `.arena/.agents/` as a CLI-managed format; do not make user setup depend on hand-editing it.
 - Keep the protocol provider-neutral while preserving provider-specific model IDs, effort controls, permissions, and capabilities as opaque values.
 - Route communication through Arena's versioned message envelope. Do not assume two vendor agents share a session, memory, tool API, or filesystem.
+- A team returns one versioned verdict packet. Call it consensus only after unanimous affirmation; preserve unresolved disagreement as no-consensus.
+- On-call agents stay outside the ordinary graph and start only through a configured event or explicit user invocation. Record trigger, context, and invocation limits.
 - Give each writing worker an isolated worktree. Integrate through an auditable queue, and never silently discard user or agent changes.
 - Persist a local event history for workflow state, messages, command outcomes, checkpoints, and code changes. Redact secrets and make retention visible.
 - Make rollback create a reversible change, such as a revert commit or restored checkpoint. Do not implement rollback as an unrecorded destructive reset.

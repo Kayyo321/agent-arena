@@ -8,6 +8,8 @@ This repository currently contains the product and interoperability foundation. 
 
 - Define an arena once and let the CLI create and maintain its files.
 - Show the workflow as a live graph: delegated work, peer messages, progress, and failures.
+- Run teams through bounded deliberation and return one recognizable verdict packet, preserving unresolved disagreement.
+- Keep specialist agents off the ordinary path and invoke them for configured events or manual escalation.
 - Let agents from different providers exchange a stable handoff format.
 - Give each writing agent an isolated Git worktree and control how its changes enter the project.
 - Keep a local audit trail and make rollback an explicit, reviewable operation.
@@ -49,7 +51,7 @@ arena rollback <run-id> <change-id>
 arena skill install --agent codex|claude|all
 ```
 
-`arena workflow create` should launch a guided builder that asks for a head agent, workers, provider/model settings, hierarchy, peer links, and workspace/review policy, then validates and writes the configuration. Arena, rather than the developer, creates profile files and keeps them in sync.
+`arena workflow create` should launch a guided builder that asks for a head agent, workers, provider/model settings, hierarchy, peer links, optional team membership and verdict labels, on-call trigger scenarios, and workspace/review policy, then validates and writes the configuration. Arena, rather than the developer, creates profile files and keeps them in sync.
 
 ## First-time agent setup
 
@@ -59,7 +61,7 @@ The skill describes how an agent should manage arenas through the CLI. Since the
 
 ## Example
 
-See [`examples/project/.arena/`](examples/project/.arena/) for a small, illustrative cross-provider review workflow and generated profile files. It demonstrates the proposed file format; normal users should create equivalent files with the future CLI.
+See [`examples/project/.arena/`](examples/project/.arena/) for an illustrative cross-provider workflow with a deliberating review team, a single verdict packet, and an on-call escalation agent. It demonstrates the proposed file format; normal users should create equivalent files with the future CLI.
 
 ## Development status
 

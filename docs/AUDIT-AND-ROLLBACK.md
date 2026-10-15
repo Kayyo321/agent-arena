@@ -4,9 +4,9 @@
 
 Each run has a local ordered event journal under `.arena/.state/<run-id>/`. Events include a monotonic sequence, unique event ID, timestamp, run/workflow/agent IDs, event type, correlation/message IDs where relevant, and references to any files or Git objects involved.
 
-The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, change proposed/reviewed/integrated, and rollback created/completed.
+The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, change proposed/reviewed/integrated, and rollback created/completed. Team events record team start, member positions, each deliberation round, member affirmations, facilitator output, and whether the result reached unanimous consensus. On-call events record trigger matches, invocation start/completion, deduplication or cap decisions, the context sent, and the resulting agent invocation.
 
-For auditability, the journal records the initial repository HEAD, each agent's worktree and branch, base commits, process identity and exit status, handoff links, diffs/commit IDs, review decisions, and integration/rollback operations. An event chain may include hashes to detect accidental edits, but local hashes are not a security guarantee against an owner who can rewrite the entire state directory.
+For auditability, the journal records the workflow definition and policy snapshot or content hash used by the run, the initial repository HEAD, each agent's worktree and branch, base commits, process identity and exit status, handoff links, diffs/commit IDs, review decisions, and integration/rollback operations. An event chain may include hashes to detect accidental edits, but local hashes are not a security guarantee against an owner who can rewrite the entire state directory.
 
 ## Message and output retention
 

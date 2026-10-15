@@ -7,7 +7,7 @@
     "protocolVersion": { "type": "string", "pattern": "^1\\.[0-9]+$" },
     "messageId": { "type": "string", "minLength": 1 },
     "runId": { "type": "string", "minLength": 1 },
-    "kind": { "enum": ["task", "question", "message", "result", "error", "cancel"] },
+    "kind": { "enum": ["task", "question", "message", "result", "team-result", "error", "cancel"] },
     "from": { "$ref": "#/$defs/actor" },
     "to": { "$ref": "#/$defs/actor" },
     "createdAt": { "type": "string", "format": "date-time" },
@@ -24,9 +24,46 @@
         "options": { "type": "object", "additionalProperties": true }
       },
       "additionalProperties": true
+    },
+    "invocation": {
+      "description": "Optional routing metadata for team-member and on-call task deliveries.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode", "teamId"],
+          "properties": {
+            "mode": { "const": "team-member" },
+            "teamId": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["mode", "trigger", "triggerEventId", "sourceId"],
+          "properties": {
+            "mode": { "const": "on-call" },
+            "trigger": { "enum": ["manual", "team.no-consensus", "agent.failed", "validation.failed", "change.touches-paths"] },
+            "triggerEventId": { "type": "string", "minLength": 1 },
+            "sourceId": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "task" } }, "required": ["kind"] },
+      "else": { "not": { "required": ["invocation"] } }
+    },
+    {
+      "if": { "required": ["invocation"] },
+      "then": { "properties": { "protocolVersion": { "pattern": "^1\\.(?:[1-9][0-9]*)$" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "team-result" } }, "required": ["kind"] },
+      "then": { "properties": { "protocolVersion": { "pattern": "^1\\.(?:[1-9][0-9]*)$" } } }
+    },
     {
       "if": { "properties": { "kind": { "const": "task" } }, "required": ["kind"] },
       "then": {
@@ -96,6 +133,72 @@
               "nextAction": { "type": "string" }
             },
             "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "team-result" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["teamId", "format", "outcome", "verdict", "summary", "rationale", "evidence", "memberPositions", "dissent", "rounds", "nextAction"],
+            "properties": {
+              "teamId": { "type": "string", "minLength": 1 },
+              "format": { "const": "arena.team-verdict.v1" },
+              "outcome": { "enum": ["consensus", "no-consensus"] },
+              "verdict": { "type": ["string", "null"] },
+              "summary": { "type": "string", "minLength": 1 },
+              "rationale": { "type": "string" },
+              "evidence": { "type": "array", "items": { "type": "string" } },
+              "memberPositions": {
+                "type": "array",
+                "minItems": 2,
+                "items": {
+                  "type": "object",
+                  "required": ["agentId", "verdict", "status", "summary", "evidence"],
+                  "properties": {
+                    "agentId": { "type": "string", "minLength": 1 },
+                    "verdict": { "type": ["string", "null"] },
+                    "status": { "enum": ["affirmed", "disagreed", "unavailable"] },
+                    "summary": { "type": "string" },
+                    "evidence": { "type": "array", "items": { "type": "string" } }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "dissent": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["agentId", "position", "reason"],
+                  "properties": {
+                    "agentId": { "type": "string", "minLength": 1 },
+                    "position": { "type": ["string", "null"] },
+                    "reason": { "type": "string", "minLength": 1 }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "rounds": { "type": "integer", "minimum": 0 },
+              "nextAction": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": true,
+            "allOf": [
+              {
+                "if": { "properties": { "outcome": { "const": "consensus" } }, "required": ["outcome"] },
+                "then": {
+                  "properties": { "verdict": { "type": "string", "minLength": 1 }, "dissent": { "maxItems": 0 } }
+                }
+              },
+              {
+                "if": { "properties": { "outcome": { "const": "no-consensus" } }, "required": ["outcome"] },
+                "then": {
+                  "properties": { "verdict": { "type": "null" }, "dissent": { "minItems": 1 } }
+                }
+              }
+            ]
           }
         }
       }

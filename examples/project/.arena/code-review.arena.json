@@ -2,12 +2,13 @@
   "schemaVersion": 1,
   "id": "code-review",
   "name": "Cross-provider implementation and review",
-  "description": "A coordinator delegates implementation and independent review, then presents changes for integration.",
+  "description": "A coordinator delegates implementation and consensus review, with a maintainer available for unresolved results.",
   "headAgent": "orchestrator",
   "agents": [
     {
       "id": "orchestrator",
       "profile": ".agents/code-review/orchestrator.agent.json",
+      "activation": "path",
       "level": 0,
       "runtime": {
         "provider": "codex",
@@ -18,6 +19,7 @@
     {
       "id": "implementer",
       "profile": ".agents/code-review/implementer.agent.json",
+      "activation": "path",
       "level": 1,
       "runtime": {
         "provider": "claude-code",
@@ -27,7 +29,28 @@
     {
       "id": "reviewer",
       "profile": ".agents/code-review/reviewer.agent.json",
+      "activation": "path",
       "level": 1,
+      "runtime": {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "security-reviewer",
+      "profile": ".agents/code-review/security-reviewer.agent.json",
+      "activation": "path",
+      "level": 1,
+      "runtime": {
+        "provider": "claude-code",
+        "model": "sonnet"
+      }
+    },
+    {
+      "id": "maintainer-on-call",
+      "profile": ".agents/code-review/maintainer-on-call.agent.json",
+      "activation": "on-call",
       "runtime": {
         "provider": "codex",
         "model": "gpt-6.1-sol",
@@ -35,15 +58,40 @@
       }
     }
   ],
+  "teams": [
+    {
+      "id": "release-review",
+      "name": "Release review team",
+      "members": ["reviewer", "security-reviewer"],
+      "facilitator": "reviewer",
+      "consensus": {
+        "mode": "unanimous-deliberation",
+        "maxRounds": 2
+      },
+      "outputContract": {
+        "format": "arena.team-verdict.v1",
+        "verdicts": ["approve", "request-changes", "needs-more-evidence"]
+      }
+    }
+  ],
+  "onCall": [
+    {
+      "agentId": "maintainer-on-call",
+      "maxInvocationsPerRun": 1,
+      "triggers": [
+        { "type": "event", "event": "team.no-consensus", "teamId": "release-review" },
+        { "type": "event", "event": "validation.failed" },
+        { "type": "manual" }
+      ]
+    }
+  ],
   "relationships": [
     { "type": "delegates", "from": "orchestrator", "to": "implementer" },
-    { "type": "delegates", "from": "orchestrator", "to": "reviewer" },
-    { "type": "communicates", "from": "implementer", "to": "reviewer", "direction": "two-way" },
-    { "type": "communicates", "from": "orchestrator", "to": "implementer", "direction": "two-way" },
-    { "type": "communicates", "from": "orchestrator", "to": "reviewer", "direction": "two-way" }
+    { "type": "delegates", "from": "orchestrator", "to": "release-review" },
+    { "type": "communicates", "from": "orchestrator", "to": "implementer", "direction": "two-way" }
   ],
   "settings": {
-    "maxConcurrentAgents": 2,
+    "maxConcurrentAgents": 4,
     "workspace": {
       "writeIsolation": "git-worktree-per-task"
     },

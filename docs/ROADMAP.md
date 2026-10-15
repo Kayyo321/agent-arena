@@ -6,7 +6,7 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 
 **Status: prepared in this repository.**
 
-- Product brief, architecture, interoperability contract, configuration schemas, examples, skill entry points, and audit/rollback policy.
+- Product brief, architecture, interoperability contract (including team verdicts and on-call triggers), configuration schemas, examples, skill entry points, and audit/rollback policy.
 - Keep CLI behavior clearly marked as planned until an implementation lands.
 
 **Exit:** contributors can implement the first CLI without inventing configuration, handoff, or rollback semantics.
@@ -16,10 +16,12 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 - Select the implementation language and TUI framework.
 - Implement `arena init`, `arena workflow create/list/show/edit/delete`, and `arena workflow validate`.
 - Have the guided builder create the workflow file and all role profiles from schema-backed forms.
-- Validate IDs, profile paths, provider settings, graph reachability, delegation acyclicity, and communication permissions.
+- Author teams with member selection, unanimous-deliberation policy, a bounded round count, and allowed verdict labels.
+- Author on-call agents with event/manual triggers, scoped context, and per-run invocation limits.
+- Validate IDs, profile paths, provider settings, graph reachability, delegation acyclicity, team membership, on-call isolation, and communication permissions.
 - Add a dry-run rendering of the graph and policy before save.
 
-**Exit:** a developer can create, inspect, edit, and delete workflows without hand-writing generated JSON; invalid graphs are rejected with actionable messages.
+**Exit:** a developer can create, inspect, edit, and delete workflows, including teams and on-call rules, without hand-writing generated JSON; invalid graphs are rejected with actionable messages.
 
 ## M2 — Event journal and local run model
 
@@ -35,10 +37,12 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 - Implement capability-based adapter interface and readiness checks.
 - Add Codex CLI and Claude Code adapters through their current supported local interfaces.
 - Translate to/from the common envelope; preserve raw provider options and stream status/output.
-- Implement question, result, error, cancellation, retry, timeout, and peer messaging.
+- Run team rounds across provider adapters, collect explicit member affirmations, and emit one `arena.team-verdict.v1` result or explicit no-consensus packet.
+- Route configured on-call events with deduplication, context scoping, and invocation caps.
+- Implement question, result, team-result, error, cancellation, retry, timeout, and peer messaging.
 - Gate provider-specific account use on reviewed official integration and terms requirements.
 
-**Exit:** one user-authored task can pass through a multi-provider workflow, with clear preflight errors and a complete handoff history.
+**Exit:** one user-authored task can pass through a multi-provider workflow, teams return one auditable consensus/no-consensus packet, configured on-call triggers route safely, and the run has a complete handoff history.
 
 ## M4 — Isolated work and reversible integration
 
@@ -51,12 +55,12 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 
 ## M5 — Live terminal graph and operational polish
 
-- Render hierarchy, communication edges, agent state, current task, provider/model, worktree, and pending decisions.
+- Render hierarchy, communication edges, team groups and verdict state, on-call trigger rail, agent state, current task, provider/model, worktree, and pending decisions.
 - Add keyboard navigation, event detail, and accessible non-TUI output for logs and automation.
 - Add usage/concurrency controls, process cleanup, crash recovery, and diagnostics.
 - Package installation and document supported operating systems and provider CLI versions.
 
-**Exit:** a developer can operate and inspect a complete run from the live graph and recover after interruption.
+**Exit:** a developer can operate and inspect a complete run, team verdicts, and on-call events from the live graph and recover after interruption.
 
 ## M6 — Skill distribution and additional adapters
 

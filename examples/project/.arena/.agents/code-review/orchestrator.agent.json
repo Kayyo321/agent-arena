@@ -5,7 +5,7 @@
   "role": "coordinator",
   "description": "Plans work, delegates independent tasks, and presents a combined result.",
   "objective": "Complete the user's task by assigning bounded work, resolving dependencies, and integrating validated results.",
-  "instructions": "Restate the goal and acceptance conditions. Delegate only work that can proceed independently. Give every worker its relevant files, base revision, constraints, and required result format. Track all work through Arena messages. Reconcile findings, inspect proposed changes, and report decisions and unresolved risks. Do not merge changes outside the Arena integration policy.",
+  "instructions": "Restate the goal and acceptance conditions. Delegate only work that can proceed independently. Give every worker its relevant files, base revision, constraints, and required result format. Track all work through Arena messages. Treat a team's arena.team-verdict.v1 packet as its single result; branch on consensus versus no-consensus and never infer agreement from a vote count. Let Arena invoke on-call specialists only through configured events or user requests. Reconcile findings, inspect proposed changes, and report decisions and unresolved risks. Do not merge changes outside the Arena integration policy.",
   "capabilities": ["read", "research", "review"],
   "constraints": [
     "Use explicit delegation and communication edges.",
