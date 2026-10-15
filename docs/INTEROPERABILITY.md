@@ -116,7 +116,7 @@ Example review-result payload:
 
 Arena launches each member of a team with the same objective, acceptance criteria, context, constraints, and workspace base. It collects each member's position in a structured response, then shares the team's positions for up to the configured number of deliberation rounds. The provider sessions remain separate; Arena carries only explicit messages between them.
 
-Team protocol version `1.1` requires unanimity. Every member must affirm the same verdict from the team's configured list. The facilitator then emits one `team-result` envelope whose `payload` is the team's only output to its caller:
+Team protocol version `1.1` requires unanimity. Every member must affirm the same verdict from the team's configured list. Deliberation rounds collect positions only. When all positions match, a separate affirmation asks each member whether it accepts that candidate as the team's verdict (`acceptTeamVerdict`), which is distinct from approving the change: unanimous `ChangesRequested` is a consensus. A member that repeats the candidate but declines it is asked once more (journaled as `team.affirmation-clarified`); only explicit acceptance counts. The team result carries the change IDs of the inputs it reviewed as well as any member changes, so the agent a router sends it to starts from the reviewed code. The facilitator then emits one `team-result` envelope whose `payload` is the team's only output to its caller:
 
 ```json
 {

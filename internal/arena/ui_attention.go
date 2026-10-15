@@ -15,6 +15,9 @@ import (
 
 // A run is stalled when nothing is executing and it either waits on a
 // decision only the user can answer, or has been silent for stallIdle.
+// Everything the orchestrator says in the banner shares its transcript color.
+const sgrOrchestrator = "38;5;141"
+
 const (
 	stallDecisionAge = 15 * time.Second
 	stallIdle        = 60 * time.Second
@@ -82,14 +85,14 @@ func (m LiveModel) attentionLines(width int, color bool) []string {
 		if m.Stall.Err != nil {
 			lines = append(lines, styled(short("Orchestrator diagnosis failed: "+Redact(m.Stall.Err.Error()), width), "38;5;203", color))
 		} else if m.Stall.Applied {
-			lines = append(lines, styled(short("◆ orchestrator answered "+m.Stall.DecisionID+" with "+m.Stall.Answer+": "+m.Stall.Summary, width), "38;5;141", color))
+			lines = append(lines, styled(short("◆ orchestrator answered "+m.Stall.DecisionID+" with "+m.Stall.Answer+": "+m.Stall.Summary, width), sgrOrchestrator, color))
 			if m.Stall.Recommendation != "" {
-				lines = append(lines, short("  "+m.Stall.Recommendation, width))
+				lines = append(lines, styled(short("  "+m.Stall.Recommendation, width), sgrOrchestrator, color))
 			}
 		} else {
-			lines = append(lines, styled(short("◆ orchestrator: "+m.Stall.Summary, width), "38;5;141", color))
+			lines = append(lines, styled(short("◆ orchestrator: "+m.Stall.Summary, width), sgrOrchestrator, color))
 			if m.Stall.Recommendation != "" {
-				lines = append(lines, short("  "+m.Stall.Recommendation, width))
+				lines = append(lines, styled(short("  "+m.Stall.Recommendation, width), sgrOrchestrator, color))
 			}
 			if m.Stall.DecisionID != "" && m.pendingDecision(m.Stall.DecisionID) != nil {
 				lines = append(lines, styled(short("  /accept answers "+m.Stall.DecisionID+" with "+m.Stall.Answer, width), sgrMuted, color))

@@ -56,15 +56,19 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 	verdict := ""
 	rounds := 0
 	memberChanges := map[string][]string{}
-	schema := objectSchema(map[string]any{"verdict": map[string]any{"type": "string", "enum": t.OutputContract.Verdicts}, "affirm": map[string]any{"type": "boolean"}, "summary": map[string]any{"type": "string"}, "evidence": arraySchema(map[string]any{"type": "string"})})
-	collect := func(prompt string) ([]position, error) {
+	// Deliberation asks only for a position. Affirmation is a separate,
+	// explicitly named question: whether the member accepts the candidate as
+	// the team's verdict, which is not the same as approving the change.
+	schema := objectSchema(map[string]any{"verdict": map[string]any{"type": "string", "enum": t.OutputContract.Verdicts}, "summary": map[string]any{"type": "string"}, "evidence": arraySchema(map[string]any{"type": "string"})})
+	affirmSchema := objectSchema(map[string]any{"verdict": map[string]any{"type": "string", "enum": t.OutputContract.Verdicts}, "acceptTeamVerdict": map[string]any{"type": "boolean"}, "summary": map[string]any{"type": "string"}, "evidence": arraySchema(map[string]any{"type": "string"})})
+	collect := func(prompt string, members []string, schema map[string]any) ([]position, error) {
 		type reply struct {
 			p       position
 			changes []string
 			err     error
 		}
-		replies := make(chan reply, len(t.Members))
-		for _, id := range t.Members {
+		replies := make(chan reply, len(members))
+		for _, id := range members {
 			go func(id string) {
 				a, _ := agentByID(e.Run.Workflow, id)
 				contextParents := append([]Packet{}, parents...)
@@ -77,7 +81,7 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 				payload, _ := packet["payload"].(map[string]any)
 				result, _ := payload["position"].(map[string]any)
 				v := str(result["verdict"])
-				p := position{AgentID: id, Verdict: &v, Status: "disagreed", Summary: str(result["summary"]), Evidence: stringSlice(result["evidence"]), Affirm: result["affirm"] == true}
+				p := position{AgentID: id, Verdict: &v, Status: "disagreed", Summary: str(result["summary"]), Evidence: stringSlice(result["evidence"]), Affirm: result["acceptTeamVerdict"] == true}
 				if !Has(t.OutputContract.Verdicts, v) {
 					p.Status = "unavailable"
 					p.Verdict = nil
@@ -87,7 +91,7 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 			}(id)
 		}
 		byID := map[string]position{}
-		for range t.Members {
+		for range members {
 			select {
 			case reply := <-replies:
 				if reply.err != nil {
@@ -100,15 +104,18 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 			}
 		}
 		out := []position{}
-		for _, id := range t.Members {
+		for _, id := range members {
 			out = append(out, byID[id])
 		}
 		return out, nil
 	}
+	affirmPrompt := func(round int, candidate string, positions []position) string {
+		return fmt.Sprintf("Final affirmation for team %s in round %d. Every member proposed the verdict %q. Question: do you accept %q as the TEAM's verdict? This is not asking whether you approve the change: if you are requesting changes and the candidate is ChangesRequested, accepting it is correct. Set acceptTeamVerdict=true and verdict=%q if you accept it. Set acceptTeamVerdict=false only if, after considering every position, you now hold a different verdict, and return that verdict. Positions: %s", t.Id, round, candidate, candidate, candidate, string(JSON(positions)))
+	}
 	for round := 1; round <= t.Consensus.MaxRounds; round++ {
 		rounds = round
 		var err error
-		positions, err = collect(fmt.Sprintf("Team %s, deliberation round %d. Return your independent position using exactly one allowed verdict. Prior positions: %s", t.Id, round, string(JSON(positions))))
+		positions, err = collect(fmt.Sprintf("Team %s, deliberation round %d. Return your independent position using exactly one allowed verdict. Prior positions: %s", t.Id, round, string(JSON(positions))), t.Members, schema)
 		if err != nil {
 			return nil, err
 		}
@@ -132,9 +139,33 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 		if !agree {
 			continue
 		}
-		affirmed, err := collect(fmt.Sprintf("Final affirmation for team %s in round %d. Candidate verdict is %q. Explicitly set affirm=true only if you affirm this exact verdict after considering every member's position. Otherwise set affirm=false and preserve your position. Positions: %s", t.Id, round, candidate, string(JSON(positions))))
+		affirmed, err := collect(affirmPrompt(round, candidate, positions), t.Members, affirmSchema)
 		if err != nil {
 			return nil, err
+		}
+		// A member that repeats the candidate verdict but declines it gave a
+		// contradictory answer; ask that member once more, explicitly.
+		unclear := []string{}
+		for _, p := range affirmed {
+			if !p.Affirm && p.Verdict != nil && *p.Verdict == candidate && p.Status != "unavailable" {
+				unclear = append(unclear, p.AgentID)
+			}
+		}
+		if len(unclear) > 0 {
+			if _, err := e.event(t.Id, "team.affirmation-clarified", map[string]any{"teamId": t.Id, "round": round, "members": unclear}); err != nil {
+				return nil, err
+			}
+			clarified, err := collect("Your previous answer was contradictory: your verdict was "+fmt.Sprintf("%q", candidate)+" but you did not accept it as the team's verdict. "+affirmPrompt(round, candidate, affirmed), unclear, affirmSchema)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range clarified {
+				for i := range affirmed {
+					if affirmed[i].AgentID == c.AgentID {
+						affirmed[i] = c
+					}
+				}
+			}
 		}
 		positions = affirmed
 		consensus = true
@@ -185,7 +216,12 @@ func (e *Engine) team(ctx context.Context, t Team, parents []Packet) (Packet, er
 	facilitator, _ := agentByID(e.Run.Workflow, t.Facilitator)
 	schema = objectSchema(map[string]any{"summary": map[string]any{"type": "string"}, "rationale": map[string]any{"type": "string"}, "nextAction": map[string]any{"type": "string"}, "verdict": map[string]any{"type": "string", "enum": t.OutputContract.Verdicts}, "affirm": map[string]any{"type": "boolean"}, "evidence": arraySchema(map[string]any{"type": "string"})})
 	finalContext := NewPacket(e.Run.ID, "message", "team-coordinator", "arena", t.Facilitator, facilitator.Runtime.Provider, "", map[string]any{"text": fmt.Sprintf("Compose the team's final prose. Arena has fixed outcome=%s, verdict=%v. Do not change it or hide disagreement. Positions: %s", outcome, chosen, string(JSON(memberPositions)))}, Runtime{Provider: "arena"})
+	// The reviewed inputs travel with the verdict, so whatever acts on it
+	// (a fixer, a docs writer) starts from the code the team examined.
 	changeIDs := []string{}
+	for _, parent := range parents {
+		changeIDs = append(changeIDs, stringSlice(parent["arenaChangeIds"])...)
+	}
 	for _, id := range t.Members {
 		changeIDs = append(changeIDs, memberChanges[id]...)
 	}

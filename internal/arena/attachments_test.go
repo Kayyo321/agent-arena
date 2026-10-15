@@ -156,7 +156,7 @@ func TestAttachmentMediatedReadAndRunHandoff(t *testing.T) {
 			return nil, fmt.Errorf("unscoped attachment read")
 		}
 		if in.Schema["properties"].(map[string]any)["verdict"] != nil {
-			return map[string]any{"verdict": "Approved", "affirm": true, "summary": "fixture", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+			return map[string]any{"verdict": "Approved", "acceptTeamVerdict": true, "summary": "fixture", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
 		}
 		return ordinaryResult(), nil
 	})

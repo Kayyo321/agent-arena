@@ -53,6 +53,9 @@ func TestStalledRunIsDiagnosedAndRecommendationAccepted(t *testing.T) {
 	if m.Stall == nil || m.Stall.Answer != "fixer" || !strings.Contains(strings.Join(m.attentionLines(100, false), "\n"), "/accept answers") {
 		t.Fatalf("diagnosis not shown: %+v", m.Stall)
 	}
+	if colored := strings.Join(m.attentionLines(100, true), "\n"); !strings.Contains(colored, "\x1b["+sgrOrchestrator+"m  Send it to fixer.") {
+		t.Fatalf("orchestrator recommendation lost its color: %q", colored)
+	}
 	next, cmd = m.submit("/accept")
 	next.(LiveModel).Update(cmd())
 	select {
@@ -152,7 +155,7 @@ func TestUndeliverableResultPacketIsRejectedWithoutFailingRun(t *testing.T) {
 	r := teamRun(t, p)
 	fake := testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
 		if in.Schema["properties"].(map[string]any)["verdict"] != nil {
-			return map[string]any{"verdict": "Approved", "affirm": true, "summary": "fixture", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+			return map[string]any{"verdict": "Approved", "acceptTeamVerdict": true, "summary": "fixture", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
 		}
 		result := ordinaryResult()
 		result["packets"] = []any{map[string]any{"to": "nobody", "kind": "message", "payloadJson": `{"text":"hi"}`}, map[string]any{"to": "nobody", "kind": "message", "payloadJson": "not json"}}
