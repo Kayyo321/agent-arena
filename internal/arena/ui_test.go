@@ -31,7 +31,7 @@ func TestLiveLayoutFitsTerminalAndKeepsPrompt(t *testing.T) {
 }
 func TestGraphShowsTeamsRoutersAuthorityAndProviderIdentity(t *testing.T) {
 	w, _, _ := fixture(t)
-	lines := wideGraph(w, RunState{Agents: map[string]string{}}, nil, 140, false)
+	lines := wideGraph(w, RunState{Agents: map[string]string{}}, nil, 140, false, "")
 	view := strings.Join(lines, "\n")
 	for _, part := range []string{"HEAD", "TEAM", "codex", "claude-code", "unanimous", "delegates"} {
 		if !strings.Contains(view, part) {

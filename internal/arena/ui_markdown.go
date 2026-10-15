@@ -80,7 +80,7 @@ func chatRule(role string, width int, color bool) string {
 	if sgr == "" {
 		sgr = chatRoleStyles["Arena"]
 	}
-	return styled(line+line, sgr, color) + styled(label, sgr, color) + styled(strings.Repeat(line, width-displayWidth(label)-2), sgrMuted, color)
+	return styled(line+line, sgrMuted, color) + styled(label, sgr, color) + styled(strings.Repeat(line, width-displayWidth(label)-2), sgrMuted, color)
 }
 
 // chatTranscript renders each message under its own colored rule. Agent text

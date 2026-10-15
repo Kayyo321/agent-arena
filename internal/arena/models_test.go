@@ -2,8 +2,10 @@ package arena
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 )
@@ -56,5 +58,26 @@ func TestTeamRouterGraphNeedsIncomingEdgeAndThenValidates(t *testing.T) {
 	w.Relationships = append(w.Relationships, Relationship{Type: "delegates", From: "review-board", To: "review-gate"})
 	if err := ValidateWorkflow(w, profiles, s); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWaitInboxBlocksUntilPeerReplyAndSkipsSeen(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		packet := NewPacket(r.ID, "message", "peer", "codex", "head", "codex", "", map[string]any{"text": "API agreed"}, Runtime{Provider: "codex"})
+		_, _ = p.Deliver(r, packet)
+	}()
+	returned := map[string]bool{}
+	start := time.Now()
+	packets, err := p.WaitInbox(context.Background(), r, "head", 5*time.Second, returned, true)
+	if err != nil || len(packets) != 1 || time.Since(start) < 250*time.Millisecond {
+		t.Fatalf("wait returned %d packets after %s: %v", len(packets), time.Since(start), err)
+	}
+	returned[str(packets[0]["messageId"])] = true
+	packets, err = p.WaitInbox(context.Background(), r, "head", 600*time.Millisecond, returned, true)
+	if err != nil || len(packets) != 0 {
+		t.Fatalf("seen message returned again: %d %v", len(packets), err)
 	}
 }

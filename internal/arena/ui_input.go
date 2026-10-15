@@ -181,6 +181,11 @@ func (m LiveModel) promptView(width, height int, color bool) ([]string, int, int
 		rows = append([]string{muted(short(m.attachmentSummary(), width), color)}, rows...)
 		y++
 	}
+	if attention := m.attentionLines(width, color); len(attention) > 0 && height > 8 {
+		attention = attention[:min(len(attention), max(1, height/4))]
+		rows = append(attention, rows...)
+		y += len(attention)
+	}
 	return rows, x, y
 }
 

@@ -206,7 +206,7 @@ func TestGraphUnicodeLabelsKeepTerminalCellGeometry(t *testing.T) {
 	w.Agents[0].Runtime.Model = "模型 👩🏽‍💻 e\u0301"
 	w.Teams[0].Name = "検証チーム"
 	for _, color := range []bool{false, true} {
-		for _, line := range wideGraph(w, RunState{}, nil, 120, color) {
+		for _, line := range wideGraph(w, RunState{}, nil, 120, color, "") {
 			if ansi.StringWidth(line) > 120 {
 				t.Fatal("wide label overflowed graph: ", line)
 			}

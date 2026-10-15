@@ -73,6 +73,7 @@ stateDiagram-v2
 - A task result identifies completed work, files changed, commit/checkpoint references, validation performed, known limitations, and recommended next action.
 - A question includes the missing decision and blocks only its own work item unless the scheduler has a dependency on it.
 - A worker result returns to its delegator. Peer messages use declared communication links.
+- Peers run concurrently. Over MCP, `arena_send` with kind `message` reaches a peer and `arena_inbox` with `newOnly` and `waitSeconds` (at most 120) blocks until an unseen message arrives, so an agent can wait for agreement before returning. A result returned first ends that agent's side of the conversation.
 - A retry gets a new attempt ID and retains the same correlation ID.
 - Delivery is at least once across process recovery; consumers deduplicate by `messageId`.
 - Cancellation is a request with a recorded outcome. Arena does not claim a provider stopped until the adapter confirms process exit.

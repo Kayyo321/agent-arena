@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"time"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 )
@@ -180,7 +182,7 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 		return result, nil
 	case "coworker-request":
 		if payload["workflowId"] != r.Workflow.Id {
-			return nil, fmt.Errorf("coworker workflow scope mismatch")
+			return nil, fmt.Errorf("coworker-request payload.workflowId must be %q; it asks the orchestrator for a new agent. To talk to an existing peer, send kind \"message\"", r.Workflow.Id)
 		}
 		packet := NewPacket(r.ID, kind, from, a.Runtime.Provider, "arena-orchestrator", r.Settings.DefaultModel.Provider, "", payload, a.Runtime)
 		if _, e := p.Deliver(r, packet); e != nil {
@@ -212,6 +214,33 @@ func (p *Project) Inbox(r Run, agent string) ([]Packet, error) {
 		}
 	}
 	return packets, nil
+}
+
+// WaitInbox returns the actor's peer messages oldest first. With newOnly it
+// skips already returned IDs and polls until one arrives or wait elapses.
+func (p *Project) WaitInbox(ctx context.Context, r Run, actor string, wait time.Duration, returned map[string]bool, newOnly bool) ([]Packet, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		all, err := p.Inbox(r, actor)
+		if err != nil {
+			return nil, err
+		}
+		sort.SliceStable(all, func(i, j int) bool { return str(all[i]["createdAt"]) < str(all[j]["createdAt"]) })
+		packets := []Packet{}
+		for _, packet := range all {
+			if !newOnly || !returned[str(packet["messageId"])] {
+				packets = append(packets, packet)
+			}
+		}
+		if len(packets) > 0 || !time.Now().Before(deadline) {
+			return packets, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(min(500*time.Millisecond, time.Until(deadline))):
+		}
+	}
 }
 
 func (p *Project) Acknowledge(r Run, packet Packet) error {

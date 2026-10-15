@@ -430,8 +430,20 @@ func Required(w []Workflow, s Settings) []Runtime {
 			all = append(all, a.Runtime)
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Provider+all[i].Model < all[j].Provider+all[j].Model })
-	return all
+	// One probe per distinct runtime: agents sharing a runtime share readiness.
+	seen := map[string]bool{}
+	unique := []Runtime{}
+	for _, r := range all {
+		key := string(JSON(r))
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, r)
+		}
+	}
+	sort.SliceStable(unique, func(i, j int) bool {
+		return unique[i].Provider+"\x00"+unique[i].Model+"\x00"+unique[i].ReasoningEffort < unique[j].Provider+"\x00"+unique[j].Model+"\x00"+unique[j].ReasoningEffort
+	})
+	return unique
 }
 
 func DecodeJSON(b []byte, v any) error {

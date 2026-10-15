@@ -100,8 +100,10 @@ type interviewQuestion struct {
 	Reply  chan string
 }
 type draftSaved struct {
-	Run Run
-	Err error
+	Run       Run
+	Err       error
+	Commit    string
+	CommitErr error
 }
 
 type interviewSession struct {

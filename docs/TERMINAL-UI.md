@@ -94,8 +94,25 @@ wheel so terminals cannot turn it into Up/Down history recall; hold Shift while
 dragging to select text with the terminal. Alt+Up/Down select audit events or
 review changes, leaving ordinary arrows available for message editing and history.
 
+Pending decisions are pinned above the composer with their choices. When only
+one is pending, typing one of its choices answers it (`/answer TEXT` also omits
+the ID). If a run stops making progress (nothing executing and a decision older
+than 15 seconds, or no events for a minute) Arena wakes the permanent
+`arena-orchestrator` once per stall (at most three times per run). It reads the
+run's evidence and pins a short diagnosis and recommendation; `/accept` applies
+its suggested answer. The diagnosis is journaled as `orchestrator.stall-diagnosed`
+and never answers on its own. A router waiting on you shows `⚑ waiting for you`.
+
+A line starting with `$` runs that shell command in the project root with your
+environment (two-minute limit, 256 KiB of output) and shows the output in a
+panel; the command and exit code are journaled in project history.
+
+Graph edges leave a card through a `┬` on its bottom border and end in `▼`
+just above the target. Cards that are working show the same rotating loading
+animation as the status line.
+
 The orchestrator transcript opens each message with a full-width rule in the
-speaker's color: a heavy cyan rule for you, purple for `arena-orchestrator`, and
+speaker's label color: a heavy rule labelled in cyan for you, purple for `arena-orchestrator`, and
 amber for Arena notices (failures in red). Agent replies are rendered from
 Markdown by Arena: headings, bold/italic/strikethrough, inline code on a dark
 background, fenced code blocks, quotes, lists, rules, tables and links. Provider

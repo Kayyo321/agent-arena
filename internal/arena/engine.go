@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -454,10 +455,22 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		answer, err := e.Project.Decide(ctx, e.Run, a.Id, kind, "Allow this operation in the assigned workspace?", []string{"yes", "no"}, data)
 		return answer == "yes", err
 	}
+	coordination := ""
+	peers := []string{}
+	for _, other := range e.Run.Workflow.Agents {
+		if other.Id != a.Id && AllowedPeer(e.Run.Workflow, a.Id, other.Id) {
+			peers = append(peers, other.Id)
+		}
+	}
+	if len(peers) > 0 {
+		// Peers run concurrently; a result returned before a reply arrives ends
+		// the conversation, so agreement requires an explicit wait.
+		coordination = "\nPeers running alongside you: " + strings.Join(peers, ", ") + ". Send them kind \"message\" packets. When your task depends on a peer's answer, wait for it with arena_inbox (newOnly=true, waitSeconds up to " + fmt.Sprint(maxInboxWait) + ") instead of finishing. If no reply arrives, proceed with your own proposal, state the assumption, and still complete the task."
+	}
 	in := Invocation{Attachments: attachments, AttachmentDir: e.Project.RunDir(e.Run.ID), Diagnostic: func(kind string, data map[string]any) error { _, err := e.event(a.Id, kind, data); return err }, Delivered: func() error { return e.Project.Acknowledge(e.Run, task) }, Usage: func(usage map[string]any) error {
 		_, err := e.event(a.Id, "usage.reported", map[string]any{"provider": a.Runtime.Provider, "usage": usage})
 		return err
-	}, ProjectRoot: e.Project.Root, RunID: e.Run.ID, AgentID: a.Id, Runtime: a.Runtime, Dir: workspace.Path, Write: write, Commands: Has(profile.Capabilities, "run_commands"), Schema: schema, Approve: approve, Prompt: "Role profile:\n" + string(JSON(profile)) + "\nTask envelope:\n" + string(SafeJSON(task)) + "\nAssigned workspace: " + workspace.Path + "\nReturn the requested JSON result. The packets array may contain Arena messages with to, kind, and payloadJson; use an empty array when none are needed.", Output: func(text string) error {
+	}, ProjectRoot: e.Project.Root, RunID: e.Run.ID, AgentID: a.Id, Runtime: a.Runtime, Dir: workspace.Path, Write: write, Commands: Has(profile.Capabilities, "run_commands"), Schema: schema, Approve: approve, Prompt: "Role profile:\n" + string(JSON(profile)) + "\nTask envelope:\n" + string(SafeJSON(task)) + "\nAssigned workspace: " + workspace.Path + "\nReturn the requested JSON result. The packets array may contain Arena messages with to, kind, and payloadJson; use an empty array when none are needed." + coordination, Output: func(text string) error {
 		data := map[string]any{"bytes": len(text), "contentHash": Hash([]byte(text))}
 		if e.Run.Retention == "full-local" && e.Run.Settings.Audit.ProcessOutput == "full" {
 			data["output"] = text
@@ -594,7 +607,16 @@ func (e *Engine) route(ctx context.Context, r Router, parents []Packet) (Packet,
 						choices = append(choices, route.To)
 					}
 				}
-				answer, err := e.Project.Decide(ctx, e.Run, r.Id, "router.fallback", "Router "+r.Id+" has no exact structured match", choices, map[string]any{"messageId": packet["messageId"]})
+				from, _ := packet["from"].(map[string]any)
+				prompt := fmt.Sprintf("%s got a %s from %s, but no route matches it (%s is ", r.Id, str(packet["kind"]), str(from["agentId"]), r.PayloadPointer)
+				if packet["kind"] != r.InputKind {
+					prompt = fmt.Sprintf("%s expected %s but got a %s from %s; ", r.Id, r.InputKind, str(packet["kind"]), str(from["agentId"])) + "choose where to send it"
+				} else if value, exists, _ := LookupPointer(packet["payload"], r.PayloadPointer); exists {
+					prompt += string(JSON(value)) + "). Where should it go?"
+				} else {
+					prompt += "missing). Where should it go?"
+				}
+				answer, err := e.Project.Decide(ctx, e.Run, r.Id, "router.fallback", prompt, choices, map[string]any{"messageId": packet["messageId"]})
 				if err != nil {
 					return nil, nil, err
 				}

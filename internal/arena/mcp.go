@@ -6,7 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
+	"time"
 )
+
+// maxInboxWait bounds how long one inbox call may block for a peer reply.
+const maxInboxWait = 120
 
 func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader, out io.Writer) error {
 	agent, ok := agentByID(r.Workflow, actor)
@@ -17,6 +22,17 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
 	initialized := false
 	calls := 0
+	returned := map[string]bool{}
+	peers := []string{}
+	for _, a := range r.Workflow.Agents {
+		if a.Id != actor && AllowedPeer(r.Workflow, actor, a.Id) {
+			peers = append(peers, a.Id)
+		}
+	}
+	peerNote := "No peer links are configured for you."
+	if len(peers) > 0 {
+		peerNote = "Your peers: " + strings.Join(peers, ", ") + "."
+	}
 	for scanner.Scan() {
 		var request struct {
 			JSONRPC string          `json:"jsonrpc"`
@@ -48,7 +64,7 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 				err = fmt.Errorf("initialize first")
 				break
 			}
-			result = map[string]any{"tools": []any{map[string]any{"name": "arena_send", "description": "Route an Arena message, context-proposal or coworker-request under the active workflow's permissions and policy. payloadJson is the JSON object described by Arena's versioned envelope contract.", "inputSchema": objectSchema(map[string]any{"to": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"message", "context-proposal", "coworker-request"}}, "payloadJson": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_inbox", "description": "Read peer messages delivered to this agent in the current run.", "inputSchema": objectSchema(map[string]any{})}, map[string]any{"name": "arena_context_search", "description": "Search durable context for the active workflow only.", "inputSchema": objectSchema(map[string]any{"query": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_ask_user", "description": "Ask the user a decision through an audited Arena question envelope and wait for their answer.", "inputSchema": objectSchema(map[string]any{"question": map[string]any{"type": "string"}})}}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "arena_send", "description": "Route an Arena packet under the active workflow's permissions and policy. To talk to a peer agent use kind \"message\" with to=<peer id> and payloadJson like {\"text\":\"...\"}. " + peerNote + " Use \"context-proposal\" for durable workflow context and \"coworker-request\" only to ask the orchestrator for a NEW agent (payload needs workflowId \"" + r.Workflow.Id + "\", role, objective, reason and runtime).", "inputSchema": objectSchema(map[string]any{"to": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"message", "context-proposal", "coworker-request"}}, "payloadJson": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_inbox", "description": "Read peer messages delivered to this agent in the current run, oldest first. To wait for a peer's reply before continuing, pass newOnly=true and waitSeconds (up to " + fmt.Sprint(maxInboxWait) + "): the call returns as soon as a message you have not seen arrives, or an empty list on timeout.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"waitSeconds": map[string]any{"type": "integer", "minimum": 0, "maximum": maxInboxWait}, "newOnly": map[string]any{"type": "boolean"}}, "additionalProperties": false}}, map[string]any{"name": "arena_context_search", "description": "Search durable context for the active workflow only.", "inputSchema": objectSchema(map[string]any{"query": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_ask_user", "description": "Ask the user a decision through an audited Arena question envelope and wait for their answer.", "inputSchema": objectSchema(map[string]any{"question": map[string]any{"type": "string"}})}}}
 		case "tools/call":
 			if !initialized {
 				err = fmt.Errorf("initialize first")
@@ -69,7 +85,14 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 					value, err = p.AgentPacket(ctx, r, actor, map[string]any{"to": args["to"], "kind": args["kind"], "payload": payload})
 				}
 			case "arena_inbox":
-				value, err = p.Inbox(r, actor)
+				wait, _ := args["waitSeconds"].(float64)
+				newOnly, _ := args["newOnly"].(bool)
+				var packets []Packet
+				packets, err = p.WaitInbox(ctx, r, actor, time.Duration(min(max(wait, 0), maxInboxWait))*time.Second, returned, newOnly)
+				for _, packet := range packets {
+					returned[str(packet["messageId"])] = true
+				}
+				value = packets
 			case "arena_context_search":
 				var entries []ContextEntry
 				entries, err = p.ContextEntries(r.Workflow.Id, false)

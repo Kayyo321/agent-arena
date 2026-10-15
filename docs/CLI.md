@@ -22,7 +22,9 @@ no catalog, so its model is typed. A listed model is not proof of inference acce
 default orchestrator: describe what you want to build and answer its questions
 about the workflow in Arena's own TUI. Codex runs invisibly through app-server,
 with no native Codex terminal screen. Review the proposed graph and enter `/save`;
-Arena validates and saves it, then opens its graph in the same TUI. Choices you
+Arena validates and saves it, commits the project scaffold (`git add -A` and
+`git commit -m "Arena scaffold"`, refused if staged files look secret; use
+`/save no-commit` to skip), then opens its graph in the same TUI. Choices you
 delegate ("you pick the efforts") are made by the orchestrator from the reported
 catalog and listed in its reply. If a draft fails validation, Arena returns the
 error to the orchestrator for up to two automatic repairs (journaled as
@@ -125,11 +127,12 @@ Slash commands are available in setup and the graph:
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
-| `/save` | Apply an explicitly reviewed setup draft; never overwrite another workflow |
+| `/save [no-commit]` | Apply an explicitly reviewed setup draft and commit the scaffold; never overwrite another workflow |
 | `/run TASK`, `/pause`, `/resume`, `/cancel` | Control attached work |
 | `/events`, `/git`, `/changes`, `/teams` | Inspect audit, worktrees, patches and team members |
 | `/status`, `/refresh` | Inspect required providers or refresh the selected context/status |
-| `/decisions`, `/answer ID TEXT` | Inspect and answer pending questions/approvals |
+| `/decisions`, `/answer [ID] TEXT`, `/accept` | Inspect and answer pending questions/approvals; apply the orchestrator's stall recommendation |
+| `$ COMMAND` | Run a shell command in the project root and show its output |
 | `/integrate CHANGE_ID` | Integrate a reviewed change |
 | `/clear`, `/close`, `/quit` | Reset scroll/errors, close a panel, or exit |
 

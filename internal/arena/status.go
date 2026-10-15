@@ -30,6 +30,14 @@ type Readiness struct {
 }
 
 func Probe(ctx context.Context, root string, r Runtime) Readiness {
+	result := probe(ctx, root, r)
+	if result.CanStart && (result.State == "unknown" || result.State == "") {
+		result.State = "good"
+	}
+	return result
+}
+
+func probe(ctx context.Context, root string, r Runtime) Readiness {
 	result := Readiness{Provider: r.Provider, Model: r.Model, State: "unknown", Auth: "unknown", ModelState: "unknown", Efforts: []string{}, Skill: providerSkillState(root, r.Provider)}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()

@@ -19,7 +19,8 @@ type graphEdge struct {
 }
 
 // Graph positions are a projection of the validated graph; layout never schedules.
-func wideGraph(w Workflow, state RunState, events []Event, width int, color bool, frames ...int) []string {
+// spin is the current loading glyph shown on cards that are doing work.
+func wideGraph(w Workflow, state RunState, events []Event, width int, color bool, spin string, frames ...int) []string {
 	frame := -1
 	if len(frames) > 0 {
 		frame = frames[0]
@@ -45,6 +46,9 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 				status = v.Type
 			}
 		}
+		if Has([]string{"team.started", "team.round", "team.affirmations"}, status) {
+			status = withSpinner(spin, "deliberating · "+strings.TrimPrefix(status, "team."))
+		}
 		cards[t.Id] = &graphCard{id: t.Id, first: "TEAM · " + t.Name, second: fmt.Sprintf("unanimous · max %d rounds", t.Consensus.MaxRounds), status: status}
 	}
 	for _, a := range w.Agents {
@@ -64,13 +68,19 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		if status == "" {
 			status = "waiting"
 		}
+		if status == "running" || status == "queued" {
+			status = withSpinner(spin, status)
+		}
 		cards[a.Id] = &graphCard{id: a.Id, first: first, second: second, status: status}
 	}
 	for _, r := range w.DecisionRouters {
 		status := "waiting"
 		for _, v := range events {
-			if v.AgentID == r.Id && v.Type == "router.selected" {
+			switch {
+			case v.AgentID == r.Id && v.Type == "router.selected":
 				status = str(v.Data["branch"]) + " -> " + str(v.Data["target"])
+			case v.AgentID == r.Id && v.Type == "decision.requested":
+				status = "⚑ waiting for you · see prompt"
 			}
 		}
 		cards[r.Id] = &graphCard{id: r.Id, first: "ROUTER · " + r.Id, second: r.InputKind + " " + r.PayloadPointer, status: status}
@@ -203,6 +213,11 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		}
 		paths[to+"/"+from] = reverse
 	}
+	type joint struct {
+		x, y           int
+		unicode, ascii string
+	}
+	joints := []joint{}
 	for i, edge := range edges {
 		from, to := cards[edge.from], cards[edge.to]
 		if from == nil || to == nil {
@@ -234,7 +249,8 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 			recordPath(edge.from, edge.to, point{x1, y1}, point{x2, y1})
 			continue
 		}
-		lane := y1 + 1 + (i % 2)
+		// Lanes stay above the arrowhead row so turns and labels never collide.
+		lane := y1 + (i % 2)
 		if y2 < y1 {
 			y1 = from.y - 1
 			y2 = to.y + 5
@@ -276,21 +292,17 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 			put(x1, lane, first)
 			put(x2, lane, last)
 		}
-		arrow := "v"
+		// Heads and tails are drawn after the cards so they join the borders.
 		if to.y < from.y {
-			arrow = "^"
+			joints = append(joints, joint{x1, from.y, "┴", "+"}, joint{x2, y2, "▲", "^"})
+		} else {
+			joints = append(joints, joint{x1, from.y + 4, "┬", "+"}, joint{x2, y2, "▼", "v"})
 		}
-		if unicodeLettering() {
-			if arrow == "v" {
-				arrow = "↓"
-			} else {
-				arrow = "↑"
-			}
-		}
-		put(x2, y2, arrow)
 		recordPath(edge.from, edge.to, point{x1, y1}, point{x1, lane}, point{x2, lane}, point{x2, y2})
 		if x1 != x2 {
 			put(min(x1, x2)+1, lane, short(edge.label, max(0, abs(x2-x1)-2)))
+		} else {
+			put(x1+2, lane, short(edge.label, max(0, cardWidth/2-3)))
 		}
 	}
 	// Only unacknowledged packets move. The route comes from the graph projection;
@@ -331,6 +343,13 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		put(card.x, card.y+3, b.row(card.status, cardWidth))
 		put(card.x, card.y+4, b.bottom(cardWidth))
 	}
+	for _, j := range joints {
+		if unicodeLettering() {
+			put(j.x, j.y, j.unicode)
+		} else {
+			put(j.x, j.y, j.ascii)
+		}
+	}
 	lines := []string{}
 	for y, line := range canvas {
 		text := strings.Join(line, "")
@@ -349,7 +368,7 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		}
 		lines = append(lines, strings.TrimRight(text, " "))
 	}
-	legend := "↓ delegates · dotted peer links · = structured branch · Ctrl+E events"
+	legend := "▼ delegates · dotted peer links · = structured branch · Ctrl+E events"
 	if !unicodeLettering() {
 		legend = "v delegates · dotted peer links · = structured branch · Ctrl+E events"
 	}
@@ -415,4 +434,11 @@ func abs(n int) int {
 		return -n
 	}
 	return n
+}
+
+func withSpinner(spin, status string) string {
+	if spin == "" {
+		return status
+	}
+	return spin + " " + status
 }

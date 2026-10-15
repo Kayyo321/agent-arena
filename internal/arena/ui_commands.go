@@ -27,9 +27,11 @@ var slashHelp = []string{
 	"/status /refresh            Required-provider readiness",
 	"/teams                      Toggle team member expansion",
 	"/decisions                  Pending user questions and approvals",
-	"/answer ID TEXT             Answer a pending decision",
+	"/answer [ID] TEXT           Answer a pending decision (ID optional when only one)",
+	"/accept                     Apply the orchestrator's recommended answer",
+	"$ COMMAND                   Run a shell command in the project root",
 	"/integrate CHANGE_ID        Integrate a reviewed change",
-	"/save                       Save the previewed setup draft",
+	"/save [no-commit]           Save the previewed draft and commit the scaffold",
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
 	"/quit                       Exit; preserve attached run history",
@@ -42,7 +44,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -86,6 +88,14 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		text, input = "Inspect the attached files.", "Inspect the attached files."
+	}
+	if strings.HasPrefix(text, "$") {
+		command := strings.TrimSpace(strings.TrimPrefix(text, "$"))
+		if command == "" {
+			m.Error = "type a shell command after $"
+			return m, nil
+		}
+		return m, m.runShell(command)
 	}
 	parts := strings.Fields(text)
 	if strings.HasPrefix(text, "/") {
@@ -156,7 +166,23 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			if len(m.Chat) == 0 {
 				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", "Describe the new workflow you want to create. I will ask for all required choices."})
 			}
+		case "accept":
+			if m.Stall == nil || m.Stall.DecisionID == "" || m.pendingDecision(m.Stall.DecisionID) == nil {
+				m.Error = "no orchestrator recommendation is waiting; use /answer ID TEXT"
+				break
+			}
+			answer := "decision " + m.Stall.DecisionID + " " + m.Stall.Answer
+			operation := func() tea.Msg { return uiCommandResult{m.command(answer)} }
+			if m.Session != nil {
+				return m, m.Session.action(operation)
+			}
+			return m, operation
 		case "save":
+			commit := arg != "no-commit"
+			if arg != "" && arg != "no-commit" {
+				m.Error = "usage: /save [no-commit]"
+				break
+			}
 			if m.ChatBusy || m.Draft == nil {
 				m.Error = "No validated draft to save; finish the setup interview first"
 				break
@@ -177,7 +203,11 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 					return draftSaved{Err: fmt.Errorf("workflow saved, audit failed: %w", err)}
 				}
 				r, err := loadWorkflowView(m.Project, draft.Workflow.Id)
-				return draftSaved{r, err}
+				saved := draftSaved{Run: r, Err: err}
+				if err == nil && commit {
+					saved.Commit, saved.CommitErr = commitScaffold(m.Project)
+				}
+				return saved
 			}
 			if m.Session != nil {
 				return m, m.Session.action(operation)
@@ -277,6 +307,10 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 		m.Offset = 1 << 30 // Follow the newest messages.
 		return m, m.Interview.turn(m.Transcript, m.ChatAttachments...)
 	}
+	if answer, ok := m.decisionShortcut(text); ok {
+		text = answer
+		parts = strings.Fields(text)
+	}
 	if !Has([]string{"run", "pause", "resume", "cancel", "decision", "integrate"}, parts[0]) {
 		text = "run " + text
 		parts = strings.Fields(text)
@@ -314,6 +348,21 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 		return m, m.Session.action(operation)
 	}
 	return m, operation
+}
+
+// foldReadiness reports each provider/model once, keeping the first
+// not-ready state, and omits runtimes that are ready.
+func foldReadiness(results []Readiness) []string {
+	lines, seen := []string{}, map[string]bool{}
+	for _, ready := range results {
+		key := ready.Provider + "/" + ready.Model
+		if ready.State == "good" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		lines = append(lines, "Provider "+ready.Provider+" / "+ready.Model+": "+ready.State+" · "+ready.Auth)
+	}
+	return lines
 }
 
 func readinessLines(results []Readiness) []string {

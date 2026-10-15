@@ -76,6 +76,11 @@ type LiveModel struct {
 	PopupOffset        int
 	PopupLines         []string
 	PendingReply       chan string
+	Invoker            Invoker
+	StallKey           string
+	StallCount         int
+	StallBusy          bool
+	Stall              *stallDiagnosis
 }
 
 func (m LiveModel) Init() tea.Cmd {
@@ -214,10 +219,30 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.LastProbeEvent = max(m.LastProbeEvent, event.Sequence)
 		}
+		cmds := []tea.Cmd{tickUI(m.Run.ID)}
 		if refreshReadiness {
-			return m, tea.Batch(tickUI(m.Run.ID), m.probeReadiness())
+			cmds = append(cmds, m.probeReadiness())
 		}
-		return m, tickUI(m.Run.ID)
+		if stall := m.watchStall(); stall != nil {
+			cmds = append(cmds, stall)
+		}
+		return m, tea.Batch(cmds...)
+	case stallDiagnosis:
+		m.StallBusy = false
+		if v.RunID == m.Run.ID {
+			m.Stall = &v
+		}
+	case shellResult:
+		lines := []string{"$ " + v.Command}
+		if output := strings.TrimRight(Redact(v.Output), "\n"); output != "" {
+			lines = append(lines, strings.Split(output, "\n")...)
+		}
+		status := fmt.Sprintf("exit %d", v.Code)
+		if v.Err != nil {
+			status = "error: " + Redact(v.Err.Error())
+		}
+		m.Panel, m.PanelText, m.Offset = "Shell · "+status, lines, 1<<30
+		m.ChatMode = false
 	case uiReadinessResult:
 		if v.Required == string(JSON(Required([]Workflow{m.Run.Workflow}, m.Run.Settings))) {
 			m.Readiness = v.Results
@@ -261,10 +286,17 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Run, m.Draft, m.ChatMode = v.Run, nil, false
+		saved := "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."
+		switch {
+		case v.CommitErr != nil:
+			saved += " Scaffold not committed: " + Redact(v.CommitErr.Error()) + " — commit before running writing agents."
+		case v.Commit != "":
+			saved += " Committed the scaffold as " + v.Commit + " (Arena scaffold)."
+		}
 		m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
 		m.State = RunState{Status: "idle", Agents: map[string]string{}}
 		m.Readiness, m.Panel, m.PopupAgent, m.Offset = unknownReadiness(v.Run), "", "", 0
-		m.Chat = append(m.Chat, chatLine{"Arena", "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."})
+		m.Chat = append(m.Chat, chatLine{"Arena", saved})
 		return m, m.Init()
 	case agentContextLoaded:
 		if v.Agent == m.PopupAgent {
@@ -295,6 +327,7 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Run, m.Readiness = v.Run, v.Readiness
+		m.StallKey, m.StallCount, m.StallBusy, m.Stall = "", 0, false, nil
 		m.State = RunState{Status: "created", Agents: map[string]string{}}
 		m.Events, m.Trees, m.Decisions, m.Changes = nil, nil, nil, nil
 		m.ChangePatch, m.SelectedChange = "", ""
@@ -536,6 +569,10 @@ func (m LiveModel) command(command string) error {
 	case "cancel":
 		return m.Project.Transition(m.Run.ID, "cancelled")
 	case "decision":
+		// With a single pending decision the ID may be omitted.
+		if len(parts) >= 2 && len(m.Decisions) == 1 && m.pendingDecision(parts[1]) == nil {
+			return m.Project.Answer(m.Run.ID, m.Decisions[0].ID, strings.Join(parts[1:], " "))
+		}
 		if len(parts) < 3 {
 			return fmt.Errorf("decision ID ANSWER")
 		}
@@ -628,9 +665,9 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 			frame = -1
 		}
 		if width >= 100 && !m.Expanded {
-			body = append(body, wideGraph(m.Run.Workflow, m.State, m.Events, width, color, frame)...)
+			body = append(body, wideGraph(m.Run.Workflow, m.State, m.Events, width, color, m.spinner(false), frame)...)
 		} else {
-			body = append(body, renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded)...)
+			body = append(body, renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))...)
 		}
 		body = append(body, packetActivity(m.Events, frame)...)
 		pending := 0
@@ -640,11 +677,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 			}
 		}
 		body = append(body, fmt.Sprintf("Review queue: %d pending · /changes for patches and integration", pending))
-		for _, ready := range m.Readiness {
-			if ready.State != "good" {
-				body = append(body, "Provider "+ready.Provider+" / "+ready.Model+": "+ready.State+" · "+ready.Auth)
-			}
-		}
+		body = append(body, foldReadiness(m.Readiness)...)
 	}
 	if !m.ChatMode && m.Panel == "" && !m.Detail && !m.GitDetail && !m.ChangeDetail {
 		body = append(body, "On-call rail: arena-orchestrator (permanent project control · "+m.Run.Settings.DefaultModel.Provider+" / "+m.Run.Settings.DefaultModel.Model+")")
@@ -695,7 +728,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	}
 	return body
 }
-func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, width int, color, expanded bool) []string {
+func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, width int, color, expanded bool, spin ...string) []string {
 	lines := []string{}
 	members := map[string]bool{}
 	for _, t := range w.Teams {
@@ -710,6 +743,9 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 		status := state.Agents[a.Id]
 		if status == "" {
 			status = "waiting"
+		}
+		if (status == "running" || status == "queued") && len(spin) > 0 {
+			status = withSpinner(spin[0], status)
 		}
 		label := a.Id + " · " + a.Runtime.Provider
 		runtime := a.Runtime.Model
