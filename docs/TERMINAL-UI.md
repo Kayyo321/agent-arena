@@ -148,11 +148,15 @@ Project `display` settings may choose color mode (`auto`, `always`, `never`), pa
 
 ## ASCII shader background
 
-Each arena can select a CPU-evaluated HLSL-profile shader behind its graph. The
-shipped dots fade toward every screen edge. Full occupied text spans, card
+Each arena can select a CPU-evaluated HLSL-profile shader behind its graph. Shaders
+receive numeric projections of run, agent, packet, decision, Git, provider,
+journal and composer state, including smoothed envelopes and event ages. The
+shipped reactive dots fade toward every screen edge. They pulse amber around an
+agent waiting on the user, ripple from active agents, and tint red on failure and
+green on success. Color terminals show the shader's hue. Full occupied text spans, card
 interiors, headers, footer, composer and popups stay opaque. Detail/chat views and
 very small terminals omit the decoration. `NO_COLOR` uses monochrome dithering;
-`display.animation` freezes animation inputs when off. Invalid/missing source
+`display.animation` freezes animation inputs and transient effects when off. Invalid/missing source
 shows a diagnostic and disables the background, leaving the graph usable.
 
 `/shader DESCRIPTION` invokes the default orchestrator model and previews validated

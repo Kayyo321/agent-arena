@@ -153,7 +153,8 @@ The placeholder model ID is intentional: Arena must use the model the local back
 
 New arenas have `settings.backgroundShader` (`enabled`, `source`, `glyphs`), with
 source stored in `.arena/ID.background.hlsl` next to `.arena/ID.arena.json`.
-The default is a dot grid that fades toward the screen edges. Existing arenas
+The default is a reactive dot grid that fades toward the screen edges and responds to
+run, agent, question, failure, success, Git and typing activity. Existing arenas
 without this optional setting get the embedded default. `arena shader create ID
 "description"` uses the project default model; `set`, `default`, and `off` manage
 it without hand-editing JSON. Source and settings have recoverable transactions,

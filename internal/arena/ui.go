@@ -30,6 +30,9 @@ type LiveModel struct {
 	ShaderLast              time.Time
 	ShaderBusy              bool
 	ShaderDraft             *shaderGenerated
+	ShaderSignals           shaderSignals
+	ShaderEnv               shaderEnvelopes
+	ShaderInputAt           time.Time
 
 	Attachments        []Attachment
 	ChatAttachments    []Attachment
@@ -124,6 +127,7 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ShaderLast.IsZero() {
 			m.ShaderDelta = v.At.Sub(m.ShaderLast).Seconds()
 			m.ShaderTime += m.ShaderDelta
+			m.advanceShader(min(m.ShaderDelta, 1))
 		}
 		m.ShaderLast = v.At
 		return m, tickShader(v.Workflow)
@@ -199,6 +203,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Changes, e = m.Project.Changes(m.Run.ID)
 		if e != nil {
 			m.Error = e.Error()
+		}
+		if m.ShaderSignals.key != eventsKey(m.Events) {
+			m.ShaderSignals = summarizeEvents(m.Events)
 		}
 		m.loadChangePatch()
 		for _, event := range m.Events {
@@ -309,10 +316,12 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Error = ""
 		}
 	case tea.PasteMsg:
+		m.noteShaderInput()
 		if !m.pasteAttachments(v.Content) {
 			m.insertPrompt(v.Content)
 		}
 	case tea.KeyPressMsg:
+		m.noteShaderInput()
 		m.syncPrompt()
 		s := v.String()
 		switch s {

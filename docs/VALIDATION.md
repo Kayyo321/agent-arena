@@ -171,6 +171,21 @@ A fresh real PTY recording on the charcoal theme produced 31 distinct frames in
 15.5 seconds, with 248 changed background cells and all 854 checked foreground
 cells unchanged. The same resize and clean-exit checks passed.
 
+### State-rich shader inputs and reactive default
+
+Local checks on 2026-10-15: `make check` and `make build` pass. Tests cover every
+input being declarable and documented, inputs that cost operations only when
+referenced, hoisted per-frame evaluation matching full evaluation, the extended
+intrinsics, the projection of run/agent/packet/decision/Git/provider/journal/composer
+state into inputs, event ages, focus selection and card location, envelopes that
+ease in and out, animation-off snapping, and softened hue output. The default
+shader fades to dark edges at rest and reacts to work, questions, failures,
+success, events and typing. A 20-second fuzz run of the compiler/evaluator found
+no failures. On the local Linux Xeon container, the hoisted default costs about
+1.3 microseconds per cell. That is about 6 ms for a 120×40 frame, and it is not
+a cross-platform performance guarantee. Static renders of idle, busy, asking,
+failing and succeeded scenes were inspected. No new real-terminal recording is claimed.
+
 ## Composer and attachments
 
 Local regression coverage includes Shift+Return, visual-line navigation, grapheme
