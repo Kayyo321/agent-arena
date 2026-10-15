@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -101,6 +102,64 @@ func TestGraphNodeKindsHaveDistinctFrames(t *testing.T) {
 	for _, line := range wideGraph(w, state, nil, 140, false, "") {
 		if strings.ContainsFunc(line, func(r rune) bool { return r >= 0x2500 && r <= 0x25ff }) {
 			t.Fatalf("non-Unicode locale drew Unicode frames: %q", line)
+		}
+	}
+}
+
+func TestPanMovesGraphCameraAndSpaceRecenters(t *testing.T) {
+	w, profiles, s := fixture(t)
+	m := LiveModel{Run: Run{Workflow: w, Profiles: profiles, Settings: s}, Width: 140, Height: 40, State: RunState{Agents: map[string]string{}}}
+	press := func(m LiveModel, code rune) LiveModel {
+		next, _ := m.Update(tea.KeyPressMsg{Code: code})
+		return next.(LiveModel)
+	}
+	m.setPrompt("/pan", 4)
+	m = press(m, tea.KeyEnter)
+	if !m.Panning || m.Error != "" {
+		t.Fatalf("/pan did not start panning: %q", m.Error)
+	}
+	centered := m.bodyLines(140, false)
+	m = press(press(m, tea.KeyRight), tea.KeyDown)
+	if m.PanX != panStepX || m.PanY != panStepY || m.Prompt != "" {
+		t.Fatalf("arrows did not pan: %d,%d prompt %q", m.PanX, m.PanY, m.Prompt)
+	}
+	moved := m.bodyLines(140, false)
+	if len(moved) != len(centered) {
+		t.Fatalf("panning changed body height: %d != %d", len(moved), len(centered))
+	}
+	if strings.Join(moved, "\n") == strings.Join(centered, "\n") {
+		t.Fatal("panned graph did not move")
+	}
+	m = press(m, tea.KeySpace)
+	if m.PanX != 0 || m.PanY != 0 || !m.Panning {
+		t.Fatalf("space did not recenter: %d,%d", m.PanX, m.PanY)
+	}
+	if strings.Join(m.bodyLines(140, false), "\n") != strings.Join(centered, "\n") {
+		t.Fatal("recentered graph differs from the centered layout")
+	}
+	m = press(press(m, tea.KeyLeft), tea.KeyEscape)
+	if m.Panning || m.PanX != -panStepX {
+		t.Fatalf("esc should leave pan mode and keep the view: %v %d", m.Panning, m.PanX)
+	}
+	// Typing after leaving pan mode reaches the prompt; arrows recall history again.
+	m.Panning = true
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if m = next.(LiveModel); m.Panning || m.Prompt != "h" {
+		t.Fatalf("typing did not leave pan mode: %v %q", m.Panning, m.Prompt)
+	}
+}
+
+func TestPanLinesClampsAndKeepsHeight(t *testing.T) {
+	lines := []string{"abcd", "efgh", "ijkl"}
+	if got := panLines(lines, 1, 1, 4); strings.Join(got, "|") != "fgh|jkl|" {
+		t.Fatalf("pan right/down: %q", got)
+	}
+	if got := panLines(lines, -2, -1, 4); strings.Join(got, "|") != "|  abcd|  efgh" {
+		t.Fatalf("pan left/up: %q", got)
+	}
+	for _, got := range [][]string{panLines(lines, 99, 99, 4), panLines(lines, -99, -99, 4)} {
+		if len(got) != len(lines) || strings.TrimSpace(strings.Join(got, "")) == "" {
+			t.Fatalf("clamped pan lost the graph: %q", got)
 		}
 	}
 }

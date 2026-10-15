@@ -21,6 +21,7 @@ var slashHelp = []string{
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
 	"/graph                      Return to the workflow graph",
+	"/pan                        Pan the graph: ←↑↓→ move, Space recenters, Esc done",
 	"/run TASK                   Start an attached workflow run",
 	"/pause /resume /cancel      Control the current run",
 	"/events /git /changes       Audit, worktrees and review queue",
@@ -44,7 +45,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -154,6 +155,15 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			}
 			m.ChatMode, m.Panel, m.PopupAgent = false, "", ""
 			m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
+			m.Panning, m.PanX, m.PanY = false, 0, 0
+		case "pan":
+			if m.Run.Workflow.HeadAgent == "" {
+				m.Error = "Create and /save a workflow first"
+				break
+			}
+			m.ChatMode, m.Panel, m.PopupAgent = false, "", ""
+			m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
+			m.Panning = true
 		case "chat":
 			if m.Interview == nil {
 				m.Interview = newInterviewSession(m.Context, m.Project, m.Run.Settings)

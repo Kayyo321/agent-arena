@@ -46,6 +46,8 @@ type LiveModel struct {
 	Readiness          []Readiness
 	Width, Height      int
 	Offset, Selected   int
+	Panning            bool
+	PanX, PanY         int
 	Prompt, Error      string
 	Events             []Event
 	State              RunState
@@ -380,6 +382,11 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.noteShaderInput()
 		m.syncPrompt()
 		s := v.String()
+		if m.Panning {
+			if m.panKey(s) {
+				return m, nil
+			}
+		}
 		switch s {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -545,6 +552,39 @@ func (m *LiveModel) scrollBy(lines int) {
 	*offset = max(0, min(m.scrollEnd(popup), *offset+lines))
 }
 
+// graphShown reports whether the body is the workflow graph.
+func (m LiveModel) graphShown() bool {
+	return m.Panel == "" && !m.ChatMode && m.PopupAgent == "" && !m.Detail && !m.GitDetail && !m.ChangeDetail
+}
+
+// panKey moves the graph camera while /pan is active. Arrows pan, Space
+// recenters, and Esc or Enter leave the mode; any other key leaves it and is
+// handled normally, so typing resumes without an extra keystroke.
+func (m *LiveModel) panKey(key string) bool {
+	if !m.graphShown() {
+		m.Panning = false
+		return false
+	}
+	switch key {
+	case "left":
+		m.PanX -= panStepX
+	case "right":
+		m.PanX += panStepX
+	case "up":
+		m.PanY -= panStepY
+	case "down":
+		m.PanY += panStepY
+	case "space", " ":
+		m.PanX, m.PanY = 0, 0
+	case "esc", "enter":
+		m.Panning = false
+	default:
+		m.Panning = false
+		return false
+	}
+	return true
+}
+
 func (m *LiveModel) showDetail(panel string) {
 	open := panel == "git" && m.GitDetail || panel == "events" && m.Detail || panel == "changes" && m.ChangeDetail
 	m.ChatMode, m.Panel, m.PopupAgent, m.Offset = false, "", "", 0
@@ -678,12 +718,20 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		if m.Run.Settings.Display.Animation == "off" || m.Run.Settings.Display.Animation == "auto" && os.Getenv("TERM") == "dumb" {
 			frame = -1
 		}
-		if width >= 100 && !m.Expanded {
-			body = append(body, "")
-			body = append(body, graphView(m.Run.Workflow, m.State, m.Events, m.agentDiffs(), width, color, m.spinner(false), frame)...)
+		wide := width >= 100 && !m.Expanded
+		graph := []string{}
+		if wide {
+			graph = graphView(m.Run.Workflow, m.State, m.Events, m.agentDiffs(), width, color, m.spinner(false), frame)
 		} else {
-			body = append(body, renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))...)
+			graph = renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))
 		}
+		// While panning, the legend takes the wide graph's spacer row.
+		if m.Panning {
+			body = append(body, fmt.Sprintf("Pan · ←↑↓→ move · Space center · Esc done · offset %+d,%+d", m.PanX, m.PanY))
+		} else if wide {
+			body = append(body, "")
+		}
+		body = append(body, panLines(graph, m.PanX, m.PanY, width)...)
 		body = append(body, packetActivity(m.Events, frame)...)
 		pending := 0
 		for _, change := range m.Changes {
@@ -733,6 +781,38 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	}
 	return body
 }
+
+const panStepX, panStepY = 4, 2
+
+// panLines shows the graph through a camera offset by (dx, dy) cells from
+// its centered layout. The block keeps its height so the rows below it stay
+// put; the offset is clamped so some of the graph always remains in view.
+func panLines(lines []string, dx, dy, width int) []string {
+	if dx == 0 && dy == 0 || len(lines) == 0 {
+		return lines
+	}
+	cols := width
+	for _, line := range lines {
+		cols = max(cols, ansi.StringWidth(line))
+	}
+	dx = max(-(width - 1), min(cols-1, dx))
+	dy = max(-(len(lines) - 1), min(len(lines)-1, dy))
+	out := make([]string, len(lines))
+	for i := range out {
+		line := ""
+		if row := i + dy; row >= 0 && row < len(lines) {
+			line = lines[row]
+		}
+		if dx > 0 {
+			line = ansi.Cut(line, dx, dx+width)
+		} else if dx < 0 && line != "" {
+			line = strings.Repeat(" ", -dx) + line
+		}
+		out[i] = line
+	}
+	return out
+}
+
 func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, width int, color, expanded bool, spin ...string) []string {
 	lines := []string{}
 	members := map[string]bool{}

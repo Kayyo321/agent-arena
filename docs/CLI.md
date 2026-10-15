@@ -127,6 +127,7 @@ Slash commands are available in setup and the graph:
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
+| `/pan` | Pan the graph with ←↑↓→ and press Space to recenter; Esc, Enter or typing leaves pan mode and keeps the view, and `/graph` recenters |
 | `/save [no-commit]` | Apply an explicitly reviewed setup draft and commit the scaffold; never overwrite another workflow |
 | `/run TASK`, `/pause`, `/resume`, `/cancel` | Control attached work |
 | `/events`, `/git`, `/changes`, `/teams` | Inspect audit, worktrees, patches and team members |

@@ -187,7 +187,7 @@ The bottom bar shows only `/help`. The graph reports the loaded arena and run st
 
 ## Fit and accessibility
 
-Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
+Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs: `/pan` moves a camera over the graph with the arrow keys, keeps the graph block's height so the rows below it stay put, and Space snaps back to the centered layout. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
 
 Color is supplementary: every state has a text label or symbol. `display.colorMode` follows terminal capability by default and honors `NO_COLOR`; `display.animation` follows terminal capability and can be disabled. Unicode tree connectors fall back to ASCII when the terminal cannot render them. Non-TTY output uses a readable event stream or static graph summary, never terminal escape animations. Resizing recomputes layout without changing workflow state.
 
