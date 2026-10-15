@@ -61,27 +61,31 @@ The Git tree, agent cards and detail windows share thin, rounded Unicode borders
 ASCII borders remain the fallback for non-Unicode locales and dumb terminals.
 Agent ownership colors highlight card labels; the frame and footer stay quiet.
 The bottom prompt's idle text is `> memento mori`; typing replaces it. A thin
-full-width rule above the composer shows the most useful keyboard controls when
-space allows. The purple title keeps its existing placement and lettering.
+full-width rule above the composer shows only `/help`. Run status and required
+provider readiness stay in the graph and `/status`, with pending questions in `/decisions`. The purple title keeps its existing placement and lettering.
 
 ## Prompt commands and agent windows
 
 `/help` lists commands, and Tab completes command names and agent IDs. Ordinary
 text is an answer in the setup interview or a task in the loaded workflow. Letter
-keys remain text input; Ctrl+E/G/T/V open events/Git/teams/changes, and Ctrl+Q or
+keys remain text input; Ctrl+E/G/T open events/Git/teams, `/changes` opens the review queue,
+and Ctrl+V pastes clipboard images or text, and Ctrl+Q or
 `/quit` exits. The workflow chooser retains its arrow/j/k/Enter/q controls.
 
 The composer has a visible caret. Left/Right move one displayed character,
-including combined accents and emoji; Home/End move to the start/end of the draft.
+including combined accents and emoji; Home/End move to the start/end of the current line.
 Alt+Left/Right (or Ctrl+Left/Right) move by word. Backspace/Delete edit at the caret,
 Ctrl+W removes the preceding word, and Ctrl+U/K clear before/after the caret.
-Up/Down recall submitted messages and commands, then restore the unfinished draft
+Up/Down move through visual lines in multiline or wrapped text; in a single line
+they recall history. Ctrl+P/N always recall submitted messages and commands,
+then restore the unfinished draft
 and its caret when returning to the newest position. History is bounded to the last
 100 distinct consecutive submissions in this UI session and is not separately
 persisted. Recalling or editing history never submits a task.
 
-Enter sends. Alt+Enter or Ctrl+J inserts a newline; Shift+Enter also works in
-terminals that report it distinctly. Bracketed paste inserts at the caret and
+Enter sends. Shift+Enter inserts a newline in terminals that support enhanced
+keyboard reporting (requested automatically). Alt+Enter or Ctrl+J also inserts a
+newline, including in older terminals that cannot distinguish Shift+Enter. Bracketed paste inserts at the caret and
 preserves line breaks, stripping terminal control sequences. The composer wraps,
 grows to at most five rows, and keeps the caret visible after resizing. PageUp/
 PageDown scroll the conversation or current view; Ctrl+Home/End jump to its
@@ -128,13 +132,13 @@ The tree box may shrink or scroll when there are many worktrees. It must not hid
 
 ## Provider status
 
-The bottom status row reports the loaded arena name, run state, pending decision count, and readiness only for providers required by that arena. The required set is the union of providers used by its configured agents plus the permanent project orchestrator when its provider is distinct. Unused installed adapters are not probed or displayed in this view. Missing or unverifiable capabilities use explicit states such as `missing`, `signed out`, `unsupported authentication`, or `unknown`; `good` means the selected provider CLI or integration is ready for the configured model and options, not that every model in a subscription is available.
+The bottom bar shows only `/help`. The graph reports the loaded arena and run state; `/decisions` lists pending questions, and `/status` reports readiness only for providers required by that arena. The required set is the union of providers used by its configured agents plus the permanent project orchestrator when its provider is distinct. Unused installed adapters are not probed or displayed in this view. Missing or unverifiable capabilities use explicit states such as `missing`, `signed out`, `unsupported authentication`, or `unknown`; `good` means the selected provider CLI or integration is ready for the configured model and options, not that every model in a subscription is available.
 
 `arena status` without a selected workflow shows the union required by configured workflows plus the permanent orchestrator. A workflow-specific status view shows only that workflow and its required control agent. Readiness distinguishes missing CLI, signed-out account, unsupported authentication mode, incompatible version, and unavailable model; `good` requires a compatible auth path for Arena's integration. The live view updates readiness when provider processes or configuration change.
 
 ## Fit and accessibility
 
-Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs. The status row and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
+Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
 
 Color is supplementary: every state has a text label or symbol. `display.colorMode` follows terminal capability by default and honors `NO_COLOR`; `display.animation` follows terminal capability and can be disabled. Unicode tree connectors fall back to ASCII when the terminal cannot render them. Non-TTY output uses a readable event stream or static graph summary, never terminal escape animations. Resizing recomputes layout without changing workflow state.
 
@@ -154,3 +158,39 @@ shows a diagnostic and disables the background, leaving the graph usable.
 `/shader DESCRIPTION` invokes the default orchestrator model and previews validated
 source; `/shader-save` applies it, `/shader-off` disables it, and `/refresh` reloads
 external CLI changes. See [the shader contract](BACKGROUND-SHADERS.md).
+
+## Attachments and clipboard
+
+`/attach PATH [PATH ...]` snapshots images and other regular files for the next
+message. Quote paths containing spaces or use shell-escaped paths. Dropping files
+into an empty composer also attaches them when the terminal sends their absolute
+paths as a bracketed paste. `/attachments` lists names, types and sizes;
+`/detach NUMBER` or `/detach all` removes pending files. A compact attachment row
+appears above the draft. Enter sends the text and files together. Failed starts
+preserve the draft and attachments.
+
+Ctrl+V or `/paste` reads the system clipboard: an image becomes an attachment and
+text is inserted at the caret. macOS uses AppKit through the system `osascript`,
+including TIFF-to-PNG conversion for screenshots; Linux uses `wl-paste` on Wayland
+or `xclip` on X11. Clipboard reading is asynchronous, bounded and cancellable.
+Cmd+V is owned by the terminal; terminals that only forward text cannot forward
+clipboard image bytes, so use Ctrl+V or `/paste` for images. Clipboard failures
+leave the existing draft intact. Arena does not write to the user's clipboard.
+
+Limits are eight files, 10 MiB per file and 32 MiB total (also the cumulative
+attachment limit for an orchestrator chat). PNG, JPEG, GIF and WebP are delivered
+as native image inputs to Codex. Other adapters explicitly refuse image input
+before starting; model vision capability still depends on the selected model.
+Codex receives authorized read-only snapshot paths for other file types. Mediated
+adapters can read attached files up to 512 KiB through `read_attachment` (UTF-8 text
+or base64 for binary files); this does not claim that a model can interpret every
+binary format. Clipboard and attachments never start a run by themselves.
+
+Attachment content is untrusted source material, not instructions. Sending files
+requires full-local retention: exact snapshots, which may include sensitive data,
+are retained in private `.arena/.state/RUN/attachments/` storage; they are not
+redacted or committed to Git. Draft attachments stay in memory. Metadata is audited
+in task envelopes, and snapshot hashes are verified before each worker invocation.
+Reduced-retention modes refuse attachments rather than silently storing raw bytes.
+Orchestrator chat snapshots live in the project control history and remain available
+on subsequent turns. `/detach` affects only pending files, not already sent history.

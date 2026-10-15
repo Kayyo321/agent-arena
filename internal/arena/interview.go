@@ -102,7 +102,7 @@ func (s *interviewSession) close() { s.cancel(); s.workers.Wait() }
 func waitInterview(ch <-chan interviewEvent) tea.Cmd {
 	return func() tea.Msg { v := <-ch; v.Next = ch; return v }
 }
-func (s *interviewSession) turn(transcript string) tea.Cmd {
+func (s *interviewSession) turn(transcript string, attachments ...Attachment) tea.Cmd {
 	ch := make(chan interviewEvent, 32)
 	s.workers.Add(1)
 	go func() {
@@ -131,6 +131,20 @@ func (s *interviewSession) turn(transcript string) tea.Cmd {
 		if err != nil {
 			result.Err = err
 			return
+		}
+		if err := attachmentPolicy(attachments, s.settings.Audit.Retention, []Runtime{s.settings.DefaultModel}); err != nil {
+			result.Err = err
+			return
+		}
+		if len(attachments) > 0 {
+			saved, err := s.project.saveAttachments("project", attachments)
+			if err != nil {
+				result.Err = err
+				return
+			}
+			packet["payload"].(map[string]any)["attachments"] = saved
+			in.Attachments, in.AttachmentDir = attachments, s.project.RunDir("project")
+			in.Prompt += attachmentManifest(saved)
 		}
 		bounded, cancel := inferenceDeadline(s.ctx, s.settings.Limits.MaxAgentRunMinutes)
 		defer cancel()

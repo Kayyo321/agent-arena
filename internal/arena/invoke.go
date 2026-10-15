@@ -9,6 +9,8 @@ import (
 )
 
 type Invocation struct {
+	Attachments                 []Attachment
+	AttachmentDir               string
 	Diagnostic                  func(string, map[string]any) error
 	Delivered                   func() error
 	Usage                       func(map[string]any) error
@@ -238,7 +240,7 @@ func invokeCodex(ctx context.Context, in Invocation) (map[string]any, error) {
 		}
 		return nil
 	}
-	turn := map[string]any{"threadId": t.Thread.ID, "input": []map[string]any{{"type": "text", "text": in.Prompt}}, "model": in.Runtime.Model, "effort": in.Runtime.ReasoningEffort}
+	turn := map[string]any{"threadId": t.Thread.ID, "input": codexInput(in), "model": in.Runtime.Model, "effort": in.Runtime.ReasoningEffort}
 	if in.Schema != nil {
 		turn["outputSchema"] = in.Schema
 	}

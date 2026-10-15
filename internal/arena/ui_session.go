@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -49,7 +50,7 @@ func (s *uiSession) action(f tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return <-ch }
 }
 
-func (s *uiSession) start(workflow, task string) tea.Cmd {
+func (s *uiSession) start(workflow, task string, attachments ...Attachment) tea.Cmd {
 	messages := make(chan tea.Msg, 2)
 	// Add and launch synchronously, so closing the UI cannot race a not-yet-run
 	// Bubble Tea command and leave an invocation outside attached supervision.
@@ -57,6 +58,25 @@ func (s *uiSession) start(workflow, task string) tea.Cmd {
 	go func() {
 		defer s.workers.Done()
 		r, readiness, err := s.prepare(s.ctx, s.project, workflow, task)
+		if err == nil && len(attachments) > 0 {
+			runtimes := []Runtime{}
+			for _, a := range r.Workflow.Agents {
+				runtimes = append(runtimes, a.Runtime)
+			}
+			err = attachmentPolicy(attachments, r.Retention, runtimes)
+			if err == nil {
+				r.Attachments, err = s.project.saveAttachments(r.ID, attachments)
+			}
+			if err == nil {
+				err = Atomic(filepath.Join(s.project.RunDir(r.ID), "run.json"), SafeJSON(r), 0600)
+			}
+			if err == nil {
+				_, err = s.project.Append(r.ID, r.Workflow.Id, "", "attachments.saved", map[string]any{"attachments": r.Attachments})
+			}
+			if err != nil {
+				_, _ = s.project.Append(r.ID, r.Workflow.Id, "", "workflow.failed", map[string]any{"reason": err.Error()})
+			}
+		}
 		messages <- uiRunStarted{r, readiness, err, messages}
 		if err == nil {
 			messages <- uiRunFinished{s.execute(s.ctx, s.project, r)}

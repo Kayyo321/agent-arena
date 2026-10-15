@@ -10,16 +10,17 @@ import (
 )
 
 type Run struct {
-	Version    int                `json:"version"`
-	ID         string             `json:"id"`
-	Workflow   Workflow           `json:"workflow"`
-	Profiles   map[string]Profile `json:"profiles"`
-	Settings   Settings           `json:"settings"`
-	Objective  string             `json:"objective"`
-	CreatedAt  string             `json:"createdAt"`
-	BaseCommit string             `json:"baseCommit"`
-	Retention  string             `json:"retention"`
-	Simulated  bool               `json:"simulated"`
+	Attachments []Attachment       `json:"attachments,omitempty"`
+	Version     int                `json:"version"`
+	ID          string             `json:"id"`
+	Workflow    Workflow           `json:"workflow"`
+	Profiles    map[string]Profile `json:"profiles"`
+	Settings    Settings           `json:"settings"`
+	Objective   string             `json:"objective"`
+	CreatedAt   string             `json:"createdAt"`
+	BaseCommit  string             `json:"baseCommit"`
+	Retention   string             `json:"retention"`
+	Simulated   bool               `json:"simulated"`
 }
 type RunState struct {
 	Status    string                    `json:"status"`

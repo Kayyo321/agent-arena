@@ -168,7 +168,7 @@ func (m LiveModel) overlay(lines []string, width, height int) []string {
 	}
 	w := min(88, width-2)
 	prompt, _, _ := m.promptView(width, height, false)
-	footer := 2 + len(prompt)
+	footer := 1 + len(prompt)
 	h := min(22, height-footer-1)
 	if w < 10 || h < 4 {
 		content = plainUILines(append([]string{title}, content...), width)
@@ -225,7 +225,7 @@ func (m LiveModel) chatBody() []string {
 func (m LiveModel) scrollEnd(popup bool) int {
 	width, height := max(8, m.Width), max(4, m.Height)
 	prompt, _, _ := m.promptView(width, height, false)
-	footer := 2 + len(prompt)
+	footer := 1 + len(prompt)
 	if popup {
 		body := m.agentActivity(m.PopupAgent)
 		if m.PopupContext {

@@ -31,14 +31,14 @@ func ValidateProjectSettings(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return check311(v, "$")
+	return check318(v, "$")
 }
 func ValidateWorkflow(data []byte) error {
 	v, err := decode(data)
 	if err != nil {
 		return err
 	}
-	return check372(v, "$")
+	return check379(v, "$")
 }
 
 type Actor struct {
@@ -1518,22 +1518,22 @@ func check55(v any, p string) error {
 	if e := check202(v, p); e != nil {
 		return e
 	}
-	if e := check223(v, p); e != nil {
+	if e := check230(v, p); e != nil {
 		return e
 	}
-	if e := check232(v, p); e != nil {
+	if e := check239(v, p); e != nil {
 		return e
 	}
-	if e := check238(v, p); e != nil {
+	if e := check245(v, p); e != nil {
 		return e
 	}
-	if e := check256(v, p); e != nil {
+	if e := check263(v, p); e != nil {
 		return e
 	}
-	if e := check296(v, p); e != nil {
+	if e := check303(v, p); e != nil {
 		return e
 	}
-	if e := check305(v, p); e != nil {
+	if e := check312(v, p); e != nil {
 		return e
 	}
 	return nil
@@ -4178,38 +4178,43 @@ func check206(v any, p string) error {
 				return e
 			}
 		}
+		if x, ok := m["attachments"]; ok {
+			if e := check209(x, p+"/attachments"); e != nil {
+				return e
+			}
+		}
 		if x, ok := m["constraints"]; ok {
-			if e := check209(x, p+"/constraints"); e != nil {
+			if e := check216(x, p+"/constraints"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["context"]; ok {
-			if e := check211(x, p+"/context"); e != nil {
+			if e := check218(x, p+"/context"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["deadline"]; ok {
-			if e := check213(x, p+"/deadline"); e != nil {
+			if e := check220(x, p+"/deadline"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["expectedOutput"]; ok {
-			if e := check214(x, p+"/expectedOutput"); e != nil {
+			if e := check221(x, p+"/expectedOutput"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["files"]; ok {
-			if e := check216(x, p+"/files"); e != nil {
+			if e := check223(x, p+"/files"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["objective"]; ok {
-			if e := check218(x, p+"/objective"); e != nil {
+			if e := check225(x, p+"/objective"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["workspace"]; ok {
-			if e := check219(x, p+"/workspace"); e != nil {
+			if e := check226(x, p+"/workspace"); e != nil {
 				return e
 			}
 		}
@@ -4257,6 +4262,9 @@ func check209(v any, p string) error {
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+		if len(a) > 8 {
+			return fmt.Errorf("%s: allows at most 8 items", p)
+		}
 		for i, x := range a {
 			if e := check210(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
@@ -4266,6 +4274,63 @@ func check209(v any, p string) error {
 	return nil
 }
 func check210(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["name"]; !ok {
+			return fmt.Errorf("%s: missing required field name", p)
+		}
+		if _, ok := m["mediaType"]; !ok {
+			return fmt.Errorf("%s: missing required field mediaType", p)
+		}
+		if _, ok := m["size"]; !ok {
+			return fmt.Errorf("%s: missing required field size", p)
+		}
+		if _, ok := m["sha256"]; !ok {
+			return fmt.Errorf("%s: missing required field sha256", p)
+		}
+		if _, ok := m["file"]; !ok {
+			return fmt.Errorf("%s: missing required field file", p)
+		}
+		if x, ok := m["file"]; ok {
+			if e := check211(x, p+"/file"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["mediaType"]; ok {
+			if e := check212(x, p+"/mediaType"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["name"]; ok {
+			if e := check213(x, p+"/name"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["sha256"]; ok {
+			if e := check214(x, p+"/sha256"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["size"]; ok {
+			if e := check215(x, p+"/size"); e != nil {
+				return e
+			}
+		}
+		for k := range m {
+			if !in(k, jsonValue("[\"file\",\"mediaType\",\"name\",\"sha256\",\"size\"]").([]any)) {
+				return fmt.Errorf("%s/%s: unknown field", p, k)
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check211(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -4275,22 +4340,8 @@ func check210(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	return nil
-}
-func check211(v any, p string) error {
-	if !hasType(v, jsonValue("\"array\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-		for i, x := range a {
-			if e := check212(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
-				return e
-			}
-		}
+	if e := constraint(v, p, "pattern", jsonValue("\"^attachments/[a-f0-9]{64}/[^/]+$\"")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -4304,41 +4355,12 @@ func check212(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	return nil
-}
-func check213(v any, p string) error {
-	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "format", jsonValue("\"date-time\"")); e != nil {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
 		return e
 	}
 	return nil
 }
-func check214(v any, p string) error {
-	if !hasType(v, jsonValue("\"array\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-		for i, x := range a {
-			if e := check215(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
-}
-func check215(v any, p string) error {
+func check213(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -4347,6 +4369,42 @@ func check215(v any, p string) error {
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
+	}
+	return nil
+}
+func check214(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-f0-9]{64}$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check215(v any, p string) error {
+	if !hasType(v, jsonValue("\"integer\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "minimum", jsonValue("0")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "maximum", jsonValue("10485760")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -4380,6 +4438,108 @@ func check217(v any, p string) error {
 	return nil
 }
 func check218(v any, p string) error {
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+		for i, x := range a {
+			if e := check219(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+func check219(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check220(v any, p string) error {
+	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "format", jsonValue("\"date-time\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check221(v any, p string) error {
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+		for i, x := range a {
+			if e := check222(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+func check222(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check223(v any, p string) error {
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+		for i, x := range a {
+			if e := check224(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
+		}
+	}
+	return nil
+}
+func check224(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check225(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -4394,8 +4554,8 @@ func check218(v any, p string) error {
 	}
 	return nil
 }
-func check219(v any, p string) error {
-	if e := check220(v, p); e != nil {
+func check226(v any, p string) error {
+	if e := check227(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -4406,7 +4566,7 @@ func check219(v any, p string) error {
 	}
 	return nil
 }
-func check220(v any, p string) error {
+func check227(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -4419,12 +4579,12 @@ func check220(v any, p string) error {
 			return fmt.Errorf("%s: missing required field mode", p)
 		}
 		if x, ok := m["baseCommit"]; ok {
-			if e := check221(x, p+"/baseCommit"); e != nil {
+			if e := check228(x, p+"/baseCommit"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["mode"]; ok {
-			if e := check222(x, p+"/mode"); e != nil {
+			if e := check229(x, p+"/mode"); e != nil {
 				return e
 			}
 		}
@@ -4439,7 +4599,7 @@ func check220(v any, p string) error {
 	}
 	return nil
 }
-func check221(v any, p string) error {
+func check228(v any, p string) error {
 	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
 	}
@@ -4451,7 +4611,7 @@ func check221(v any, p string) error {
 	}
 	return nil
 }
-func check222(v any, p string) error {
+func check229(v any, p string) error {
 	if !in(v, jsonValue("[\"read-only\",\"write\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -4463,29 +4623,29 @@ func check222(v any, p string) error {
 	}
 	return nil
 }
-func check223(v any, p string) error {
+func check230(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check224(v, p) == nil {
-		if e := check226(v, p); e != nil {
+	if check231(v, p) == nil {
+		if e := check233(v, p); e != nil {
 			return e
 		}
 	} else {
 	}
 	return nil
 }
-func check224(v any, p string) error {
+func check231(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["kind"]; !ok {
 			return fmt.Errorf("%s: missing required field kind", p)
 		}
 		if x, ok := m["kind"]; ok {
-			if e := check225(x, p+"/kind"); e != nil {
+			if e := check232(x, p+"/kind"); e != nil {
 				return e
 			}
 		}
@@ -4495,7 +4655,7 @@ func check224(v any, p string) error {
 	}
 	return nil
 }
-func check225(v any, p string) error {
+func check232(v any, p string) error {
 	if !equal(v, jsonValue("\"question\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"question\""))
 	}
@@ -4507,11 +4667,11 @@ func check225(v any, p string) error {
 	}
 	return nil
 }
-func check226(v any, p string) error {
+func check233(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["payload"]; ok {
-			if e := check227(x, p+"/payload"); e != nil {
+			if e := check234(x, p+"/payload"); e != nil {
 				return e
 			}
 		}
@@ -4521,7 +4681,7 @@ func check226(v any, p string) error {
 	}
 	return nil
 }
-func check227(v any, p string) error {
+func check234(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -4534,17 +4694,17 @@ func check227(v any, p string) error {
 			return fmt.Errorf("%s: missing required field decisionNeeded", p)
 		}
 		if x, ok := m["context"]; ok {
-			if e := check228(x, p+"/context"); e != nil {
+			if e := check235(x, p+"/context"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["decisionNeeded"]; ok {
-			if e := check230(x, p+"/decisionNeeded"); e != nil {
+			if e := check237(x, p+"/decisionNeeded"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["question"]; ok {
-			if e := check231(x, p+"/question"); e != nil {
+			if e := check238(x, p+"/question"); e != nil {
 				return e
 			}
 		}
@@ -4554,7 +4714,7 @@ func check227(v any, p string) error {
 	}
 	return nil
 }
-func check228(v any, p string) error {
+func check235(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -4564,127 +4724,19 @@ func check228(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check229(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check236(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
-	}
-	return nil
-}
-func check229(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check230(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check231(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check232(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check233(v, p) == nil {
-		if e := check235(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
-	return nil
-}
-func check233(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["kind"]; !ok {
-			return fmt.Errorf("%s: missing required field kind", p)
-		}
-		if x, ok := m["kind"]; ok {
-			if e := check234(x, p+"/kind"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check234(v any, p string) error {
-	if !equal(v, jsonValue("\"message\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"message\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check235(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if x, ok := m["payload"]; ok {
-			if e := check236(x, p+"/payload"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
 	}
 	return nil
 }
 func check236(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["text"]; !ok {
-			return fmt.Errorf("%s: missing required field text", p)
-		}
-		if x, ok := m["text"]; ok {
-			if e := check237(x, p+"/text"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -4707,28 +4759,43 @@ func check237(v any, p string) error {
 	return nil
 }
 func check238(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check239(v, p) == nil {
-		if e := check241(v, p); e != nil {
-			return e
-		}
-	} else {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
 func check239(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check240(v, p) == nil {
+		if e := check242(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check240(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
 		if _, ok := m["kind"]; !ok {
 			return fmt.Errorf("%s: missing required field kind", p)
 		}
 		if x, ok := m["kind"]; ok {
-			if e := check240(x, p+"/kind"); e != nil {
+			if e := check241(x, p+"/kind"); e != nil {
 				return e
 			}
 		}
@@ -4738,7 +4805,100 @@ func check239(v any, p string) error {
 	}
 	return nil
 }
-func check240(v any, p string) error {
+func check241(v any, p string) error {
+	if !equal(v, jsonValue("\"message\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"message\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check242(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if x, ok := m["payload"]; ok {
+			if e := check243(x, p+"/payload"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check243(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["text"]; !ok {
+			return fmt.Errorf("%s: missing required field text", p)
+		}
+		if x, ok := m["text"]; ok {
+			if e := check244(x, p+"/text"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check244(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
+	}
+	return nil
+}
+func check245(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check246(v, p) == nil {
+		if e := check248(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check246(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["kind"]; !ok {
+			return fmt.Errorf("%s: missing required field kind", p)
+		}
+		if x, ok := m["kind"]; ok {
+			if e := check247(x, p+"/kind"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check247(v any, p string) error {
 	if !equal(v, jsonValue("\"result\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"result\""))
 	}
@@ -4750,11 +4910,11 @@ func check240(v any, p string) error {
 	}
 	return nil
 }
-func check241(v any, p string) error {
+func check248(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["payload"]; ok {
-			if e := check242(x, p+"/payload"); e != nil {
+			if e := check249(x, p+"/payload"); e != nil {
 				return e
 			}
 		}
@@ -4764,7 +4924,7 @@ func check241(v any, p string) error {
 	}
 	return nil
 }
-func check242(v any, p string) error {
+func check249(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -4786,134 +4946,40 @@ func check242(v any, p string) error {
 			return fmt.Errorf("%s: missing required field nextAction", p)
 		}
 		if x, ok := m["changedFiles"]; ok {
-			if e := check243(x, p+"/changedFiles"); e != nil {
+			if e := check250(x, p+"/changedFiles"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["checkpoint"]; ok {
-			if e := check245(x, p+"/checkpoint"); e != nil {
+			if e := check252(x, p+"/checkpoint"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["commit"]; ok {
-			if e := check246(x, p+"/commit"); e != nil {
+			if e := check253(x, p+"/commit"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["limitations"]; ok {
-			if e := check247(x, p+"/limitations"); e != nil {
+			if e := check254(x, p+"/limitations"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["nextAction"]; ok {
-			if e := check249(x, p+"/nextAction"); e != nil {
+			if e := check256(x, p+"/nextAction"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["summary"]; ok {
-			if e := check250(x, p+"/summary"); e != nil {
+			if e := check257(x, p+"/summary"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["validation"]; ok {
-			if e := check251(x, p+"/validation"); e != nil {
+			if e := check258(x, p+"/validation"); e != nil {
 				return e
 			}
 		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check243(v any, p string) error {
-	if !hasType(v, jsonValue("\"array\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-		for i, x := range a {
-			if e := check244(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
-}
-func check244(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check245(v any, p string) error {
-	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check246(v any, p string) error {
-	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check247(v any, p string) error {
-	if !hasType(v, jsonValue("\"array\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-		for i, x := range a {
-			if e := check248(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
-				return e
-			}
-		}
-	}
-	return nil
-}
-func check248(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check249(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -4921,18 +4987,6 @@ func check249(v any, p string) error {
 	return nil
 }
 func check250(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check251(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -4942,40 +4996,31 @@ func check251(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check252(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check251(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check252(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+func check251(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["command"]; !ok {
-			return fmt.Errorf("%s: missing required field command", p)
-		}
-		if _, ok := m["outcome"]; !ok {
-			return fmt.Errorf("%s: missing required field outcome", p)
-		}
-		if x, ok := m["command"]; ok {
-			if e := check253(x, p+"/command"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["details"]; ok {
-			if e := check254(x, p+"/details"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["outcome"]; ok {
-			if e := check255(x, p+"/outcome"); e != nil {
-				return e
-			}
-		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check252(v any, p string) error {
+	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -4983,8 +5028,8 @@ func check252(v any, p string) error {
 	return nil
 }
 func check253(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -4995,14 +5040,19 @@ func check253(v any, p string) error {
 	return nil
 }
 func check254(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+		for i, x := range a {
+			if e := check255(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
+		}
 	}
 	return nil
 }
@@ -5019,28 +5069,70 @@ func check255(v any, p string) error {
 	return nil
 }
 func check256(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check257(v, p) == nil {
-		if e := check259(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
 	return nil
 }
 func check257(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["kind"]; !ok {
-			return fmt.Errorf("%s: missing required field kind", p)
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check258(v any, p string) error {
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+		for i, x := range a {
+			if e := check259(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
 		}
-		if x, ok := m["kind"]; ok {
-			if e := check258(x, p+"/kind"); e != nil {
+	}
+	return nil
+}
+func check259(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["command"]; !ok {
+			return fmt.Errorf("%s: missing required field command", p)
+		}
+		if _, ok := m["outcome"]; !ok {
+			return fmt.Errorf("%s: missing required field outcome", p)
+		}
+		if x, ok := m["command"]; ok {
+			if e := check260(x, p+"/command"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["details"]; ok {
+			if e := check261(x, p+"/details"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["outcome"]; ok {
+			if e := check262(x, p+"/outcome"); e != nil {
 				return e
 			}
 		}
@@ -5050,7 +5142,75 @@ func check257(v any, p string) error {
 	}
 	return nil
 }
-func check258(v any, p string) error {
+func check260(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check261(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check262(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check263(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check264(v, p) == nil {
+		if e := check266(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check264(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["kind"]; !ok {
+			return fmt.Errorf("%s: missing required field kind", p)
+		}
+		if x, ok := m["kind"]; ok {
+			if e := check265(x, p+"/kind"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check265(v any, p string) error {
 	if !equal(v, jsonValue("\"team-result\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"team-result\""))
 	}
@@ -5062,11 +5222,11 @@ func check258(v any, p string) error {
 	}
 	return nil
 }
-func check259(v any, p string) error {
+func check266(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["payload"]; ok {
-			if e := check260(x, p+"/payload"); e != nil {
+			if e := check267(x, p+"/payload"); e != nil {
 				return e
 			}
 		}
@@ -5076,7 +5236,7 @@ func check259(v any, p string) error {
 	}
 	return nil
 }
-func check260(v any, p string) error {
+func check267(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -5116,57 +5276,57 @@ func check260(v any, p string) error {
 			return fmt.Errorf("%s: missing required field nextAction", p)
 		}
 		if x, ok := m["dissent"]; ok {
-			if e := check261(x, p+"/dissent"); e != nil {
+			if e := check268(x, p+"/dissent"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["evidence"]; ok {
-			if e := check266(x, p+"/evidence"); e != nil {
+			if e := check273(x, p+"/evidence"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["format"]; ok {
-			if e := check268(x, p+"/format"); e != nil {
+			if e := check275(x, p+"/format"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["memberPositions"]; ok {
-			if e := check269(x, p+"/memberPositions"); e != nil {
+			if e := check276(x, p+"/memberPositions"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["nextAction"]; ok {
-			if e := check277(x, p+"/nextAction"); e != nil {
+			if e := check284(x, p+"/nextAction"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["outcome"]; ok {
-			if e := check278(x, p+"/outcome"); e != nil {
+			if e := check285(x, p+"/outcome"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["rationale"]; ok {
-			if e := check279(x, p+"/rationale"); e != nil {
+			if e := check286(x, p+"/rationale"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["rounds"]; ok {
-			if e := check280(x, p+"/rounds"); e != nil {
+			if e := check287(x, p+"/rounds"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["summary"]; ok {
-			if e := check281(x, p+"/summary"); e != nil {
+			if e := check288(x, p+"/summary"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["teamId"]; ok {
-			if e := check282(x, p+"/teamId"); e != nil {
+			if e := check289(x, p+"/teamId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["verdict"]; ok {
-			if e := check283(x, p+"/verdict"); e != nil {
+			if e := check290(x, p+"/verdict"); e != nil {
 				return e
 			}
 		}
@@ -5174,15 +5334,15 @@ func check260(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := check284(v, p); e != nil {
+	if e := check291(v, p); e != nil {
 		return e
 	}
-	if e := check290(v, p); e != nil {
+	if e := check297(v, p); e != nil {
 		return e
 	}
 	return nil
 }
-func check261(v any, p string) error {
+func check268(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -5192,14 +5352,14 @@ func check261(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check262(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check269(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check262(v any, p string) error {
+func check269(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -5215,17 +5375,17 @@ func check262(v any, p string) error {
 			return fmt.Errorf("%s: missing required field reason", p)
 		}
 		if x, ok := m["agentId"]; ok {
-			if e := check263(x, p+"/agentId"); e != nil {
+			if e := check270(x, p+"/agentId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["position"]; ok {
-			if e := check264(x, p+"/position"); e != nil {
+			if e := check271(x, p+"/position"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["reason"]; ok {
-			if e := check265(x, p+"/reason"); e != nil {
+			if e := check272(x, p+"/reason"); e != nil {
 				return e
 			}
 		}
@@ -5240,7 +5400,7 @@ func check262(v any, p string) error {
 	}
 	return nil
 }
-func check263(v any, p string) error {
+func check270(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -5255,7 +5415,7 @@ func check263(v any, p string) error {
 	}
 	return nil
 }
-func check264(v any, p string) error {
+func check271(v any, p string) error {
 	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
 	}
@@ -5267,7 +5427,7 @@ func check264(v any, p string) error {
 	}
 	return nil
 }
-func check265(v any, p string) error {
+func check272(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -5282,7 +5442,7 @@ func check265(v any, p string) error {
 	}
 	return nil
 }
-func check266(v any, p string) error {
+func check273(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -5292,14 +5452,14 @@ func check266(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check267(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check274(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check267(v any, p string) error {
+func check274(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -5311,7 +5471,7 @@ func check267(v any, p string) error {
 	}
 	return nil
 }
-func check268(v any, p string) error {
+func check275(v any, p string) error {
 	if !equal(v, jsonValue("\"arena.team-verdict.v1\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"arena.team-verdict.v1\""))
 	}
@@ -5323,7 +5483,7 @@ func check268(v any, p string) error {
 	}
 	return nil
 }
-func check269(v any, p string) error {
+func check276(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -5336,14 +5496,14 @@ func check269(v any, p string) error {
 			return fmt.Errorf("%s: requires at least 2 items", p)
 		}
 		for i, x := range a {
-			if e := check270(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check277(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check270(v any, p string) error {
+func check277(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -5365,27 +5525,27 @@ func check270(v any, p string) error {
 			return fmt.Errorf("%s: missing required field evidence", p)
 		}
 		if x, ok := m["agentId"]; ok {
-			if e := check271(x, p+"/agentId"); e != nil {
+			if e := check278(x, p+"/agentId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["evidence"]; ok {
-			if e := check272(x, p+"/evidence"); e != nil {
+			if e := check279(x, p+"/evidence"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["status"]; ok {
-			if e := check274(x, p+"/status"); e != nil {
+			if e := check281(x, p+"/status"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["summary"]; ok {
-			if e := check275(x, p+"/summary"); e != nil {
+			if e := check282(x, p+"/summary"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["verdict"]; ok {
-			if e := check276(x, p+"/verdict"); e != nil {
+			if e := check283(x, p+"/verdict"); e != nil {
 				return e
 			}
 		}
@@ -5400,7 +5560,7 @@ func check270(v any, p string) error {
 	}
 	return nil
 }
-func check271(v any, p string) error {
+func check278(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -5415,7 +5575,7 @@ func check271(v any, p string) error {
 	}
 	return nil
 }
-func check272(v any, p string) error {
+func check279(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -5425,14 +5585,14 @@ func check272(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check273(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check280(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check273(v any, p string) error {
+func check280(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -5444,7 +5604,7 @@ func check273(v any, p string) error {
 	}
 	return nil
 }
-func check274(v any, p string) error {
+func check281(v any, p string) error {
 	if !in(v, jsonValue("[\"affirmed\",\"disagreed\",\"unavailable\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -5453,99 +5613,6 @@ func check274(v any, p string) error {
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-	}
-	return nil
-}
-func check275(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check276(v any, p string) error {
-	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check277(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check278(v any, p string) error {
-	if !in(v, jsonValue("[\"consensus\",\"no-consensus\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check279(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check280(v any, p string) error {
-	if !hasType(v, jsonValue("\"integer\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minimum", jsonValue("0")); e != nil {
-		return e
-	}
-	return nil
-}
-func check281(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
 	}
 	return nil
 }
@@ -5558,9 +5625,6 @@ func check282(v any, p string) error {
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
 	}
 	return nil
 }
@@ -5577,31 +5641,26 @@ func check283(v any, p string) error {
 	return nil
 }
 func check284(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check285(v, p) == nil {
-		if e := check287(v, p); e != nil {
-			return e
-		}
-	} else {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
 func check285(v any, p string) error {
+	if !in(v, jsonValue("[\"consensus\",\"no-consensus\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["outcome"]; !ok {
-			return fmt.Errorf("%s: missing required field outcome", p)
-		}
-		if x, ok := m["outcome"]; ok {
-			if e := check286(x, p+"/outcome"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -5609,8 +5668,8 @@ func check285(v any, p string) error {
 	return nil
 }
 func check286(v any, p string) error {
-	if !equal(v, jsonValue("\"consensus\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"consensus\""))
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -5621,33 +5680,32 @@ func check286(v any, p string) error {
 	return nil
 }
 func check287(v any, p string) error {
+	if !hasType(v, jsonValue("\"integer\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if x, ok := m["dissent"]; ok {
-			if e := check288(x, p+"/dissent"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["verdict"]; ok {
-			if e := check289(x, p+"/verdict"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "minimum", jsonValue("0")); e != nil {
+		return e
 	}
 	return nil
 }
 func check288(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-		if len(a) > 0 {
-			return fmt.Errorf("%s: allows at most 0 items", p)
-		}
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -5667,28 +5725,40 @@ func check289(v any, p string) error {
 	return nil
 }
 func check290(v any, p string) error {
+	if !hasType(v, jsonValue("[\"string\",\"null\"]")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"null\"]"))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check291(v, p) == nil {
-		if e := check293(v, p); e != nil {
+	return nil
+}
+func check291(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check292(v, p) == nil {
+		if e := check294(v, p); e != nil {
 			return e
 		}
 	} else {
 	}
 	return nil
 }
-func check291(v any, p string) error {
+func check292(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["outcome"]; !ok {
 			return fmt.Errorf("%s: missing required field outcome", p)
 		}
 		if x, ok := m["outcome"]; ok {
-			if e := check292(x, p+"/outcome"); e != nil {
+			if e := check293(x, p+"/outcome"); e != nil {
 				return e
 			}
 		}
@@ -5698,7 +5768,97 @@ func check291(v any, p string) error {
 	}
 	return nil
 }
-func check292(v any, p string) error {
+func check293(v any, p string) error {
+	if !equal(v, jsonValue("\"consensus\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"consensus\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check294(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if x, ok := m["dissent"]; ok {
+			if e := check295(x, p+"/dissent"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["verdict"]; ok {
+			if e := check296(x, p+"/verdict"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check295(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+		if len(a) > 0 {
+			return fmt.Errorf("%s: allows at most 0 items", p)
+		}
+	}
+	return nil
+}
+func check296(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
+	}
+	return nil
+}
+func check297(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check298(v, p) == nil {
+		if e := check300(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check298(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["outcome"]; !ok {
+			return fmt.Errorf("%s: missing required field outcome", p)
+		}
+		if x, ok := m["outcome"]; ok {
+			if e := check299(x, p+"/outcome"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check299(v any, p string) error {
 	if !equal(v, jsonValue("\"no-consensus\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"no-consensus\""))
 	}
@@ -5710,16 +5870,16 @@ func check292(v any, p string) error {
 	}
 	return nil
 }
-func check293(v any, p string) error {
+func check300(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["dissent"]; ok {
-			if e := check294(x, p+"/dissent"); e != nil {
+			if e := check301(x, p+"/dissent"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["verdict"]; ok {
-			if e := check295(x, p+"/verdict"); e != nil {
+			if e := check302(x, p+"/verdict"); e != nil {
 				return e
 			}
 		}
@@ -5729,7 +5889,7 @@ func check293(v any, p string) error {
 	}
 	return nil
 }
-func check294(v any, p string) error {
+func check301(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
@@ -5741,7 +5901,7 @@ func check294(v any, p string) error {
 	}
 	return nil
 }
-func check295(v any, p string) error {
+func check302(v any, p string) error {
 	if !hasType(v, jsonValue("\"null\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"null\""))
 	}
@@ -5753,29 +5913,29 @@ func check295(v any, p string) error {
 	}
 	return nil
 }
-func check296(v any, p string) error {
+func check303(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check297(v, p) == nil {
-		if e := check299(v, p); e != nil {
+	if check304(v, p) == nil {
+		if e := check306(v, p); e != nil {
 			return e
 		}
 	} else {
 	}
 	return nil
 }
-func check297(v any, p string) error {
+func check304(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["kind"]; !ok {
 			return fmt.Errorf("%s: missing required field kind", p)
 		}
 		if x, ok := m["kind"]; ok {
-			if e := check298(x, p+"/kind"); e != nil {
+			if e := check305(x, p+"/kind"); e != nil {
 				return e
 			}
 		}
@@ -5785,7 +5945,7 @@ func check297(v any, p string) error {
 	}
 	return nil
 }
-func check298(v any, p string) error {
+func check305(v any, p string) error {
 	if !equal(v, jsonValue("\"error\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"error\""))
 	}
@@ -5797,11 +5957,11 @@ func check298(v any, p string) error {
 	}
 	return nil
 }
-func check299(v any, p string) error {
+func check306(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["payload"]; ok {
-			if e := check300(x, p+"/payload"); e != nil {
+			if e := check307(x, p+"/payload"); e != nil {
 				return e
 			}
 		}
@@ -5811,7 +5971,7 @@ func check299(v any, p string) error {
 	}
 	return nil
 }
-func check300(v any, p string) error {
+func check307(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -5827,117 +5987,25 @@ func check300(v any, p string) error {
 			return fmt.Errorf("%s: missing required field retryable", p)
 		}
 		if x, ok := m["code"]; ok {
-			if e := check301(x, p+"/code"); e != nil {
+			if e := check308(x, p+"/code"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["details"]; ok {
-			if e := check302(x, p+"/details"); e != nil {
+			if e := check309(x, p+"/details"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["message"]; ok {
-			if e := check303(x, p+"/message"); e != nil {
+			if e := check310(x, p+"/message"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["retryable"]; ok {
-			if e := check304(x, p+"/retryable"); e != nil {
+			if e := check311(x, p+"/retryable"); e != nil {
 				return e
 			}
 		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check301(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check302(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check303(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check304(v any, p string) error {
-	if !hasType(v, jsonValue("\"boolean\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"boolean\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check305(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check306(v, p) == nil {
-		if e := check308(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
-	return nil
-}
-func check306(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["kind"]; !ok {
-			return fmt.Errorf("%s: missing required field kind", p)
-		}
-		if x, ok := m["kind"]; ok {
-			if e := check307(x, p+"/kind"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check307(v any, p string) error {
-	if !equal(v, jsonValue("\"cancel\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"cancel\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -5945,13 +6013,11 @@ func check307(v any, p string) error {
 	return nil
 }
 func check308(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if x, ok := m["payload"]; ok {
-			if e := check309(x, p+"/payload"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -5959,19 +6025,11 @@ func check308(v any, p string) error {
 	return nil
 }
 func check309(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["reason"]; !ok {
-			return fmt.Errorf("%s: missing required field reason", p)
-		}
-		if x, ok := m["reason"]; ok {
-			if e := check310(x, p+"/reason"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -5991,6 +6049,108 @@ func check310(v any, p string) error {
 	return nil
 }
 func check311(v any, p string) error {
+	if !hasType(v, jsonValue("\"boolean\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"boolean\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check312(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check313(v, p) == nil {
+		if e := check315(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check313(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["kind"]; !ok {
+			return fmt.Errorf("%s: missing required field kind", p)
+		}
+		if x, ok := m["kind"]; ok {
+			if e := check314(x, p+"/kind"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check314(v any, p string) error {
+	if !equal(v, jsonValue("\"cancel\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"cancel\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check315(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if x, ok := m["payload"]; ok {
+			if e := check316(x, p+"/payload"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check316(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["reason"]; !ok {
+			return fmt.Errorf("%s: missing required field reason", p)
+		}
+		if x, ok := m["reason"]; ok {
+			if e := check317(x, p+"/reason"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check317(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check318(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6015,47 +6175,47 @@ func check311(v any, p string) error {
 			return fmt.Errorf("%s: missing required field audit", p)
 		}
 		if x, ok := m["approvalPolicies"]; ok {
-			if e := check312(x, p+"/approvalPolicies"); e != nil {
+			if e := check319(x, p+"/approvalPolicies"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["audit"]; ok {
-			if e := check319(x, p+"/audit"); e != nil {
+			if e := check326(x, p+"/audit"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["context"]; ok {
-			if e := check323(x, p+"/context"); e != nil {
+			if e := check330(x, p+"/context"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["defaultModel"]; ok {
-			if e := check326(x, p+"/defaultModel"); e != nil {
+			if e := check333(x, p+"/defaultModel"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["display"]; ok {
-			if e := check345(x, p+"/display"); e != nil {
+			if e := check352(x, p+"/display"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["limits"]; ok {
-			if e := check350(x, p+"/limits"); e != nil {
+			if e := check357(x, p+"/limits"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["permanentOnCallAgent"]; ok {
-			if e := check357(x, p+"/permanentOnCallAgent"); e != nil {
+			if e := check364(x, p+"/permanentOnCallAgent"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["schemaVersion"]; ok {
-			if e := check363(x, p+"/schemaVersion"); e != nil {
+			if e := check370(x, p+"/schemaVersion"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["sharedContext"]; ok {
-			if e := check364(x, p+"/sharedContext"); e != nil {
+			if e := check371(x, p+"/sharedContext"); e != nil {
 				return e
 			}
 		}
@@ -6070,7 +6230,7 @@ func check311(v any, p string) error {
 	}
 	return nil
 }
-func check312(v any, p string) error {
+func check319(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6095,32 +6255,32 @@ func check312(v any, p string) error {
 			return fmt.Errorf("%s: missing required field workflow-deletion", p)
 		}
 		if x, ok := m["agent-workflow-edit"]; ok {
-			if e := check313(x, p+"/agent-workflow-edit"); e != nil {
+			if e := check320(x, p+"/agent-workflow-edit"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["arena-subagent-modification-inquiry"]; ok {
-			if e := check314(x, p+"/arena-subagent-modification-inquiry"); e != nil {
+			if e := check321(x, p+"/arena-subagent-modification-inquiry"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["change-integration"]; ok {
-			if e := check315(x, p+"/change-integration"); e != nil {
+			if e := check322(x, p+"/change-integration"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["cross-provider-context-sharing"]; ok {
-			if e := check316(x, p+"/cross-provider-context-sharing"); e != nil {
+			if e := check323(x, p+"/cross-provider-context-sharing"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["shell-command-execution"]; ok {
-			if e := check317(x, p+"/shell-command-execution"); e != nil {
+			if e := check324(x, p+"/shell-command-execution"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["workflow-deletion"]; ok {
-			if e := check318(x, p+"/workflow-deletion"); e != nil {
+			if e := check325(x, p+"/workflow-deletion"); e != nil {
 				return e
 			}
 		}
@@ -6135,7 +6295,7 @@ func check312(v any, p string) error {
 	}
 	return nil
 }
-func check313(v any, p string) error {
+func check320(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6147,7 +6307,7 @@ func check313(v any, p string) error {
 	}
 	return nil
 }
-func check314(v any, p string) error {
+func check321(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6159,7 +6319,7 @@ func check314(v any, p string) error {
 	}
 	return nil
 }
-func check315(v any, p string) error {
+func check322(v any, p string) error {
 	if !in(v, jsonValue("[\"human-review\",\"auto-if-clean\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6171,7 +6331,7 @@ func check315(v any, p string) error {
 	}
 	return nil
 }
-func check316(v any, p string) error {
+func check323(v any, p string) error {
 	if !in(v, jsonValue("[\"deny\",\"ask-user\",\"task-scoped\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6183,7 +6343,7 @@ func check316(v any, p string) error {
 	}
 	return nil
 }
-func check317(v any, p string) error {
+func check324(v any, p string) error {
 	if !in(v, jsonValue("[\"adapter-default\",\"ask-user\",\"auto-refuse\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6195,7 +6355,7 @@ func check317(v any, p string) error {
 	}
 	return nil
 }
-func check318(v any, p string) error {
+func check325(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6207,7 +6367,7 @@ func check318(v any, p string) error {
 	}
 	return nil
 }
-func check319(v any, p string) error {
+func check326(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6223,17 +6383,17 @@ func check319(v any, p string) error {
 			return fmt.Errorf("%s: missing required field processOutput", p)
 		}
 		if x, ok := m["processOutput"]; ok {
-			if e := check320(x, p+"/processOutput"); e != nil {
+			if e := check327(x, p+"/processOutput"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["redactSecrets"]; ok {
-			if e := check321(x, p+"/redactSecrets"); e != nil {
+			if e := check328(x, p+"/redactSecrets"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["retention"]; ok {
-			if e := check322(x, p+"/retention"); e != nil {
+			if e := check329(x, p+"/retention"); e != nil {
 				return e
 			}
 		}
@@ -6248,7 +6408,7 @@ func check319(v any, p string) error {
 	}
 	return nil
 }
-func check320(v any, p string) error {
+func check327(v any, p string) error {
 	if !in(v, jsonValue("[\"full\",\"summary\",\"none\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6260,7 +6420,7 @@ func check320(v any, p string) error {
 	}
 	return nil
 }
-func check321(v any, p string) error {
+func check328(v any, p string) error {
 	if !equal(v, jsonValue("true")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("true"))
 	}
@@ -6272,7 +6432,7 @@ func check321(v any, p string) error {
 	}
 	return nil
 }
-func check322(v any, p string) error {
+func check329(v any, p string) error {
 	if !in(v, jsonValue("[\"full-local\",\"redacted-local\",\"metadata-only\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6284,7 +6444,7 @@ func check322(v any, p string) error {
 	}
 	return nil
 }
-func check323(v any, p string) error {
+func check330(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6297,12 +6457,12 @@ func check323(v any, p string) error {
 			return fmt.Errorf("%s: missing required field maxFilesPerHandoff", p)
 		}
 		if x, ok := m["defaultHandoffScope"]; ok {
-			if e := check324(x, p+"/defaultHandoffScope"); e != nil {
+			if e := check331(x, p+"/defaultHandoffScope"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxFilesPerHandoff"]; ok {
-			if e := check325(x, p+"/maxFilesPerHandoff"); e != nil {
+			if e := check332(x, p+"/maxFilesPerHandoff"); e != nil {
 				return e
 			}
 		}
@@ -6317,7 +6477,7 @@ func check323(v any, p string) error {
 	}
 	return nil
 }
-func check324(v any, p string) error {
+func check331(v any, p string) error {
 	if !in(v, jsonValue("[\"task-scoped\",\"selected-files\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6329,7 +6489,7 @@ func check324(v any, p string) error {
 	}
 	return nil
 }
-func check325(v any, p string) error {
+func check332(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6347,8 +6507,8 @@ func check325(v any, p string) error {
 	}
 	return nil
 }
-func check326(v any, p string) error {
-	if e := check327(v, p); e != nil {
+func check333(v any, p string) error {
+	if e := check334(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -6359,7 +6519,7 @@ func check326(v any, p string) error {
 	}
 	return nil
 }
-func check327(v any, p string) error {
+func check334(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6372,22 +6532,22 @@ func check327(v any, p string) error {
 			return fmt.Errorf("%s: missing required field model", p)
 		}
 		if x, ok := m["model"]; ok {
-			if e := check328(x, p+"/model"); e != nil {
+			if e := check335(x, p+"/model"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["options"]; ok {
-			if e := check329(x, p+"/options"); e != nil {
+			if e := check336(x, p+"/options"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["provider"]; ok {
-			if e := check330(x, p+"/provider"); e != nil {
+			if e := check337(x, p+"/provider"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["reasoningEffort"]; ok {
-			if e := check331(x, p+"/reasoningEffort"); e != nil {
+			if e := check338(x, p+"/reasoningEffort"); e != nil {
 				return e
 			}
 		}
@@ -6400,129 +6560,26 @@ func check327(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := check332(v, p); e != nil {
-		return e
-	}
 	if e := check339(v, p); e != nil {
 		return e
 	}
-	return nil
-}
-func check328(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+	if e := check346(v, p); e != nil {
 		return e
-	}
-	return nil
-}
-func check329(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check330(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check331(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check332(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check333(v, p) == nil {
-		if e := check335(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
-	return nil
-}
-func check333(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["provider"]; !ok {
-			return fmt.Errorf("%s: missing required field provider", p)
-		}
-		if x, ok := m["provider"]; ok {
-			if e := check334(x, p+"/provider"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check334(v any, p string) error {
-	if !equal(v, jsonValue("\"local\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"local\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
 	}
 	return nil
 }
 func check335(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["options"]; !ok {
-			return fmt.Errorf("%s: missing required field options", p)
-		}
-		if x, ok := m["options"]; ok {
-			if e := check336(x, p+"/options"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -6532,19 +6589,6 @@ func check336(v any, p string) error {
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["backend"]; !ok {
-			return fmt.Errorf("%s: missing required field backend", p)
-		}
-		if x, ok := m["backend"]; ok {
-			if e := check337(x, p+"/backend"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["endpoint"]; ok {
-			if e := check338(x, p+"/endpoint"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -6552,14 +6596,17 @@ func check336(v any, p string) error {
 	return nil
 }
 func check337(v any, p string) error {
-	if !in(v, jsonValue("[\"ollama\",\"lm-studio\",\"llama.cpp\",\"vllm\",\"openai-compatible\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -6573,7 +6620,7 @@ func check338(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := constraint(v, p, "format", jsonValue("\"uri\"")); e != nil {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
 		return e
 	}
 	return nil
@@ -6611,8 +6658,8 @@ func check340(v any, p string) error {
 	return nil
 }
 func check341(v any, p string) error {
-	if !equal(v, jsonValue("\"gemini\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"gemini\""))
+	if !equal(v, jsonValue("\"local\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"local\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -6645,11 +6692,16 @@ func check343(v any, p string) error {
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["authMethod"]; !ok {
-			return fmt.Errorf("%s: missing required field authMethod", p)
+		if _, ok := m["backend"]; !ok {
+			return fmt.Errorf("%s: missing required field backend", p)
 		}
-		if x, ok := m["authMethod"]; ok {
-			if e := check344(x, p+"/authMethod"); e != nil {
+		if x, ok := m["backend"]; ok {
+			if e := check344(x, p+"/backend"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["endpoint"]; ok {
+			if e := check345(x, p+"/endpoint"); e != nil {
 				return e
 			}
 		}
@@ -6660,7 +6712,7 @@ func check343(v any, p string) error {
 	return nil
 }
 func check344(v any, p string) error {
-	if !in(v, jsonValue("[\"google-ai-studio-api-key\",\"vertex-ai\"]").([]any)) {
+	if !in(v, jsonValue("[\"ollama\",\"lm-studio\",\"llama.cpp\",\"vllm\",\"openai-compatible\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -6672,28 +6724,136 @@ func check344(v any, p string) error {
 	return nil
 }
 func check345(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "format", jsonValue("\"uri\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check346(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check347(v, p) == nil {
+		if e := check349(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check347(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["provider"]; !ok {
+			return fmt.Errorf("%s: missing required field provider", p)
+		}
+		if x, ok := m["provider"]; ok {
+			if e := check348(x, p+"/provider"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check348(v any, p string) error {
+	if !equal(v, jsonValue("\"gemini\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"gemini\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check349(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["options"]; !ok {
+			return fmt.Errorf("%s: missing required field options", p)
+		}
+		if x, ok := m["options"]; ok {
+			if e := check350(x, p+"/options"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check350(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["authMethod"]; !ok {
+			return fmt.Errorf("%s: missing required field authMethod", p)
+		}
+		if x, ok := m["authMethod"]; ok {
+			if e := check351(x, p+"/authMethod"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check351(v any, p string) error {
+	if !in(v, jsonValue("[\"google-ai-studio-api-key\",\"vertex-ai\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check352(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["animation"]; ok {
-			if e := check346(x, p+"/animation"); e != nil {
+			if e := check353(x, p+"/animation"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["asciiTitle"]; ok {
-			if e := check347(x, p+"/asciiTitle"); e != nil {
+			if e := check354(x, p+"/asciiTitle"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["colorMode"]; ok {
-			if e := check348(x, p+"/colorMode"); e != nil {
+			if e := check355(x, p+"/colorMode"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["gitTree"]; ok {
-			if e := check349(x, p+"/gitTree"); e != nil {
+			if e := check356(x, p+"/gitTree"); e != nil {
 				return e
 			}
 		}
@@ -6708,7 +6868,7 @@ func check345(v any, p string) error {
 	}
 	return nil
 }
-func check346(v any, p string) error {
+func check353(v any, p string) error {
 	if !in(v, jsonValue("[\"auto\",\"on\",\"off\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6720,7 +6880,7 @@ func check346(v any, p string) error {
 	}
 	return nil
 }
-func check347(v any, p string) error {
+func check354(v any, p string) error {
 	if !in(v, jsonValue("[\"show\",\"compact\",\"hide\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6732,7 +6892,7 @@ func check347(v any, p string) error {
 	}
 	return nil
 }
-func check348(v any, p string) error {
+func check355(v any, p string) error {
 	if !in(v, jsonValue("[\"auto\",\"always\",\"never\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6744,7 +6904,7 @@ func check348(v any, p string) error {
 	}
 	return nil
 }
-func check349(v any, p string) error {
+func check356(v any, p string) error {
 	if !in(v, jsonValue("[\"show\",\"hide\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -6756,7 +6916,7 @@ func check349(v any, p string) error {
 	}
 	return nil
 }
-func check350(v any, p string) error {
+func check357(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6781,32 +6941,32 @@ func check350(v any, p string) error {
 			return fmt.Errorf("%s: missing required field maxRetriesPerAgent", p)
 		}
 		if x, ok := m["maxAgentRunMinutes"]; ok {
-			if e := check351(x, p+"/maxAgentRunMinutes"); e != nil {
+			if e := check358(x, p+"/maxAgentRunMinutes"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxConcurrentAgents"]; ok {
-			if e := check352(x, p+"/maxConcurrentAgents"); e != nil {
+			if e := check359(x, p+"/maxConcurrentAgents"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxCoworkerAdditionsPerRun"]; ok {
-			if e := check353(x, p+"/maxCoworkerAdditionsPerRun"); e != nil {
+			if e := check360(x, p+"/maxCoworkerAdditionsPerRun"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxOnCallInvocationsPerRun"]; ok {
-			if e := check354(x, p+"/maxOnCallInvocationsPerRun"); e != nil {
+			if e := check361(x, p+"/maxOnCallInvocationsPerRun"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxRetriesPerAgent"]; ok {
-			if e := check355(x, p+"/maxRetriesPerAgent"); e != nil {
+			if e := check362(x, p+"/maxRetriesPerAgent"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxTeamRounds"]; ok {
-			if e := check356(x, p+"/maxTeamRounds"); e != nil {
+			if e := check363(x, p+"/maxTeamRounds"); e != nil {
 				return e
 			}
 		}
@@ -6821,7 +6981,7 @@ func check350(v any, p string) error {
 	}
 	return nil
 }
-func check351(v any, p string) error {
+func check358(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6839,7 +6999,7 @@ func check351(v any, p string) error {
 	}
 	return nil
 }
-func check352(v any, p string) error {
+func check359(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6857,7 +7017,7 @@ func check352(v any, p string) error {
 	}
 	return nil
 }
-func check353(v any, p string) error {
+func check360(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6875,7 +7035,7 @@ func check353(v any, p string) error {
 	}
 	return nil
 }
-func check354(v any, p string) error {
+func check361(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6893,7 +7053,7 @@ func check354(v any, p string) error {
 	}
 	return nil
 }
-func check355(v any, p string) error {
+func check362(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6911,7 +7071,7 @@ func check355(v any, p string) error {
 	}
 	return nil
 }
-func check356(v any, p string) error {
+func check363(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -6929,7 +7089,7 @@ func check356(v any, p string) error {
 	}
 	return nil
 }
-func check357(v any, p string) error {
+func check364(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -6951,27 +7111,27 @@ func check357(v any, p string) error {
 			return fmt.Errorf("%s: missing required field availability", p)
 		}
 		if x, ok := m["availability"]; ok {
-			if e := check358(x, p+"/availability"); e != nil {
+			if e := check365(x, p+"/availability"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["id"]; ok {
-			if e := check359(x, p+"/id"); e != nil {
+			if e := check366(x, p+"/id"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["profile"]; ok {
-			if e := check360(x, p+"/profile"); e != nil {
+			if e := check367(x, p+"/profile"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["runtimeSource"]; ok {
-			if e := check361(x, p+"/runtimeSource"); e != nil {
+			if e := check368(x, p+"/runtimeSource"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["skill"]; ok {
-			if e := check362(x, p+"/skill"); e != nil {
+			if e := check369(x, p+"/skill"); e != nil {
 				return e
 			}
 		}
@@ -6986,7 +7146,7 @@ func check357(v any, p string) error {
 	}
 	return nil
 }
-func check358(v any, p string) error {
+func check365(v any, p string) error {
 	if !equal(v, jsonValue("\"permanent-on-call\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"permanent-on-call\""))
 	}
@@ -6998,7 +7158,7 @@ func check358(v any, p string) error {
 	}
 	return nil
 }
-func check359(v any, p string) error {
+func check366(v any, p string) error {
 	if !equal(v, jsonValue("\"arena-orchestrator\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"arena-orchestrator\""))
 	}
@@ -7010,7 +7170,7 @@ func check359(v any, p string) error {
 	}
 	return nil
 }
-func check360(v any, p string) error {
+func check367(v any, p string) error {
 	if !equal(v, jsonValue("\".agents/arena-system/arena-orchestrator.agent.json\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\".agents/arena-system/arena-orchestrator.agent.json\""))
 	}
@@ -7022,7 +7182,7 @@ func check360(v any, p string) error {
 	}
 	return nil
 }
-func check361(v any, p string) error {
+func check368(v any, p string) error {
 	if !equal(v, jsonValue("\"defaultModel\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"defaultModel\""))
 	}
@@ -7034,7 +7194,7 @@ func check361(v any, p string) error {
 	}
 	return nil
 }
-func check362(v any, p string) error {
+func check369(v any, p string) error {
 	if !equal(v, jsonValue("\"arena-orchestrator\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"arena-orchestrator\""))
 	}
@@ -7046,7 +7206,7 @@ func check362(v any, p string) error {
 	}
 	return nil
 }
-func check363(v any, p string) error {
+func check370(v any, p string) error {
 	if !equal(v, jsonValue("1")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("1"))
 	}
@@ -7058,7 +7218,7 @@ func check363(v any, p string) error {
 	}
 	return nil
 }
-func check364(v any, p string) error {
+func check371(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -7086,37 +7246,37 @@ func check364(v any, p string) error {
 			return fmt.Errorf("%s: missing required field staleAfterDays", p)
 		}
 		if x, ok := m["agentDeletePolicy"]; ok {
-			if e := check365(x, p+"/agentDeletePolicy"); e != nil {
+			if e := check372(x, p+"/agentDeletePolicy"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["agentWritePolicy"]; ok {
-			if e := check366(x, p+"/agentWritePolicy"); e != nil {
+			if e := check373(x, p+"/agentWritePolicy"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxEntries"]; ok {
-			if e := check367(x, p+"/maxEntries"); e != nil {
+			if e := check374(x, p+"/maxEntries"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxEntryBytes"]; ok {
-			if e := check368(x, p+"/maxEntryBytes"); e != nil {
+			if e := check375(x, p+"/maxEntryBytes"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxTotalBytes"]; ok {
-			if e := check369(x, p+"/maxTotalBytes"); e != nil {
+			if e := check376(x, p+"/maxTotalBytes"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["staleAfterDays"]; ok {
-			if e := check370(x, p+"/staleAfterDays"); e != nil {
+			if e := check377(x, p+"/staleAfterDays"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["storage"]; ok {
-			if e := check371(x, p+"/storage"); e != nil {
+			if e := check378(x, p+"/storage"); e != nil {
 				return e
 			}
 		}
@@ -7131,7 +7291,7 @@ func check364(v any, p string) error {
 	}
 	return nil
 }
-func check365(v any, p string) error {
+func check372(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -7143,7 +7303,7 @@ func check365(v any, p string) error {
 	}
 	return nil
 }
-func check366(v any, p string) error {
+func check373(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-accept\",\"ask-user\",\"auto-refuse\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -7155,7 +7315,7 @@ func check366(v any, p string) error {
 	}
 	return nil
 }
-func check367(v any, p string) error {
+func check374(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -7173,7 +7333,7 @@ func check367(v any, p string) error {
 	}
 	return nil
 }
-func check368(v any, p string) error {
+func check375(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -7191,7 +7351,7 @@ func check368(v any, p string) error {
 	}
 	return nil
 }
-func check369(v any, p string) error {
+func check376(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -7209,7 +7369,7 @@ func check369(v any, p string) error {
 	}
 	return nil
 }
-func check370(v any, p string) error {
+func check377(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -7227,7 +7387,7 @@ func check370(v any, p string) error {
 	}
 	return nil
 }
-func check371(v any, p string) error {
+func check378(v any, p string) error {
 	if !in(v, jsonValue("[\"git-tracked\",\"local-only\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -7239,7 +7399,7 @@ func check371(v any, p string) error {
 	}
 	return nil
 }
-func check372(v any, p string) error {
+func check379(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -7267,57 +7427,57 @@ func check372(v any, p string) error {
 			return fmt.Errorf("%s: missing required field settings", p)
 		}
 		if x, ok := m["agents"]; ok {
-			if e := check373(x, p+"/agents"); e != nil {
+			if e := check380(x, p+"/agents"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["decisionRouters"]; ok {
-			if e := check406(x, p+"/decisionRouters"); e != nil {
+			if e := check413(x, p+"/decisionRouters"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["description"]; ok {
-			if e := check431(x, p+"/description"); e != nil {
+			if e := check438(x, p+"/description"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["headAgent"]; ok {
-			if e := check432(x, p+"/headAgent"); e != nil {
+			if e := check439(x, p+"/headAgent"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["id"]; ok {
-			if e := check434(x, p+"/id"); e != nil {
+			if e := check441(x, p+"/id"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["name"]; ok {
-			if e := check436(x, p+"/name"); e != nil {
+			if e := check443(x, p+"/name"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["onCall"]; ok {
-			if e := check437(x, p+"/onCall"); e != nil {
+			if e := check444(x, p+"/onCall"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["relationships"]; ok {
-			if e := check486(x, p+"/relationships"); e != nil {
+			if e := check493(x, p+"/relationships"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["schemaVersion"]; ok {
-			if e := check502(x, p+"/schemaVersion"); e != nil {
+			if e := check509(x, p+"/schemaVersion"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["settings"]; ok {
-			if e := check503(x, p+"/settings"); e != nil {
+			if e := check510(x, p+"/settings"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["teams"]; ok {
-			if e := check523(x, p+"/teams"); e != nil {
+			if e := check530(x, p+"/teams"); e != nil {
 				return e
 			}
 		}
@@ -7332,7 +7492,7 @@ func check372(v any, p string) error {
 	}
 	return nil
 }
-func check373(v any, p string) error {
+func check380(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -7345,148 +7505,10 @@ func check373(v any, p string) error {
 			return fmt.Errorf("%s: requires at least 1 items", p)
 		}
 		for i, x := range a {
-			if e := check374(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check381(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
-	}
-	return nil
-}
-func check374(v any, p string) error {
-	if e := check375(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check375(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["id"]; !ok {
-			return fmt.Errorf("%s: missing required field id", p)
-		}
-		if _, ok := m["profile"]; !ok {
-			return fmt.Errorf("%s: missing required field profile", p)
-		}
-		if _, ok := m["runtime"]; !ok {
-			return fmt.Errorf("%s: missing required field runtime", p)
-		}
-		if x, ok := m["activation"]; ok {
-			if e := check376(x, p+"/activation"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["id"]; ok {
-			if e := check377(x, p+"/id"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["level"]; ok {
-			if e := check379(x, p+"/level"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["profile"]; ok {
-			if e := check380(x, p+"/profile"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["runtime"]; ok {
-			if e := check381(x, p+"/runtime"); e != nil {
-				return e
-			}
-		}
-		for k := range m {
-			if !in(k, jsonValue("[\"activation\",\"id\",\"level\",\"profile\",\"runtime\"]").([]any)) {
-				return fmt.Errorf("%s/%s: unknown field", p, k)
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := check400(v, p); e != nil {
-		return e
-	}
-	return nil
-}
-func check376(v any, p string) error {
-	if !in(v, jsonValue("[\"path\",\"on-call\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check377(v any, p string) error {
-	if e := check378(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check378(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
-	}
-	return nil
-}
-func check379(v any, p string) error {
-	if !hasType(v, jsonValue("\"integer\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minimum", jsonValue("0")); e != nil {
-		return e
-	}
-	return nil
-}
-func check380(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^\\\\.agents/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\\\\.agent\\\\.json$\"")); e != nil {
-		return e
 	}
 	return nil
 }
@@ -7508,34 +7530,42 @@ func check382(v any, p string) error {
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["provider"]; !ok {
-			return fmt.Errorf("%s: missing required field provider", p)
+		if _, ok := m["id"]; !ok {
+			return fmt.Errorf("%s: missing required field id", p)
 		}
-		if _, ok := m["model"]; !ok {
-			return fmt.Errorf("%s: missing required field model", p)
+		if _, ok := m["profile"]; !ok {
+			return fmt.Errorf("%s: missing required field profile", p)
 		}
-		if x, ok := m["model"]; ok {
-			if e := check383(x, p+"/model"); e != nil {
+		if _, ok := m["runtime"]; !ok {
+			return fmt.Errorf("%s: missing required field runtime", p)
+		}
+		if x, ok := m["activation"]; ok {
+			if e := check383(x, p+"/activation"); e != nil {
 				return e
 			}
 		}
-		if x, ok := m["options"]; ok {
-			if e := check384(x, p+"/options"); e != nil {
+		if x, ok := m["id"]; ok {
+			if e := check384(x, p+"/id"); e != nil {
 				return e
 			}
 		}
-		if x, ok := m["provider"]; ok {
-			if e := check385(x, p+"/provider"); e != nil {
+		if x, ok := m["level"]; ok {
+			if e := check386(x, p+"/level"); e != nil {
 				return e
 			}
 		}
-		if x, ok := m["reasoningEffort"]; ok {
-			if e := check386(x, p+"/reasoningEffort"); e != nil {
+		if x, ok := m["profile"]; ok {
+			if e := check387(x, p+"/profile"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["runtime"]; ok {
+			if e := check388(x, p+"/runtime"); e != nil {
 				return e
 			}
 		}
 		for k := range m {
-			if !in(k, jsonValue("[\"model\",\"options\",\"provider\",\"reasoningEffort\"]").([]any)) {
+			if !in(k, jsonValue("[\"activation\",\"id\",\"level\",\"profile\",\"runtime\"]").([]any)) {
 				return fmt.Errorf("%s/%s: unknown field", p, k)
 			}
 		}
@@ -7543,17 +7573,14 @@ func check382(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := check387(v, p); e != nil {
-		return e
-	}
-	if e := check394(v, p); e != nil {
+	if e := check407(v, p); e != nil {
 		return e
 	}
 	return nil
 }
 func check383(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if !in(v, jsonValue("[\"path\",\"on-call\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -7561,14 +7588,11 @@ func check383(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
 	return nil
 }
 func check384(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	if e := check385(v, p); e != nil {
+		return e
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -7588,12 +7612,106 @@ func check385(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
 		return e
 	}
 	return nil
 }
 func check386(v any, p string) error {
+	if !hasType(v, jsonValue("\"integer\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "minimum", jsonValue("0")); e != nil {
+		return e
+	}
+	return nil
+}
+func check387(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^\\\\.agents/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\\\\.agent\\\\.json$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check388(v any, p string) error {
+	if e := check389(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check389(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["provider"]; !ok {
+			return fmt.Errorf("%s: missing required field provider", p)
+		}
+		if _, ok := m["model"]; !ok {
+			return fmt.Errorf("%s: missing required field model", p)
+		}
+		if x, ok := m["model"]; ok {
+			if e := check390(x, p+"/model"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["options"]; ok {
+			if e := check391(x, p+"/options"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["provider"]; ok {
+			if e := check392(x, p+"/provider"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["reasoningEffort"]; ok {
+			if e := check393(x, p+"/reasoningEffort"); e != nil {
+				return e
+			}
+		}
+		for k := range m {
+			if !in(k, jsonValue("[\"model\",\"options\",\"provider\",\"reasoningEffort\"]").([]any)) {
+				return fmt.Errorf("%s/%s: unknown field", p, k)
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := check394(v, p); e != nil {
+		return e
+	}
+	if e := check401(v, p); e != nil {
+		return e
+	}
+	return nil
+}
+func check390(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -7608,86 +7726,12 @@ func check386(v any, p string) error {
 	}
 	return nil
 }
-func check387(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check388(v, p) == nil {
-		if e := check390(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
-	return nil
-}
-func check388(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["provider"]; !ok {
-			return fmt.Errorf("%s: missing required field provider", p)
-		}
-		if x, ok := m["provider"]; ok {
-			if e := check389(x, p+"/provider"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check389(v any, p string) error {
-	if !equal(v, jsonValue("\"local\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"local\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check390(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["options"]; !ok {
-			return fmt.Errorf("%s: missing required field options", p)
-		}
-		if x, ok := m["options"]; ok {
-			if e := check391(x, p+"/options"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
 func check391(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["backend"]; !ok {
-			return fmt.Errorf("%s: missing required field backend", p)
-		}
-		if x, ok := m["backend"]; ok {
-			if e := check392(x, p+"/backend"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["endpoint"]; ok {
-			if e := check393(x, p+"/endpoint"); e != nil {
-				return e
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -7695,14 +7739,17 @@ func check391(v any, p string) error {
 	return nil
 }
 func check392(v any, p string) error {
-	if !in(v, jsonValue("[\"ollama\",\"lm-studio\",\"llama.cpp\",\"vllm\",\"openai-compatible\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
+		return e
 	}
 	return nil
 }
@@ -7716,7 +7763,7 @@ func check393(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := constraint(v, p, "format", jsonValue("\"uri\"")); e != nil {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
 		return e
 	}
 	return nil
@@ -7754,8 +7801,8 @@ func check395(v any, p string) error {
 	return nil
 }
 func check396(v any, p string) error {
-	if !equal(v, jsonValue("\"gemini\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"gemini\""))
+	if !equal(v, jsonValue("\"local\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"local\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -7788,11 +7835,16 @@ func check398(v any, p string) error {
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["authMethod"]; !ok {
-			return fmt.Errorf("%s: missing required field authMethod", p)
+		if _, ok := m["backend"]; !ok {
+			return fmt.Errorf("%s: missing required field backend", p)
 		}
-		if x, ok := m["authMethod"]; ok {
-			if e := check399(x, p+"/authMethod"); e != nil {
+		if x, ok := m["backend"]; ok {
+			if e := check399(x, p+"/backend"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["endpoint"]; ok {
+			if e := check400(x, p+"/endpoint"); e != nil {
 				return e
 			}
 		}
@@ -7803,7 +7855,7 @@ func check398(v any, p string) error {
 	return nil
 }
 func check399(v any, p string) error {
-	if !in(v, jsonValue("[\"google-ai-studio-api-key\",\"vertex-ai\"]").([]any)) {
+	if !in(v, jsonValue("[\"ollama\",\"lm-studio\",\"llama.cpp\",\"vllm\",\"openai-compatible\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -7815,31 +7867,43 @@ func check399(v any, p string) error {
 	return nil
 }
 func check400(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check401(v, p) == nil {
-		if e := check403(v, p); e != nil {
-			return e
-		}
-	} else {
-		if e := check405(v, p); e != nil {
-			return e
-		}
+	if e := constraint(v, p, "format", jsonValue("\"uri\"")); e != nil {
+		return e
 	}
 	return nil
 }
 func check401(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["activation"]; !ok {
-			return fmt.Errorf("%s: missing required field activation", p)
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check402(v, p) == nil {
+		if e := check404(v, p); e != nil {
+			return e
 		}
-		if x, ok := m["activation"]; ok {
-			if e := check402(x, p+"/activation"); e != nil {
+	} else {
+	}
+	return nil
+}
+func check402(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["provider"]; !ok {
+			return fmt.Errorf("%s: missing required field provider", p)
+		}
+		if x, ok := m["provider"]; ok {
+			if e := check403(x, p+"/provider"); e != nil {
 				return e
 			}
 		}
@@ -7849,7 +7913,103 @@ func check401(v any, p string) error {
 	}
 	return nil
 }
-func check402(v any, p string) error {
+func check403(v any, p string) error {
+	if !equal(v, jsonValue("\"gemini\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"gemini\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check404(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["options"]; !ok {
+			return fmt.Errorf("%s: missing required field options", p)
+		}
+		if x, ok := m["options"]; ok {
+			if e := check405(x, p+"/options"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check405(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["authMethod"]; !ok {
+			return fmt.Errorf("%s: missing required field authMethod", p)
+		}
+		if x, ok := m["authMethod"]; ok {
+			if e := check406(x, p+"/authMethod"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check406(v any, p string) error {
+	if !in(v, jsonValue("[\"google-ai-studio-api-key\",\"vertex-ai\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check407(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check408(v, p) == nil {
+		if e := check410(v, p); e != nil {
+			return e
+		}
+	} else {
+		if e := check412(v, p); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+func check408(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["activation"]; !ok {
+			return fmt.Errorf("%s: missing required field activation", p)
+		}
+		if x, ok := m["activation"]; ok {
+			if e := check409(x, p+"/activation"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check409(v any, p string) error {
 	if !equal(v, jsonValue("\"on-call\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"on-call\""))
 	}
@@ -7861,19 +8021,19 @@ func check402(v any, p string) error {
 	}
 	return nil
 }
-func check403(v any, p string) error {
+func check410(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check404(v, p) == nil {
+	if check411(v, p) == nil {
 		return fmt.Errorf("%s: forbidden field combination", p)
 	}
 	return nil
 }
-func check404(v any, p string) error {
+func check411(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["level"]; !ok {
@@ -7885,7 +8045,7 @@ func check404(v any, p string) error {
 	}
 	return nil
 }
-func check405(v any, p string) error {
+func check412(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["level"]; !ok {
@@ -7897,7 +8057,7 @@ func check405(v any, p string) error {
 	}
 	return nil
 }
-func check406(v any, p string) error {
+func check413(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -7907,15 +8067,15 @@ func check406(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check407(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check414(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check407(v any, p string) error {
-	if e := check408(v, p); e != nil {
+func check414(v any, p string) error {
+	if e := check415(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -7926,7 +8086,7 @@ func check407(v any, p string) error {
 	}
 	return nil
 }
-func check408(v any, p string) error {
+func check415(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -7951,32 +8111,32 @@ func check408(v any, p string) error {
 			return fmt.Errorf("%s: missing required field fallback", p)
 		}
 		if x, ok := m["fallback"]; ok {
-			if e := check409(x, p+"/fallback"); e != nil {
+			if e := check416(x, p+"/fallback"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["id"]; ok {
-			if e := check418(x, p+"/id"); e != nil {
+			if e := check425(x, p+"/id"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["inputKind"]; ok {
-			if e := check420(x, p+"/inputKind"); e != nil {
+			if e := check427(x, p+"/inputKind"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["name"]; ok {
-			if e := check421(x, p+"/name"); e != nil {
+			if e := check428(x, p+"/name"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["payloadPointer"]; ok {
-			if e := check422(x, p+"/payloadPointer"); e != nil {
+			if e := check429(x, p+"/payloadPointer"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["routes"]; ok {
-			if e := check423(x, p+"/routes"); e != nil {
+			if e := check430(x, p+"/routes"); e != nil {
 				return e
 			}
 		}
@@ -7991,7 +8151,7 @@ func check408(v any, p string) error {
 	}
 	return nil
 }
-func check409(v any, p string) error {
+func check416(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
@@ -8000,13 +8160,13 @@ func check409(v any, p string) error {
 	}
 	{
 		matches := 0
-		if check410(v, p) == nil {
+		if check417(v, p) == nil {
 			matches++
 		}
-		if check412(v, p) == nil {
+		if check419(v, p) == nil {
 			matches++
 		}
-		if check414(v, p) == nil {
+		if check421(v, p) == nil {
 			matches++
 		}
 		if matches != 1 {
@@ -8015,7 +8175,7 @@ func check409(v any, p string) error {
 	}
 	return nil
 }
-func check410(v any, p string) error {
+func check417(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8025,7 +8185,7 @@ func check410(v any, p string) error {
 			return fmt.Errorf("%s: missing required field action", p)
 		}
 		if x, ok := m["action"]; ok {
-			if e := check411(x, p+"/action"); e != nil {
+			if e := check418(x, p+"/action"); e != nil {
 				return e
 			}
 		}
@@ -8040,7 +8200,7 @@ func check410(v any, p string) error {
 	}
 	return nil
 }
-func check411(v any, p string) error {
+func check418(v any, p string) error {
 	if !equal(v, jsonValue("\"ask-user\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"ask-user\""))
 	}
@@ -8052,7 +8212,7 @@ func check411(v any, p string) error {
 	}
 	return nil
 }
-func check412(v any, p string) error {
+func check419(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8062,7 +8222,7 @@ func check412(v any, p string) error {
 			return fmt.Errorf("%s: missing required field action", p)
 		}
 		if x, ok := m["action"]; ok {
-			if e := check413(x, p+"/action"); e != nil {
+			if e := check420(x, p+"/action"); e != nil {
 				return e
 			}
 		}
@@ -8077,7 +8237,7 @@ func check412(v any, p string) error {
 	}
 	return nil
 }
-func check413(v any, p string) error {
+func check420(v any, p string) error {
 	if !equal(v, jsonValue("\"stop\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"stop\""))
 	}
@@ -8089,7 +8249,7 @@ func check413(v any, p string) error {
 	}
 	return nil
 }
-func check414(v any, p string) error {
+func check421(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8102,12 +8262,12 @@ func check414(v any, p string) error {
 			return fmt.Errorf("%s: missing required field to", p)
 		}
 		if x, ok := m["action"]; ok {
-			if e := check415(x, p+"/action"); e != nil {
+			if e := check422(x, p+"/action"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["to"]; ok {
-			if e := check416(x, p+"/to"); e != nil {
+			if e := check423(x, p+"/to"); e != nil {
 				return e
 			}
 		}
@@ -8122,7 +8282,7 @@ func check414(v any, p string) error {
 	}
 	return nil
 }
-func check415(v any, p string) error {
+func check422(v any, p string) error {
 	if !equal(v, jsonValue("\"route\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"route\""))
 	}
@@ -8134,131 +8294,21 @@ func check415(v any, p string) error {
 	}
 	return nil
 }
-func check416(v any, p string) error {
-	if e := check417(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check417(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
-	}
-	return nil
-}
-func check418(v any, p string) error {
-	if e := check419(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check419(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
-	}
-	return nil
-}
-func check420(v any, p string) error {
-	if !in(v, jsonValue("[\"review-result\",\"team-result\",\"result\",\"error\",\"context-result\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check421(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
-		return e
-	}
-	return nil
-}
-func check422(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^/\"")); e != nil {
-		return e
-	}
-	return nil
-}
 func check423(v any, p string) error {
-	if !hasType(v, jsonValue("\"array\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
+	if e := check424(v, p); e != nil {
+		return e
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-		if len(a) < 1 {
-			return fmt.Errorf("%s: requires at least 1 items", p)
-		}
-		for i, x := range a {
-			if e := check424(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
-				return e
-			}
-		}
 	}
 	return nil
 }
 func check424(v any, p string) error {
-	if e := check425(v, p); e != nil {
-		return e
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -8266,43 +8316,20 @@ func check424(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
 	return nil
 }
 func check425(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	if e := check426(v, p); e != nil {
+		return e
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["id"]; !ok {
-			return fmt.Errorf("%s: missing required field id", p)
-		}
-		if _, ok := m["equals"]; !ok {
-			return fmt.Errorf("%s: missing required field equals", p)
-		}
-		if _, ok := m["to"]; !ok {
-			return fmt.Errorf("%s: missing required field to", p)
-		}
-		if x, ok := m["equals"]; ok {
-			if e := check426(x, p+"/equals"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["id"]; ok {
-			if e := check427(x, p+"/id"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["to"]; ok {
-			if e := check429(x, p+"/to"); e != nil {
-				return e
-			}
-		}
-		for k := range m {
-			if !in(k, jsonValue("[\"equals\",\"id\",\"to\"]").([]any)) {
-				return fmt.Errorf("%s/%s: unknown field", p, k)
-			}
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -8310,8 +8337,8 @@ func check425(v any, p string) error {
 	return nil
 }
 func check426(v any, p string) error {
-	if !hasType(v, jsonValue("[\"string\",\"number\",\"boolean\",\"null\"]")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"number\",\"boolean\",\"null\"]"))
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -8319,11 +8346,17 @@ func check426(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
 	return nil
 }
 func check427(v any, p string) error {
-	if e := check428(v, p); e != nil {
-		return e
+	if !in(v, jsonValue("[\"review-result\",\"team-result\",\"result\",\"error\",\"context-result\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -8343,47 +8376,49 @@ func check428(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+	if e := constraint(v, p, "minLength", jsonValue("1")); e != nil {
 		return e
 	}
 	return nil
 }
 func check429(v any, p string) error {
-	if e := check430(v, p); e != nil {
-		return e
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^/\"")); e != nil {
+		return e
 	}
 	return nil
 }
 func check430(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if !hasType(v, jsonValue("\"array\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
+		if len(a) < 1 {
+			return fmt.Errorf("%s: requires at least 1 items", p)
+		}
+		for i, x := range a {
+			if e := check431(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+				return e
+			}
+		}
 	}
 	return nil
 }
 func check431(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if e := check432(v, p); e != nil {
+		return e
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -8394,11 +8429,40 @@ func check431(v any, p string) error {
 	return nil
 }
 func check432(v any, p string) error {
-	if e := check433(v, p); e != nil {
-		return e
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
+		if _, ok := m["id"]; !ok {
+			return fmt.Errorf("%s: missing required field id", p)
+		}
+		if _, ok := m["equals"]; !ok {
+			return fmt.Errorf("%s: missing required field equals", p)
+		}
+		if _, ok := m["to"]; !ok {
+			return fmt.Errorf("%s: missing required field to", p)
+		}
+		if x, ok := m["equals"]; ok {
+			if e := check433(x, p+"/equals"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["id"]; ok {
+			if e := check434(x, p+"/id"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["to"]; ok {
+			if e := check436(x, p+"/to"); e != nil {
+				return e
+			}
+		}
+		for k := range m {
+			if !in(k, jsonValue("[\"equals\",\"id\",\"to\"]").([]any)) {
+				return fmt.Errorf("%s/%s: unknown field", p, k)
+			}
+		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -8406,20 +8470,14 @@ func check432(v any, p string) error {
 	return nil
 }
 func check433(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	if !hasType(v, jsonValue("[\"string\",\"number\",\"boolean\",\"null\"]")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("[\"string\",\"number\",\"boolean\",\"null\"]"))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
 	}
 	return nil
 }
@@ -8454,6 +8512,108 @@ func check435(v any, p string) error {
 	return nil
 }
 func check436(v any, p string) error {
+	if e := check437(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check437(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check438(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check439(v any, p string) error {
+	if e := check440(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check440(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check441(v any, p string) error {
+	if e := check442(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check442(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check443(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -8468,7 +8628,7 @@ func check436(v any, p string) error {
 	}
 	return nil
 }
-func check437(v any, p string) error {
+func check444(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -8478,15 +8638,15 @@ func check437(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check438(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check445(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check438(v any, p string) error {
-	if e := check439(v, p); e != nil {
+func check445(v any, p string) error {
+	if e := check446(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -8497,7 +8657,7 @@ func check438(v any, p string) error {
 	}
 	return nil
 }
-func check439(v any, p string) error {
+func check446(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8513,17 +8673,17 @@ func check439(v any, p string) error {
 			return fmt.Errorf("%s: missing required field triggers", p)
 		}
 		if x, ok := m["agentId"]; ok {
-			if e := check440(x, p+"/agentId"); e != nil {
+			if e := check447(x, p+"/agentId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxInvocationsPerRun"]; ok {
-			if e := check442(x, p+"/maxInvocationsPerRun"); e != nil {
+			if e := check449(x, p+"/maxInvocationsPerRun"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["triggers"]; ok {
-			if e := check443(x, p+"/triggers"); e != nil {
+			if e := check450(x, p+"/triggers"); e != nil {
 				return e
 			}
 		}
@@ -8538,8 +8698,8 @@ func check439(v any, p string) error {
 	}
 	return nil
 }
-func check440(v any, p string) error {
-	if e := check441(v, p); e != nil {
+func check447(v any, p string) error {
+	if e := check448(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -8550,7 +8710,7 @@ func check440(v any, p string) error {
 	}
 	return nil
 }
-func check441(v any, p string) error {
+func check448(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -8568,7 +8728,7 @@ func check441(v any, p string) error {
 	}
 	return nil
 }
-func check442(v any, p string) error {
+func check449(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -8583,7 +8743,7 @@ func check442(v any, p string) error {
 	}
 	return nil
 }
-func check443(v any, p string) error {
+func check450(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -8596,15 +8756,15 @@ func check443(v any, p string) error {
 			return fmt.Errorf("%s: requires at least 1 items", p)
 		}
 		for i, x := range a {
-			if e := check444(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check451(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check444(v any, p string) error {
-	if e := check445(v, p); e != nil {
+func check451(v any, p string) error {
+	if e := check452(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -8615,7 +8775,7 @@ func check444(v any, p string) error {
 	}
 	return nil
 }
-func check445(v any, p string) error {
+func check452(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
@@ -8624,10 +8784,10 @@ func check445(v any, p string) error {
 	}
 	{
 		matches := 0
-		if check446(v, p) == nil {
+		if check453(v, p) == nil {
 			matches++
 		}
-		if check448(v, p) == nil {
+		if check455(v, p) == nil {
 			matches++
 		}
 		if matches != 1 {
@@ -8636,7 +8796,7 @@ func check445(v any, p string) error {
 	}
 	return nil
 }
-func check446(v any, p string) error {
+func check453(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8646,7 +8806,7 @@ func check446(v any, p string) error {
 			return fmt.Errorf("%s: missing required field type", p)
 		}
 		if x, ok := m["type"]; ok {
-			if e := check447(x, p+"/type"); e != nil {
+			if e := check454(x, p+"/type"); e != nil {
 				return e
 			}
 		}
@@ -8661,7 +8821,7 @@ func check446(v any, p string) error {
 	}
 	return nil
 }
-func check447(v any, p string) error {
+func check454(v any, p string) error {
 	if !equal(v, jsonValue("\"manual\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"manual\""))
 	}
@@ -8673,7 +8833,7 @@ func check447(v any, p string) error {
 	}
 	return nil
 }
-func check448(v any, p string) error {
+func check455(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -8686,27 +8846,27 @@ func check448(v any, p string) error {
 			return fmt.Errorf("%s: missing required field event", p)
 		}
 		if x, ok := m["agentId"]; ok {
-			if e := check449(x, p+"/agentId"); e != nil {
+			if e := check456(x, p+"/agentId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["event"]; ok {
-			if e := check451(x, p+"/event"); e != nil {
+			if e := check458(x, p+"/event"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["paths"]; ok {
-			if e := check452(x, p+"/paths"); e != nil {
+			if e := check459(x, p+"/paths"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["teamId"]; ok {
-			if e := check454(x, p+"/teamId"); e != nil {
+			if e := check461(x, p+"/teamId"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["type"]; ok {
-			if e := check456(x, p+"/type"); e != nil {
+			if e := check463(x, p+"/type"); e != nil {
 				return e
 			}
 		}
@@ -8719,22 +8879,22 @@ func check448(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if e := check457(v, p); e != nil {
-		return e
-	}
 	if e := check464(v, p); e != nil {
 		return e
 	}
 	if e := check471(v, p); e != nil {
 		return e
 	}
-	if e := check479(v, p); e != nil {
+	if e := check478(v, p); e != nil {
+		return e
+	}
+	if e := check486(v, p); e != nil {
 		return e
 	}
 	return nil
 }
-func check449(v any, p string) error {
-	if e := check450(v, p); e != nil {
+func check456(v any, p string) error {
+	if e := check457(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -8745,7 +8905,7 @@ func check449(v any, p string) error {
 	}
 	return nil
 }
-func check450(v any, p string) error {
+func check457(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -8763,7 +8923,7 @@ func check450(v any, p string) error {
 	}
 	return nil
 }
-func check451(v any, p string) error {
+func check458(v any, p string) error {
 	if !in(v, jsonValue("[\"team.no-consensus\",\"agent.failed\",\"validation.failed\",\"change.touches-paths\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -8775,7 +8935,7 @@ func check451(v any, p string) error {
 	}
 	return nil
 }
-func check452(v any, p string) error {
+func check459(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -8788,14 +8948,14 @@ func check452(v any, p string) error {
 			return fmt.Errorf("%s: requires at least 1 items", p)
 		}
 		for i, x := range a {
-			if e := check453(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check460(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check453(v any, p string) error {
+func check460(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -8810,8 +8970,8 @@ func check453(v any, p string) error {
 	}
 	return nil
 }
-func check454(v any, p string) error {
-	if e := check455(v, p); e != nil {
+func check461(v any, p string) error {
+	if e := check462(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -8822,7 +8982,7 @@ func check454(v any, p string) error {
 	}
 	return nil
 }
-func check455(v any, p string) error {
+func check462(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -8840,116 +9000,12 @@ func check455(v any, p string) error {
 	}
 	return nil
 }
-func check456(v any, p string) error {
+func check463(v any, p string) error {
 	if !equal(v, jsonValue("\"event\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"event\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check457(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check458(v, p) == nil {
-		if e := check460(v, p); e != nil {
-			return e
-		}
-	} else {
-	}
-	return nil
-}
-func check458(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["event"]; !ok {
-			return fmt.Errorf("%s: missing required field event", p)
-		}
-		if x, ok := m["event"]; ok {
-			if e := check459(x, p+"/event"); e != nil {
-				return e
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check459(v any, p string) error {
-	if !equal(v, jsonValue("\"team.no-consensus\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"team.no-consensus\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check460(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["teamId"]; !ok {
-			return fmt.Errorf("%s: missing required field teamId", p)
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check461(v, p) == nil {
-		return fmt.Errorf("%s: forbidden field combination", p)
-	}
-	return nil
-}
-func check461(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	{
-		matches := 0
-		if check462(v, p) == nil {
-			matches++
-		}
-		if check463(v, p) == nil {
-			matches++
-		}
-		if matches == 0 {
-			return fmt.Errorf("%s: does not satisfy anyOf", p)
-		}
-	}
-	return nil
-}
-func check462(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["agentId"]; !ok {
-			return fmt.Errorf("%s: missing required field agentId", p)
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check463(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["paths"]; !ok {
-			return fmt.Errorf("%s: missing required field paths", p)
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -8989,8 +9045,8 @@ func check465(v any, p string) error {
 	return nil
 }
 func check466(v any, p string) error {
-	if !equal(v, jsonValue("\"agent.failed\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"agent.failed\""))
+	if !equal(v, jsonValue("\"team.no-consensus\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"team.no-consensus\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -9003,8 +9059,8 @@ func check466(v any, p string) error {
 func check467(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["agentId"]; !ok {
-			return fmt.Errorf("%s: missing required field agentId", p)
+		if _, ok := m["teamId"]; !ok {
+			return fmt.Errorf("%s: missing required field teamId", p)
 		}
 	}
 	if a, ok := v.([]any); ok {
@@ -9039,8 +9095,8 @@ func check468(v any, p string) error {
 func check469(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["teamId"]; !ok {
-			return fmt.Errorf("%s: missing required field teamId", p)
+		if _, ok := m["agentId"]; !ok {
+			return fmt.Errorf("%s: missing required field agentId", p)
 		}
 	}
 	if a, ok := v.([]any); ok {
@@ -9093,8 +9149,8 @@ func check472(v any, p string) error {
 	return nil
 }
 func check473(v any, p string) error {
-	if !equal(v, jsonValue("\"validation.failed\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"validation.failed\""))
+	if !equal(v, jsonValue("\"agent.failed\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"agent.failed\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -9107,6 +9163,9 @@ func check473(v any, p string) error {
 func check474(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
+		if _, ok := m["agentId"]; !ok {
+			return fmt.Errorf("%s: missing required field agentId", p)
+		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -9131,9 +9190,6 @@ func check475(v any, p string) error {
 		if check477(v, p) == nil {
 			matches++
 		}
-		if check478(v, p) == nil {
-			matches++
-		}
 		if matches == 0 {
 			return fmt.Errorf("%s: does not satisfy anyOf", p)
 		}
@@ -9155,8 +9211,8 @@ func check476(v any, p string) error {
 func check477(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["agentId"]; !ok {
-			return fmt.Errorf("%s: missing required field agentId", p)
+		if _, ok := m["paths"]; !ok {
+			return fmt.Errorf("%s: missing required field paths", p)
 		}
 	}
 	if a, ok := v.([]any); ok {
@@ -9167,38 +9223,26 @@ func check477(v any, p string) error {
 func check478(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["paths"]; !ok {
-			return fmt.Errorf("%s: missing required field paths", p)
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	return nil
-}
-func check479(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if check480(v, p) == nil {
-		if e := check482(v, p); e != nil {
+	if check479(v, p) == nil {
+		if e := check481(v, p); e != nil {
 			return e
 		}
 	} else {
 	}
 	return nil
 }
-func check480(v any, p string) error {
+func check479(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["event"]; !ok {
 			return fmt.Errorf("%s: missing required field event", p)
 		}
 		if x, ok := m["event"]; ok {
-			if e := check481(x, p+"/event"); e != nil {
+			if e := check480(x, p+"/event"); e != nil {
 				return e
 			}
 		}
@@ -9208,9 +9252,9 @@ func check480(v any, p string) error {
 	}
 	return nil
 }
-func check481(v any, p string) error {
-	if !equal(v, jsonValue("\"change.touches-paths\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"change.touches-paths\""))
+func check480(v any, p string) error {
+	if !equal(v, jsonValue("\"validation.failed\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"validation.failed\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -9220,22 +9264,19 @@ func check481(v any, p string) error {
 	}
 	return nil
 }
-func check482(v any, p string) error {
+func check481(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
-		if _, ok := m["paths"]; !ok {
-			return fmt.Errorf("%s: missing required field paths", p)
-		}
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
 	}
-	if check483(v, p) == nil {
+	if check482(v, p) == nil {
 		return fmt.Errorf("%s: forbidden field combination", p)
 	}
 	return nil
 }
-func check483(v any, p string) error {
+func check482(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 	}
@@ -9244,6 +9285,9 @@ func check483(v any, p string) error {
 	}
 	{
 		matches := 0
+		if check483(v, p) == nil {
+			matches++
+		}
 		if check484(v, p) == nil {
 			matches++
 		}
@@ -9256,7 +9300,7 @@ func check483(v any, p string) error {
 	}
 	return nil
 }
-func check484(v any, p string) error {
+func check483(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["teamId"]; !ok {
@@ -9268,7 +9312,7 @@ func check484(v any, p string) error {
 	}
 	return nil
 }
-func check485(v any, p string) error {
+func check484(v any, p string) error {
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if _, ok := m["agentId"]; !ok {
@@ -9280,7 +9324,123 @@ func check485(v any, p string) error {
 	}
 	return nil
 }
+func check485(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["paths"]; !ok {
+			return fmt.Errorf("%s: missing required field paths", p)
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
 func check486(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check487(v, p) == nil {
+		if e := check489(v, p); e != nil {
+			return e
+		}
+	} else {
+	}
+	return nil
+}
+func check487(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["event"]; !ok {
+			return fmt.Errorf("%s: missing required field event", p)
+		}
+		if x, ok := m["event"]; ok {
+			if e := check488(x, p+"/event"); e != nil {
+				return e
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check488(v any, p string) error {
+	if !equal(v, jsonValue("\"change.touches-paths\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"change.touches-paths\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check489(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["paths"]; !ok {
+			return fmt.Errorf("%s: missing required field paths", p)
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if check490(v, p) == nil {
+		return fmt.Errorf("%s: forbidden field combination", p)
+	}
+	return nil
+}
+func check490(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	{
+		matches := 0
+		if check491(v, p) == nil {
+			matches++
+		}
+		if check492(v, p) == nil {
+			matches++
+		}
+		if matches == 0 {
+			return fmt.Errorf("%s: does not satisfy anyOf", p)
+		}
+	}
+	return nil
+}
+func check491(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["teamId"]; !ok {
+			return fmt.Errorf("%s: missing required field teamId", p)
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check492(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["agentId"]; !ok {
+			return fmt.Errorf("%s: missing required field agentId", p)
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check493(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -9290,150 +9450,16 @@ func check486(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check487(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check494(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
-	}
-	return nil
-}
-func check487(v any, p string) error {
-	if e := check488(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check488(v any, p string) error {
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	{
-		matches := 0
-		if check489(v, p) == nil {
-			matches++
-		}
-		if check495(v, p) == nil {
-			matches++
-		}
-		if matches != 1 {
-			return fmt.Errorf("%s: does not satisfy oneOf", p)
-		}
-	}
-	return nil
-}
-func check489(v any, p string) error {
-	if !hasType(v, jsonValue("\"object\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-		if _, ok := m["type"]; !ok {
-			return fmt.Errorf("%s: missing required field type", p)
-		}
-		if _, ok := m["from"]; !ok {
-			return fmt.Errorf("%s: missing required field from", p)
-		}
-		if _, ok := m["to"]; !ok {
-			return fmt.Errorf("%s: missing required field to", p)
-		}
-		if x, ok := m["from"]; ok {
-			if e := check490(x, p+"/from"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["to"]; ok {
-			if e := check492(x, p+"/to"); e != nil {
-				return e
-			}
-		}
-		if x, ok := m["type"]; ok {
-			if e := check494(x, p+"/type"); e != nil {
-				return e
-			}
-		}
-		for k := range m {
-			if !in(k, jsonValue("[\"from\",\"to\",\"type\"]").([]any)) {
-				return fmt.Errorf("%s/%s: unknown field", p, k)
-			}
-		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check490(v any, p string) error {
-	if e := check491(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check491(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
-	}
-	return nil
-}
-func check492(v any, p string) error {
-	if e := check493(v, p); e != nil {
-		return e
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check493(v any, p string) error {
-	if !hasType(v, jsonValue("\"string\"")) {
-		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
-		return e
-	}
-	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
-		return e
 	}
 	return nil
 }
 func check494(v any, p string) error {
-	if !equal(v, jsonValue("\"delegates\"")) {
-		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"delegates\""))
+	if e := check495(v, p); e != nil {
+		return e
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
@@ -9444,6 +9470,27 @@ func check494(v any, p string) error {
 	return nil
 }
 func check495(v any, p string) error {
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	{
+		matches := 0
+		if check496(v, p) == nil {
+			matches++
+		}
+		if check502(v, p) == nil {
+			matches++
+		}
+		if matches != 1 {
+			return fmt.Errorf("%s: does not satisfy oneOf", p)
+		}
+	}
+	return nil
+}
+func check496(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9457,14 +9504,6 @@ func check495(v any, p string) error {
 		}
 		if _, ok := m["to"]; !ok {
 			return fmt.Errorf("%s: missing required field to", p)
-		}
-		if _, ok := m["direction"]; !ok {
-			return fmt.Errorf("%s: missing required field direction", p)
-		}
-		if x, ok := m["direction"]; ok {
-			if e := check496(x, p+"/direction"); e != nil {
-				return e
-			}
 		}
 		if x, ok := m["from"]; ok {
 			if e := check497(x, p+"/from"); e != nil {
@@ -9482,22 +9521,10 @@ func check495(v any, p string) error {
 			}
 		}
 		for k := range m {
-			if !in(k, jsonValue("[\"direction\",\"from\",\"to\",\"type\"]").([]any)) {
+			if !in(k, jsonValue("[\"from\",\"to\",\"type\"]").([]any)) {
 				return fmt.Errorf("%s/%s: unknown field", p, k)
 			}
 		}
-	}
-	if a, ok := v.([]any); ok {
-		_ = a
-	}
-	return nil
-}
-func check496(v any, p string) error {
-	if !in(v, jsonValue("[\"one-way\",\"two-way\"]").([]any)) {
-		return fmt.Errorf("%s: unsupported value %v", p, v)
-	}
-	if m, ok := v.(map[string]any); ok {
-		_ = m
 	}
 	if a, ok := v.([]any); ok {
 		_ = a
@@ -9565,6 +9592,139 @@ func check500(v any, p string) error {
 	return nil
 }
 func check501(v any, p string) error {
+	if !equal(v, jsonValue("\"delegates\"")) {
+		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"delegates\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check502(v any, p string) error {
+	if !hasType(v, jsonValue("\"object\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+		if _, ok := m["type"]; !ok {
+			return fmt.Errorf("%s: missing required field type", p)
+		}
+		if _, ok := m["from"]; !ok {
+			return fmt.Errorf("%s: missing required field from", p)
+		}
+		if _, ok := m["to"]; !ok {
+			return fmt.Errorf("%s: missing required field to", p)
+		}
+		if _, ok := m["direction"]; !ok {
+			return fmt.Errorf("%s: missing required field direction", p)
+		}
+		if x, ok := m["direction"]; ok {
+			if e := check503(x, p+"/direction"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["from"]; ok {
+			if e := check504(x, p+"/from"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["to"]; ok {
+			if e := check506(x, p+"/to"); e != nil {
+				return e
+			}
+		}
+		if x, ok := m["type"]; ok {
+			if e := check508(x, p+"/type"); e != nil {
+				return e
+			}
+		}
+		for k := range m {
+			if !in(k, jsonValue("[\"direction\",\"from\",\"to\",\"type\"]").([]any)) {
+				return fmt.Errorf("%s/%s: unknown field", p, k)
+			}
+		}
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check503(v any, p string) error {
+	if !in(v, jsonValue("[\"one-way\",\"two-way\"]").([]any)) {
+		return fmt.Errorf("%s: unsupported value %v", p, v)
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check504(v any, p string) error {
+	if e := check505(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check505(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check506(v any, p string) error {
+	if e := check507(v, p); e != nil {
+		return e
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	return nil
+}
+func check507(v any, p string) error {
+	if !hasType(v, jsonValue("\"string\"")) {
+		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
+	}
+	if m, ok := v.(map[string]any); ok {
+		_ = m
+	}
+	if a, ok := v.([]any); ok {
+		_ = a
+	}
+	if e := constraint(v, p, "maxLength", jsonValue("64")); e != nil {
+		return e
+	}
+	if e := constraint(v, p, "pattern", jsonValue("\"^[a-z0-9][a-z0-9._-]*$\"")); e != nil {
+		return e
+	}
+	return nil
+}
+func check508(v any, p string) error {
 	if !equal(v, jsonValue("\"communicates\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"communicates\""))
 	}
@@ -9576,7 +9736,7 @@ func check501(v any, p string) error {
 	}
 	return nil
 }
-func check502(v any, p string) error {
+func check509(v any, p string) error {
 	if !equal(v, jsonValue("1")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("1"))
 	}
@@ -9588,8 +9748,8 @@ func check502(v any, p string) error {
 	}
 	return nil
 }
-func check503(v any, p string) error {
-	if e := check504(v, p); e != nil {
+func check510(v any, p string) error {
+	if e := check511(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -9600,7 +9760,7 @@ func check503(v any, p string) error {
 	}
 	return nil
 }
-func check504(v any, p string) error {
+func check511(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9619,32 +9779,32 @@ func check504(v any, p string) error {
 			return fmt.Errorf("%s: missing required field audit", p)
 		}
 		if x, ok := m["audit"]; ok {
-			if e := check505(x, p+"/audit"); e != nil {
+			if e := check512(x, p+"/audit"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["backgroundShader"]; ok {
-			if e := check507(x, p+"/backgroundShader"); e != nil {
+			if e := check514(x, p+"/backgroundShader"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["integration"]; ok {
-			if e := check511(x, p+"/integration"); e != nil {
+			if e := check518(x, p+"/integration"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxConcurrentAgents"]; ok {
-			if e := check513(x, p+"/maxConcurrentAgents"); e != nil {
+			if e := check520(x, p+"/maxConcurrentAgents"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["sharedContext"]; ok {
-			if e := check514(x, p+"/sharedContext"); e != nil {
+			if e := check521(x, p+"/sharedContext"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["workspace"]; ok {
-			if e := check521(x, p+"/workspace"); e != nil {
+			if e := check528(x, p+"/workspace"); e != nil {
 				return e
 			}
 		}
@@ -9659,7 +9819,7 @@ func check504(v any, p string) error {
 	}
 	return nil
 }
-func check505(v any, p string) error {
+func check512(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9669,7 +9829,7 @@ func check505(v any, p string) error {
 			return fmt.Errorf("%s: missing required field retention", p)
 		}
 		if x, ok := m["retention"]; ok {
-			if e := check506(x, p+"/retention"); e != nil {
+			if e := check513(x, p+"/retention"); e != nil {
 				return e
 			}
 		}
@@ -9684,7 +9844,7 @@ func check505(v any, p string) error {
 	}
 	return nil
 }
-func check506(v any, p string) error {
+func check513(v any, p string) error {
 	if !in(v, jsonValue("[\"full-local\",\"redacted-local\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -9696,7 +9856,7 @@ func check506(v any, p string) error {
 	}
 	return nil
 }
-func check507(v any, p string) error {
+func check514(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9712,17 +9872,17 @@ func check507(v any, p string) error {
 			return fmt.Errorf("%s: missing required field glyphs", p)
 		}
 		if x, ok := m["enabled"]; ok {
-			if e := check508(x, p+"/enabled"); e != nil {
+			if e := check515(x, p+"/enabled"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["glyphs"]; ok {
-			if e := check509(x, p+"/glyphs"); e != nil {
+			if e := check516(x, p+"/glyphs"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["source"]; ok {
-			if e := check510(x, p+"/source"); e != nil {
+			if e := check517(x, p+"/source"); e != nil {
 				return e
 			}
 		}
@@ -9737,7 +9897,7 @@ func check507(v any, p string) error {
 	}
 	return nil
 }
-func check508(v any, p string) error {
+func check515(v any, p string) error {
 	if !hasType(v, jsonValue("\"boolean\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"boolean\""))
 	}
@@ -9749,7 +9909,7 @@ func check508(v any, p string) error {
 	}
 	return nil
 }
-func check509(v any, p string) error {
+func check516(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -9764,7 +9924,7 @@ func check509(v any, p string) error {
 	}
 	return nil
 }
-func check510(v any, p string) error {
+func check517(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -9782,7 +9942,7 @@ func check510(v any, p string) error {
 	}
 	return nil
 }
-func check511(v any, p string) error {
+func check518(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9792,7 +9952,7 @@ func check511(v any, p string) error {
 			return fmt.Errorf("%s: missing required field policy", p)
 		}
 		if x, ok := m["policy"]; ok {
-			if e := check512(x, p+"/policy"); e != nil {
+			if e := check519(x, p+"/policy"); e != nil {
 				return e
 			}
 		}
@@ -9807,7 +9967,7 @@ func check511(v any, p string) error {
 	}
 	return nil
 }
-func check512(v any, p string) error {
+func check519(v any, p string) error {
 	if !in(v, jsonValue("[\"human-review\",\"auto-if-clean\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -9819,7 +9979,7 @@ func check512(v any, p string) error {
 	}
 	return nil
 }
-func check513(v any, p string) error {
+func check520(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -9834,39 +9994,39 @@ func check513(v any, p string) error {
 	}
 	return nil
 }
-func check514(v any, p string) error {
+func check521(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
 	if m, ok := v.(map[string]any); ok {
 		_ = m
 		if x, ok := m["agentDeletePolicy"]; ok {
-			if e := check515(x, p+"/agentDeletePolicy"); e != nil {
+			if e := check522(x, p+"/agentDeletePolicy"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["agentWritePolicy"]; ok {
-			if e := check516(x, p+"/agentWritePolicy"); e != nil {
+			if e := check523(x, p+"/agentWritePolicy"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxEntries"]; ok {
-			if e := check517(x, p+"/maxEntries"); e != nil {
+			if e := check524(x, p+"/maxEntries"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxEntryBytes"]; ok {
-			if e := check518(x, p+"/maxEntryBytes"); e != nil {
+			if e := check525(x, p+"/maxEntryBytes"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["maxTotalBytes"]; ok {
-			if e := check519(x, p+"/maxTotalBytes"); e != nil {
+			if e := check526(x, p+"/maxTotalBytes"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["staleAfterDays"]; ok {
-			if e := check520(x, p+"/staleAfterDays"); e != nil {
+			if e := check527(x, p+"/staleAfterDays"); e != nil {
 				return e
 			}
 		}
@@ -9881,7 +10041,7 @@ func check514(v any, p string) error {
 	}
 	return nil
 }
-func check515(v any, p string) error {
+func check522(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -9893,7 +10053,7 @@ func check515(v any, p string) error {
 	}
 	return nil
 }
-func check516(v any, p string) error {
+func check523(v any, p string) error {
 	if !in(v, jsonValue("[\"auto-refuse\",\"ask-user\",\"auto-accept\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -9905,7 +10065,7 @@ func check516(v any, p string) error {
 	}
 	return nil
 }
-func check517(v any, p string) error {
+func check524(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -9920,7 +10080,7 @@ func check517(v any, p string) error {
 	}
 	return nil
 }
-func check518(v any, p string) error {
+func check525(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -9935,7 +10095,7 @@ func check518(v any, p string) error {
 	}
 	return nil
 }
-func check519(v any, p string) error {
+func check526(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -9950,7 +10110,7 @@ func check519(v any, p string) error {
 	}
 	return nil
 }
-func check520(v any, p string) error {
+func check527(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -9965,7 +10125,7 @@ func check520(v any, p string) error {
 	}
 	return nil
 }
-func check521(v any, p string) error {
+func check528(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -9975,7 +10135,7 @@ func check521(v any, p string) error {
 			return fmt.Errorf("%s: missing required field writeIsolation", p)
 		}
 		if x, ok := m["writeIsolation"]; ok {
-			if e := check522(x, p+"/writeIsolation"); e != nil {
+			if e := check529(x, p+"/writeIsolation"); e != nil {
 				return e
 			}
 		}
@@ -9990,7 +10150,7 @@ func check521(v any, p string) error {
 	}
 	return nil
 }
-func check522(v any, p string) error {
+func check529(v any, p string) error {
 	if !in(v, jsonValue("[\"git-worktree-per-task\"]").([]any)) {
 		return fmt.Errorf("%s: unsupported value %v", p, v)
 	}
@@ -10002,7 +10162,7 @@ func check522(v any, p string) error {
 	}
 	return nil
 }
-func check523(v any, p string) error {
+func check530(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -10012,15 +10172,15 @@ func check523(v any, p string) error {
 	if a, ok := v.([]any); ok {
 		_ = a
 		for i, x := range a {
-			if e := check524(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check531(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check524(v any, p string) error {
-	if e := check525(v, p); e != nil {
+func check531(v any, p string) error {
+	if e := check532(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -10031,7 +10191,7 @@ func check524(v any, p string) error {
 	}
 	return nil
 }
-func check525(v any, p string) error {
+func check532(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -10056,32 +10216,32 @@ func check525(v any, p string) error {
 			return fmt.Errorf("%s: missing required field outputContract", p)
 		}
 		if x, ok := m["consensus"]; ok {
-			if e := check526(x, p+"/consensus"); e != nil {
+			if e := check533(x, p+"/consensus"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["facilitator"]; ok {
-			if e := check529(x, p+"/facilitator"); e != nil {
+			if e := check536(x, p+"/facilitator"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["id"]; ok {
-			if e := check531(x, p+"/id"); e != nil {
+			if e := check538(x, p+"/id"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["members"]; ok {
-			if e := check533(x, p+"/members"); e != nil {
+			if e := check540(x, p+"/members"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["name"]; ok {
-			if e := check536(x, p+"/name"); e != nil {
+			if e := check543(x, p+"/name"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["outputContract"]; ok {
-			if e := check537(x, p+"/outputContract"); e != nil {
+			if e := check544(x, p+"/outputContract"); e != nil {
 				return e
 			}
 		}
@@ -10096,7 +10256,7 @@ func check525(v any, p string) error {
 	}
 	return nil
 }
-func check526(v any, p string) error {
+func check533(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -10109,12 +10269,12 @@ func check526(v any, p string) error {
 			return fmt.Errorf("%s: missing required field maxRounds", p)
 		}
 		if x, ok := m["maxRounds"]; ok {
-			if e := check527(x, p+"/maxRounds"); e != nil {
+			if e := check534(x, p+"/maxRounds"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["mode"]; ok {
-			if e := check528(x, p+"/mode"); e != nil {
+			if e := check535(x, p+"/mode"); e != nil {
 				return e
 			}
 		}
@@ -10129,7 +10289,7 @@ func check526(v any, p string) error {
 	}
 	return nil
 }
-func check527(v any, p string) error {
+func check534(v any, p string) error {
 	if !hasType(v, jsonValue("\"integer\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"integer\""))
 	}
@@ -10147,7 +10307,7 @@ func check527(v any, p string) error {
 	}
 	return nil
 }
-func check528(v any, p string) error {
+func check535(v any, p string) error {
 	if !equal(v, jsonValue("\"unanimous-deliberation\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"unanimous-deliberation\""))
 	}
@@ -10159,8 +10319,8 @@ func check528(v any, p string) error {
 	}
 	return nil
 }
-func check529(v any, p string) error {
-	if e := check530(v, p); e != nil {
+func check536(v any, p string) error {
+	if e := check537(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -10171,7 +10331,7 @@ func check529(v any, p string) error {
 	}
 	return nil
 }
-func check530(v any, p string) error {
+func check537(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -10189,8 +10349,8 @@ func check530(v any, p string) error {
 	}
 	return nil
 }
-func check531(v any, p string) error {
-	if e := check532(v, p); e != nil {
+func check538(v any, p string) error {
+	if e := check539(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -10201,7 +10361,7 @@ func check531(v any, p string) error {
 	}
 	return nil
 }
-func check532(v any, p string) error {
+func check539(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -10219,7 +10379,7 @@ func check532(v any, p string) error {
 	}
 	return nil
 }
-func check533(v any, p string) error {
+func check540(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -10239,15 +10399,15 @@ func check533(v any, p string) error {
 			}
 		}
 		for i, x := range a {
-			if e := check534(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check541(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check534(v any, p string) error {
-	if e := check535(v, p); e != nil {
+func check541(v any, p string) error {
+	if e := check542(v, p); e != nil {
 		return e
 	}
 	if m, ok := v.(map[string]any); ok {
@@ -10258,7 +10418,7 @@ func check534(v any, p string) error {
 	}
 	return nil
 }
-func check535(v any, p string) error {
+func check542(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -10276,7 +10436,7 @@ func check535(v any, p string) error {
 	}
 	return nil
 }
-func check536(v any, p string) error {
+func check543(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}
@@ -10291,7 +10451,7 @@ func check536(v any, p string) error {
 	}
 	return nil
 }
-func check537(v any, p string) error {
+func check544(v any, p string) error {
 	if !hasType(v, jsonValue("\"object\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"object\""))
 	}
@@ -10304,12 +10464,12 @@ func check537(v any, p string) error {
 			return fmt.Errorf("%s: missing required field verdicts", p)
 		}
 		if x, ok := m["format"]; ok {
-			if e := check538(x, p+"/format"); e != nil {
+			if e := check545(x, p+"/format"); e != nil {
 				return e
 			}
 		}
 		if x, ok := m["verdicts"]; ok {
-			if e := check539(x, p+"/verdicts"); e != nil {
+			if e := check546(x, p+"/verdicts"); e != nil {
 				return e
 			}
 		}
@@ -10324,7 +10484,7 @@ func check537(v any, p string) error {
 	}
 	return nil
 }
-func check538(v any, p string) error {
+func check545(v any, p string) error {
 	if !equal(v, jsonValue("\"arena.team-verdict.v1\"")) {
 		return fmt.Errorf("%s: expected constant %v", p, jsonValue("\"arena.team-verdict.v1\""))
 	}
@@ -10336,7 +10496,7 @@ func check538(v any, p string) error {
 	}
 	return nil
 }
-func check539(v any, p string) error {
+func check546(v any, p string) error {
 	if !hasType(v, jsonValue("\"array\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"array\""))
 	}
@@ -10356,14 +10516,14 @@ func check539(v any, p string) error {
 			}
 		}
 		for i, x := range a {
-			if e := check540(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
+			if e := check547(x, fmt.Sprintf("%s/%d", p, i)); e != nil {
 				return e
 			}
 		}
 	}
 	return nil
 }
-func check540(v any, p string) error {
+func check547(v any, p string) error {
 	if !hasType(v, jsonValue("\"string\"")) {
 		return fmt.Errorf("%s: expected %v", p, jsonValue("\"string\""))
 	}

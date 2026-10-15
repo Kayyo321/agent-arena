@@ -414,7 +414,18 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 			fromProvider = str(actor["provider"])
 		}
 	}
+	attachments, err := e.Project.loadAttachments(e.Run.ID, e.Run.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachmentPolicy(attachments, e.Run.Retention, []Runtime{a.Runtime}); err != nil {
+		return nil, err
+	}
+
 	task := NewPacket(e.Run.ID, "task", from, fromProvider, a.Id, a.Runtime.Provider, "", taskPayload(e.Run.Objective, workspace.Path, workspace.Base, contextParts, write), a.Runtime)
+	if len(attachments) > 0 {
+		task["payload"].(map[string]any)["attachments"] = attachments
+	}
 	if invocation != nil {
 		task["invocation"] = invocation
 		if invocation["mode"] == "team-composition" {
@@ -443,7 +454,7 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		answer, err := e.Project.Decide(ctx, e.Run, a.Id, kind, "Allow this operation in the assigned workspace?", []string{"yes", "no"}, data)
 		return answer == "yes", err
 	}
-	in := Invocation{Diagnostic: func(kind string, data map[string]any) error { _, err := e.event(a.Id, kind, data); return err }, Delivered: func() error { return e.Project.Acknowledge(e.Run, task) }, Usage: func(usage map[string]any) error {
+	in := Invocation{Attachments: attachments, AttachmentDir: e.Project.RunDir(e.Run.ID), Diagnostic: func(kind string, data map[string]any) error { _, err := e.event(a.Id, kind, data); return err }, Delivered: func() error { return e.Project.Acknowledge(e.Run, task) }, Usage: func(usage map[string]any) error {
 		_, err := e.event(a.Id, "usage.reported", map[string]any{"provider": a.Runtime.Provider, "usage": usage})
 		return err
 	}, ProjectRoot: e.Project.Root, RunID: e.Run.ID, AgentID: a.Id, Runtime: a.Runtime, Dir: workspace.Path, Write: write, Commands: Has(profile.Capabilities, "run_commands"), Schema: schema, Approve: approve, Prompt: "Role profile:\n" + string(JSON(profile)) + "\nTask envelope:\n" + string(SafeJSON(task)) + "\nAssigned workspace: " + workspace.Path + "\nReturn the requested JSON result. The packets array may contain Arena messages with to, kind, and payloadJson; use an empty array when none are needed.", Output: func(text string) error {

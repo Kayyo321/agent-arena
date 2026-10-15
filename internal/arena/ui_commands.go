@@ -8,6 +8,11 @@ import (
 )
 
 var slashHelp = []string{
+	"/paste                      Paste clipboard image or text (Ctrl+V)",
+	"/attach PATH [PATH ...]     Attach images or files (quote paths with spaces)",
+	"/attachments /detach N|all  List or remove pending attachments",
+	"Files: drop paths into an empty composer; up to 8 files, 10 MiB each, 32 MiB total.",
+	"Attachments retain exact file snapshots in full-local history. Images require Codex.",
 	"/shader DESCRIPTION         Create a background shader with the default model",
 	"/shader-save /shader-off    Apply the preview or disable the background",
 	"/help                       Commands and keyboard controls",
@@ -28,15 +33,16 @@ var slashHelp = []string{
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
 	"/quit                       Exit; preserve attached run history",
-	"↑/↓ recall messages; ←/→ move the cursor. Home/End: start/end.",
+	"↑/↓ edit multiline text (recall history on one line); Ctrl+P/N always recall.",
+	"←/→ move the cursor; Home/End move to the start/end of the current line.",
 	"Alt+←/→ move by word; Ctrl+W deletes a word; Ctrl+U/K clear before/after.",
-	"Enter sends; Alt+Enter or Ctrl+J inserts a newline. Paste supports multiple lines.",
+	"Enter sends; Shift+Enter inserts a newline. Alt+Enter/Ctrl+J work on legacy terminals.",
 	"PgUp/PgDn scroll; Ctrl+Home/End: first/latest; Alt+↑/↓ select events/changes.",
 	"Tab completes /commands. In a mini-window: Tab context/activity,",
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -60,17 +66,43 @@ func (m LiveModel) resolveAgent(name string) (string, error) {
 }
 
 func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
+	next, cmd := m.submitInput(input)
+	value := next.(LiveModel)
+	if value.Error != "" && value.Prompt == "" {
+		value.setPrompt(input, len(input))
+	}
+	return value, cmd
+}
+
+func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 	m.Prompt, m.Error = "", ""
 	text := strings.TrimSpace(input)
-	if text == "" {
+	if m.ClipboardBusy && (!strings.HasPrefix(text, "/") || strings.HasPrefix(text, "/run ")) {
+		m.Error = "Clipboard paste is still in progress; your draft is preserved"
 		return m, nil
+	}
+	if text == "" {
+		if len(m.Attachments) == 0 {
+			return m, nil
+		}
+		text, input = "Inspect the attached files.", "Inspect the attached files."
 	}
 	parts := strings.Fields(text)
 	if strings.HasPrefix(text, "/") {
 		name := strings.TrimPrefix(parts[0], "/")
 		arg := strings.TrimSpace(strings.TrimPrefix(text, parts[0]))
 		switch name {
+		case "paste":
+			cmd := m.pasteClipboard()
+			m.ClipboardBusy = true
+			return m, cmd
+		case "attach", "attachments", "detach":
+			m.attachmentCommand(name, arg)
 		case "shader", "shader-save", "shader-off":
+			if name == "shader" && len(m.Attachments) > 0 {
+				m.Error = "Shader commands accept text only; detach the files or send them as a workflow/chat message"
+				return m, nil
+			}
 			return m.shaderCommand(name, arg)
 		case "quit", "exit":
 			return m, tea.Quit
@@ -187,7 +219,7 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 			}
 			chat := m.ChatMode
 			m.ChatMode = false
-			next, cmd := m.submit(name + " " + arg)
+			next, cmd := m.submitInput(name + " " + arg)
 			value := next.(LiveModel)
 			if name != "run" {
 				value.ChatMode = chat
@@ -201,6 +233,10 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 	}
 	if m.ChatMode {
 		if m.PendingReply != nil {
+			if len(m.Attachments) > 0 {
+				m.Error = "Finish this text reply first; attachments can be sent in the next chat message"
+				return m, nil
+			}
 			m.PendingReply <- Redact(text)
 			m.PendingReply = nil
 			m.Chat = append(m.Chat, chatLine{"you", Redact(text)})
@@ -224,12 +260,22 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 			m.Error = "This observer has no setup session"
 			return m, nil
 		}
+		combined := append(append([]Attachment(nil), m.ChatAttachments...), m.Attachments...)
+		if err := attachmentPolicy(combined, m.Run.Settings.Audit.Retention, []Runtime{m.Run.Settings.DefaultModel}); err != nil {
+			m.Error = err.Error()
+			return m, nil
+		}
+		shownText := Redact(text)
+		if len(m.Attachments) > 0 {
+			shownText += "\nAttachments: " + m.attachmentSummary()
+		}
+		m.ChatAttachments, m.Attachments = combined, nil
 		m.Transcript += "\nUser: " + Redact(text)
-		m.Chat = append(m.Chat, chatLine{"you", Redact(text)})
+		m.Chat = append(m.Chat, chatLine{"you", shownText})
 		m.ChatTurns++
 		m.ChatBusy, m.Draft = true, nil
 		m.Offset = 1 << 30 // Follow the newest messages.
-		return m, m.Interview.turn(m.Transcript)
+		return m, m.Interview.turn(m.Transcript, m.ChatAttachments...)
 	}
 	if !Has([]string{"run", "pause", "resume", "cancel", "decision", "integrate"}, parts[0]) {
 		text = "run " + text
@@ -243,8 +289,23 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 		} else if m.Starting || m.Executing || m.Run.ID != "" && Has([]string{"created", "running", "paused"}, m.State.Status) {
 			m.Error = "a task is already starting or active; finish or cancel it before starting another"
 		} else {
+			retention := m.Run.Settings.Audit.Retention
+			if m.Run.Workflow.Settings.Audit.Retention == "redacted-local" {
+				retention = "redacted-local"
+			}
+			runtimes := []Runtime{}
+			for _, a := range m.Run.Workflow.Agents {
+				runtimes = append(runtimes, a.Runtime)
+			}
+			if err := attachmentPolicy(m.Attachments, retention, runtimes); err != nil {
+				m.Error = err.Error()
+				return m, nil
+			}
 			m.Starting = true
-			return m, m.Session.start(m.Run.Workflow.Id, strings.TrimSpace(strings.TrimPrefix(text, "run")))
+			attachments := m.Attachments
+			m.SendingPrompt, m.SendingAttachments = input, attachments
+			m.Attachments = nil
+			return m, m.Session.start(m.Run.Workflow.Id, strings.TrimSpace(strings.TrimPrefix(text, "run")), attachments...)
 		}
 		return m, nil
 	}

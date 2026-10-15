@@ -127,7 +127,7 @@ func (m *LiveModel) rememberPrompt(text string) {
 
 // Wrap the composer independently from the body and follow its caret. A spare
 // cell at the right keeps a trailing cursor inside the terminal after resize.
-func (m LiveModel) promptView(width, height int, color bool) ([]string, int, int) {
+func (m LiveModel) promptTextView(width, height int, color bool) ([]string, int, int) {
 	m.syncPrompt()
 	if m.Prompt == "" {
 		return []string{"> " + muted(short("memento mori", width-2), color)}, 2, 0
@@ -173,4 +173,57 @@ func (m LiveModel) promptView(width, height int, color bool) ([]string, int, int
 		visible = append(visible, prefix+rows[i])
 	}
 	return visible, min(width-1, cursorX+2), cursorY - start
+}
+
+func (m LiveModel) promptView(width, height int, color bool) ([]string, int, int) {
+	rows, x, y := m.promptTextView(width, height, color)
+	if len(m.Attachments) > 0 && height > 5 {
+		rows = append([]string{muted(short(m.attachmentSummary(), width), color)}, rows...)
+		y++
+	}
+	return rows, x, y
+}
+
+// Move through visual lines at the current terminal width, preserving graphemes.
+func (m *LiveModel) movePromptVertical(direction int) {
+	type caret struct{ pos, x, y int }
+	points := []caret{{}}
+	x, y, currentX, currentY := 0, 0, 0, 0
+	width := max(1, max(8, m.Width)-3)
+	g := uniseg.NewGraphemes(m.Prompt)
+	for g.Next() {
+		start, end := g.Positions()
+		text := g.Str()
+		w := displayWidth(text)
+		if text != "\n" && x+w > width {
+			x, y = 0, y+1
+			points[len(points)-1] = caret{start, x, y}
+		}
+		if text == "\n" {
+			x, y = 0, y+1
+		} else {
+			x += w
+		}
+		points = append(points, caret{end, x, y})
+	}
+	for _, p := range points {
+		if p.pos == m.input.cursor {
+			currentX, currentY = p.x, p.y
+			break
+		}
+	}
+	target, best, distance := currentY+direction, m.input.cursor, 1<<30
+	for _, p := range points {
+		if p.y != target {
+			continue
+		}
+		d := p.x - currentX
+		if d < 0 {
+			d = -d
+		}
+		if d < distance {
+			best, distance = p.pos, d
+		}
+	}
+	m.input.cursor = best
 }

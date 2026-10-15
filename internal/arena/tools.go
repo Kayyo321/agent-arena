@@ -14,7 +14,7 @@ func toolLoop(ctx context.Context, in Invocation, infer inference) (map[string]a
 	if in.Schema != nil {
 		in.Prompt += "\nFinal result JSON Schema: " + string(JSON(in.Schema))
 	}
-	messages := []chatMessage{{Role: "user", Content: in.Prompt + "\nUse Arena's bounded JSON tool protocol. Return exactly one JSON object each turn: {\"action\":\"complete\",\"result\":<the requested structured result>} or {\"action\":\"read_file|list_files|write_file|run_command|ask_user|send_packet\",\"arguments\":{...}}. read_file/write_file use path (relative to assigned worktree); write_file also content. list_files uses path. run_command uses executable and args array, never shell expansion. ask_user uses question. send_packet uses to, kind, payload. You have only the capabilities in the task. Never read credentials or edit .git/.arena control files. A tool error is not success."}}
+	messages := []chatMessage{{Role: "user", Content: in.Prompt + attachmentManifest(in.Attachments) + "\nUse read_attachment with path from the attachment manifest for user-supplied files.\nUse Arena's bounded JSON tool protocol. Return exactly one JSON object each turn: {\"action\":\"complete\",\"result\":<the requested structured result>} or {\"action\":\"read_attachment|read_file|list_files|write_file|run_command|ask_user|send_packet\",\"arguments\":{...}}. read_file/write_file use path (relative to assigned worktree); write_file also content. list_files uses path. run_command uses executable and args array, never shell expansion. ask_user uses question. send_packet uses to, kind, payload. You have only the capabilities in the task. Never read credentials or edit .git/.arena control files. A tool error is not success."}}
 	for turn := 0; turn < 40; turn++ {
 		text, e := infer(ctx, messages)
 		if e != nil {
@@ -39,7 +39,7 @@ func toolLoop(ctx context.Context, in Invocation, infer inference) (map[string]a
 		}
 		args, _ := reply["arguments"].(map[string]any)
 		activity := map[string]any{"type": "arenaTool", "tool": action, "status": "started"}
-		if !Has([]string{"read_file", "list_files", "write_file", "run_command", "ask_user", "send_packet"}, action) {
+		if !Has([]string{"read_attachment", "read_file", "list_files", "write_file", "run_command", "ask_user", "send_packet"}, action) {
 			activity["tool"] = "unsupported"
 		}
 		if in.Diagnostic != nil {
@@ -87,6 +87,8 @@ func toolPath(dir, rel string) (string, error) {
 }
 func performTool(ctx context.Context, in Invocation, action string, args map[string]any) (any, error) {
 	switch action {
+	case "read_attachment":
+		return attachmentContent(in.Attachments, str(args["path"]))
 	case "read_file":
 		path, e := toolPath(in.Dir, str(args["path"]))
 		if e != nil {

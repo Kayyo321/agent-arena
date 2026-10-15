@@ -100,8 +100,12 @@ After the task finishes, another `run TASK` starts a new run of that workflow.
 
 The live view has graph cards and arrows, the Git tree, teams/routers, the permanent
 control/on-call rail, required-provider readiness, events, and pending decisions.
-Ctrl+E opens event detail, Ctrl+V opens patches, Ctrl+G shows Git identities and
+Ctrl+E opens event detail, `/changes` opens patches, Ctrl+G shows Git identities and
 Ctrl+T expands team members. Arrows/PageUp/PageDown navigate; `/quit` or Ctrl+Q exits.
+Ctrl+V (or `/paste`) pastes clipboard images or text. `/attach PATH` adds files,
+`/attachments` lists them, and `/detach NUMBER|all` removes pending files. Shift+Enter
+inserts a newline (Alt+Enter/Ctrl+J on legacy terminals). The bottom bar shows only
+`/help`; see [terminal input and attachment limits](TERMINAL-UI.md#attachments-and-clipboard).
 Typing ordinary text starts a task in a loaded workflow. The prompt also accepts `run TASK`, `pause`,
 `resume`, `cancel`, `decision ID ANSWER`, and `integrate CHANGE_ID` after patch inspection. Exiting the attached run view interrupts
 its supervisor; exiting a separate `watch` only closes that observer.

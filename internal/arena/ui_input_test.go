@@ -47,8 +47,7 @@ func TestPromptEditsAtCursorWithoutSplittingGraphemes(t *testing.T) {
 func TestPromptHistoryRestoresDraftAndDoesNotExecuteRecall(t *testing.T) {
 	m := LiveModel{}
 	for _, text := range []string{"first message", "second message"} {
-		m = inputText(m, text)
-		m = inputKey(m, tea.KeyEnter, 0) // No session: records input, no inference.
+		m.rememberPrompt(text)
 	}
 	m = inputText(m, "unfinished draft")
 	m = inputKey(m, tea.KeyLeft, 0)

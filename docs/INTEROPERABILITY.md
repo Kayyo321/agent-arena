@@ -300,3 +300,21 @@ provider options. An external reader may preserve extensions without executing t
 Team verdict prose is composed in a separate read-only snapshot. Writing members'
 proposal IDs remain attached to the single team result, including no-consensus
 results, so disagreement never discards their code.
+
+## User attachments
+
+Task payloads may include an optional `attachments` array of snapshot metadata:
+`name`, `mediaType`, `size` (bytes), `sha256` and `file` (a path relative to that
+run's state directory). This is an additive field in the version 1.2 envelope.
+Original source paths and file bytes are not embedded in the envelope. Full-local
+run manifests retain the same references; invocation verifies content hashes and
+loads only that run's snapshots. Inputs remain separate from writable worktrees.
+Attachment bytes are retained exactly, outside text secret-redaction, with private
+file permissions; reduced-retention runs refuse attachments.
+
+Codex receives images as native `image` data URLs and other files as explicitly
+authorized snapshot paths. The mediated tool protocol exposes `read_attachment`
+with an exact manifest `path`; it cannot open arbitrary paths. Unsupported image
+adapters fail explicitly. The common envelope preserves metadata independently
+of these provider-specific translations. Attachments follow the workflow's existing
+handoff and cross-provider sharing policies.

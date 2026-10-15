@@ -39,11 +39,8 @@ func muted(text string, color bool) string {
 
 func promptRule(width int, color bool) string {
 	line := borders().horizontal
-	label := " /help · ↑↓ history · PgUp/PgDn scroll "
-	if !unicodeLettering() {
-		label = " /help · Up/Down history · PgUp/PgDn scroll "
-	}
-	if width < displayWidth(label)+4 {
+	label := " /help "
+	if width < displayWidth(label)+1 {
 		return muted(strings.Repeat(line, width), color)
 	}
 	return muted(line+label+strings.Repeat(line, width-displayWidth(label)-1), color)

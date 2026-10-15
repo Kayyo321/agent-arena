@@ -239,6 +239,22 @@
               "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
               "context": { "type": "array", "items": { "type": "string" } },
               "constraints": { "type": "array", "items": { "type": "string" } },
+              "attachments": {
+                "description": "Optional user-supplied, run-scoped file snapshots. Binary contents stay outside the envelope.",
+                "type": "array", "maxItems": 8,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "mediaType", "size", "sha256", "file"],
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "mediaType": { "type": "string", "minLength": 1 },
+                    "size": { "type": "integer", "minimum": 0, "maximum": 10485760 },
+                    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+                    "file": { "type": "string", "pattern": "^attachments/[a-f0-9]{64}/[^/]+$" }
+                  },
+                  "additionalProperties": false
+                }
+              },
               "files": { "type": "array", "items": { "type": "string" } },
               "expectedOutput": { "type": "array", "items": { "type": "string" } },
               "workspace": { "$ref": "#/$defs/workspace" },

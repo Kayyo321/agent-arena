@@ -1,7 +1,7 @@
 # Validation evidence
 
 Checked locally on macOS arm64 with Go 1.27.2 and Git 2.50.1 (Apple Git-155) on 2026-10-15. Readiness, contract fixtures and actual
-inference are different evidence. No project changes were pushed, published or deployed.
+inference are different evidence. The original validation snapshot was local; subsequent changes may be published through pull requests.
 
 ## Local exit checks
 
@@ -170,3 +170,25 @@ shader does not require starting a worker.
 A fresh real PTY recording on the charcoal theme produced 31 distinct frames in
 15.5 seconds, with 248 changed background cells and all 854 checked foreground
 cells unchanged. The same resize and clean-exit checks passed.
+
+## Composer and attachments
+
+Local regression coverage includes Shift+Return, visual-line navigation, grapheme
+editing, minimal `/help` footer, attachment add/remove/drop, failed-send draft
+preservation, immutable snapshots, run isolation, hash verification, count/size
+limits, retention and adapter refusals, audited workflow/interview handoffs, and
+mediated attachment reads. Codex native-image input is checked against the installed
+0.162.1 app-server's generated schema and fixture construction; no new live model
+image-inference claim is made.
+
+Native macOS tests use isolated named AppKit pasteboards to exercise PNG, TIFF
+conversion and multiline text through the actual `osascript` bridge, without
+reading or changing the user's clipboard. Linux Wayland/X11 clipboard selection
+has command-fixture coverage, not a native Linux desktop verification.
+
+`make check` (vet and race-enabled tests) and `make build` pass with the composer
+changes. A real PTY smoke test verified the minimal footer, explicit file attach,
+Shift+Return via the terminal keyboard protocol, draft-preserving Ctrl+V image
+paste using a clipboard-command fixture, removal, resizing at 60×18, 8×4 and
+120×32, and clean exit. The separate native AppKit tests above cover actual image
+extraction; the PTY test did not read the user's clipboard or invoke a model.

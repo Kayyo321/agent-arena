@@ -21,6 +21,7 @@ type uiReadinessResult struct {
 	Results  []Readiness
 }
 type LiveModel struct {
+	ClipboardBusy           bool
 	ShaderProgram           *shader.Program
 	ShaderConfig            *c.WorkflowSettingsBackgroundShader
 	ShaderError             string
@@ -30,6 +31,10 @@ type LiveModel struct {
 	ShaderBusy              bool
 	ShaderDraft             *shaderGenerated
 
+	Attachments        []Attachment
+	ChatAttachments    []Attachment
+	SendingPrompt      string
+	SendingAttachments []Attachment
 	input              promptEditor
 	GitDetail          bool
 	Project            *Project
@@ -91,6 +96,26 @@ func tickUI(runID string) tea.Cmd {
 }
 func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
+	case clipboardResult:
+		m.ClipboardBusy = false
+		if v.Err != nil {
+			m.Error = v.Err.Error()
+			return m, nil
+		}
+		m.Error = ""
+		if v.Attachment != nil {
+			items := append(append([]Attachment(nil), m.Attachments...), *v.Attachment)
+			if err := attachmentLimits(items); err != nil {
+				m.Error = err.Error()
+			} else {
+				m.Attachments = items
+			}
+		} else if v.Text != "" {
+			m.insertPrompt(v.Text)
+		} else {
+			m.Error = "Clipboard has no image or text"
+		}
+
 	case shaderTick:
 		if v.Workflow != m.Run.Workflow.Id {
 			return m, nil
@@ -247,6 +272,16 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiRunStarted:
 		m.Starting = false
 		if v.Err != nil {
+			draft := m.SendingPrompt
+			if m.Prompt != "" && draft != "" {
+				draft += "\n\n"
+			}
+			draft += m.Prompt
+			m.setPrompt(draft, len(draft))
+			m.Attachments = append(append([]Attachment(nil), m.SendingAttachments...), m.Attachments...)
+		}
+		m.SendingPrompt, m.SendingAttachments = "", nil
+		if v.Err != nil {
 			m.Error = v.Err.Error()
 		}
 		if v.Run.ID == "" {
@@ -274,7 +309,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Error = ""
 		}
 	case tea.PasteMsg:
-		m.insertPrompt(v.Content)
+		if !m.pasteAttachments(v.Content) {
+			m.insertPrompt(v.Content)
+		}
 	case tea.KeyPressMsg:
 		m.syncPrompt()
 		s := v.String()
@@ -292,8 +329,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ChatMode, m.Panel, m.Offset = false, "", 0
 			m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
 		case "ctrl+v":
-			m.showDetail("changes")
-			m.loadChangePatch()
+			cmd := m.pasteClipboard()
+			m.ClipboardBusy = true
+			return m, cmd
 		case "esc":
 			if m.PopupAgent != "" {
 				m.PopupAgent = ""
@@ -322,11 +360,21 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.PopupOffset = min(m.scrollEnd(true), m.PopupOffset+1)
 				}
+			} else if strings.Contains(m.Prompt, "\n") || displayWidth(m.Prompt) > max(1, m.Width-3) && m.Width > 0 {
+				if s == "up" {
+					m.movePromptVertical(-1)
+				} else {
+					m.movePromptVertical(1)
+				}
 			} else if s == "up" {
 				m.recallPrompt(1)
 			} else {
 				m.recallPrompt(-1)
 			}
+		case "ctrl+p":
+			m.recallPrompt(1)
+		case "ctrl+n":
+			m.recallPrompt(-1)
 		case "alt+up", "alt+down":
 			if !m.Detail && !m.ChangeDetail {
 				return m, nil
@@ -380,13 +428,22 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.PopupAgent != "" && s == "home" {
 				m.PopupOffset = 0
 			} else {
-				m.input.cursor = 0
+				if s == "ctrl+a" {
+					m.input.cursor = 0
+				} else {
+					m.input.cursor = strings.LastIndex(m.Prompt[:m.input.cursor], "\n") + 1
+				}
 			}
 		case "end":
 			if m.PopupAgent != "" {
 				m.PopupOffset = 1 << 30
 			} else {
-				m.input.cursor = len(m.Prompt)
+				end := strings.Index(m.Prompt[m.input.cursor:], "\n")
+				if end < 0 {
+					m.input.cursor = len(m.Prompt)
+				} else {
+					m.input.cursor += end
+				}
 			}
 		case "ctrl+home":
 			m.Offset = 0
@@ -481,18 +538,8 @@ func (m LiveModel) View() tea.View {
 	color := terminalColor(m.Run.Settings.Display.ColorMode)
 	lines := m.header(width, height, color)
 	body := m.bodyLines(width, color)
-	status := []string{}
-	seen := map[string]bool{}
-	for _, r := range m.Readiness {
-		if seen[r.Provider] {
-			continue
-		}
-		seen[r.Provider] = true
-		status = append(status, r.Provider+": "+r.State)
-	}
-	bottom := fmt.Sprintf("arena: %s · %s · %s · decisions: %d", m.Run.Workflow.Id, strings.Join(status, ", "), m.State.Status, len(m.Decisions))
 	prompt, cursorX, cursorY := m.promptView(width, height, color)
-	footerHeight := 2 + len(prompt)
+	footerHeight := 1 + len(prompt)
 	lines = lines[:min(len(lines), max(0, height-footerHeight-1))]
 	backgroundStart := len(lines)
 	budget := max(0, height-len(lines)-footerHeight)
@@ -504,7 +551,7 @@ func (m LiveModel) View() tea.View {
 	for len(lines) < height-footerHeight {
 		lines = append(lines, "")
 	}
-	lines = append(lines, muted(short(bottom, width), color), promptRule(width, color))
+	lines = append(lines, promptRule(width, color))
 	promptY := len(lines)
 	lines = append(lines, prompt...)
 	for i := range lines {
@@ -526,7 +573,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	} else if m.ChatMode {
 		body = append(body, m.chatBody()...)
 	} else if m.ChangeDetail {
-		body = append(body, "Review queue · Alt+↑/↓ select a change · PageUp/PageDown scroll · Ctrl+V close")
+		body = append(body, "Review queue · Alt+↑/↓ select a change · PageUp/PageDown scroll · /close to return")
 		for i, change := range m.Changes {
 			marker := " "
 			if i == m.Selected {
@@ -602,8 +649,12 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		body = append(body, "DECISION "+d.ID+" "+d.Prompt+" choices="+strings.Join(d.Choices, "/"))
 		body = append(body, "  > decision "+d.ID+" ANSWER")
 	}
-	if m.Run.ID == "" && !m.ChatMode {
-		body = append([]string{"Ready · type a task or /run TASK · /help for commands"}, body...)
+	if !m.ChatMode {
+		label := "arena: " + m.Run.Workflow.Id + " · " + m.State.Status
+		if m.Run.ID == "" {
+			label += " · type a task or /run TASK"
+		}
+		body = append([]string{label}, body...)
 	}
 	if m.Starting {
 		body = append([]string{"Starting task · checking readiness, policies and Git isolation…"}, body...)

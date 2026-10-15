@@ -42,3 +42,11 @@ The MVP requires a Git repository for multi-agent writes. Future non-Git support
 ## Implementation limits
 
 Checkpoints exclude ignored files and Arena runtime state, preserve the caller index, and refuse submodules or nested Git repositories because their independent object/index state is not yet covered. Dependent workers receive a combined pinned snapshot of prerequisite proposals; the queue records those dependencies and requires integration in that order. Worktrees and recovery refs remain local until explicitly retired or removed by the owner. Reduced retention omits packet/output bodies and compacts consumed or cancelled decision files; pending decisions temporarily retain the text needed for approval. A process crash can leave such a pending decision file for recovery. See [CLI operations](CLI.md) and [verification evidence](VALIDATION.md).
+
+User attachments are an explicit full-local input: exact file snapshots live under
+`.arena/.state/RUN/attachments/` (or `project/attachments/` for orchestrator chat),
+with private permissions and audited name/type/size/hash references. Binary files
+and attachment text are not passed through secret-redaction, since that would
+change the supplied input. These snapshots are excluded from Git checkpoints and
+remain until their containing history is removed. Reduced-retention modes refuse
+attachments. Unsent attachments live only in memory and are discarded on exit.
