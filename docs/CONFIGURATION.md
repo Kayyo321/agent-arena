@@ -6,17 +6,55 @@ For a workflow called `code-review`, the CLI creates:
 
 ```text
 .arena/
+├── settings.arena.json
 ├── code-review.arena.json
+├── context/
+│   └── code-review/entries/  # shared context when Git-tracked
 ├── .agents/
+│   ├── arena-system/
+│   │   └── arena-orchestrator.agent.json
 │   └── code-review/
 │       ├── orchestrator.agent.json
 │       ├── implementer.agent.json
 │       ├── reviewer.agent.json
 │       └── security-reviewer.agent.json
-└── .state/                  # generated per-run data; ignored by Git
+└── .state/                  # run data and local-only context; ignored by Git
 ```
 
 Users create and change workflows through Arena's guided builder. JSON is public, versioned, reviewable configuration; `.state` is mutable run data. The CLI validates the file and any referenced profiles before starting a provider process.
+
+Project-wide defaults live in `.arena/settings.arena.json`, separate from workflow-specific run policy. It selects the default model used during bootstrap and by the permanent on-call Arena orchestrator, sets coworker and data-sharing policies, and bounds agent activity. It does not silently become the model for newly requested workers. See [`../schemas/project-settings.schema.json`](../schemas/project-settings.schema.json). If `defaultModel` or a supported reasoning-effort choice is missing, `arena init` asks the user to choose before launching the setup conversation.
+
+`arena status` reports only providers required by the selected arena, including the permanent orchestrator if its provider is not already present. With no selected arena, it reports the union required by configured workflows plus the permanent orchestrator. It includes CLI/version state, sign-in readiness, skill-discovery support, selectable models and effort controls when verifiable, and the configured default model for those providers. A provider may not expose a complete subscription catalog; in that case Arena distinguishes configured choices from verified availability and does not claim broader access. It never prints credentials. `arena init` installs the skill to the documented project skill locations for supported providers that will host agents, then launches the selected default model after verifying skill discovery.
+
+The permanent project-level control agent is reserved as `arena-orchestrator`. Its profile is `.arena/.agents/arena-system/arena-orchestrator.agent.json`; it uses `defaultModel` and the `arena-orchestrator` skill. It stays on call across workflows and is not the user-selected head agent in any one workflow.
+
+## Project policies and limits
+
+Project policies govern agent-initiated control-plane actions. In particular, `approvalPolicies.arena-subagent-modification-inquiry` is one of:
+
+- `auto-refuse`: reject coworker requests made by workflow agents and journal the reason.
+- `ask-user`: show the requested role, objective, provider/model/effort, permissions, and reason; wait for the user's decision.
+- `auto-accept`: accept a complete request when its provider is available and it fits configured limits.
+
+This policy does not change how Arena handles a setup request made directly by the user. The setup flow must ask the user for missing required choices in every policy mode. `auto-accept` never invents a provider, model, or reasoning effort. Under `auto-refuse`, an incomplete workflow-agent request is recorded as refused without asking the user; a direct user request still receives clarification.
+
+Other useful settings include:
+
+- `approvalPolicies.agent-workflow-edit`: `auto-refuse`, `ask-user`, or `auto-accept` for graph edits proposed by agents.
+- `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers.
+- `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode.
+- `approvalPolicies.change-integration`: `human-review` or `auto-if-clean` for eligible patches.
+- `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.
+- `limits.maxConcurrentAgents`, `maxTeamRounds`, `maxOnCallInvocationsPerRun`, `maxCoworkerAdditionsPerRun`, and `maxAgentRunMinutes` bound parallelism, deliberation, escalations, config growth, and execution time.
+- `context.defaultHandoffScope` and `context.maxFilesPerHandoff` bound what Arena forwards to provider sessions.
+- `sharedContext.storage` chooses Git-tracked project files or persistent local-only entries. `agentWritePolicy` controls agent additions/revisions, `agentDeletePolicy` controls archive requests, and entry/total limits bound the store. Stale entries are marked for review rather than deleted.
+- `display.colorMode`, `display.animation`, `display.gitTree`, and `display.asciiTitle` control presentation while the terminal layout continues to adapt to available space.
+- `audit.retention`, `audit.redactSecrets`, and `audit.processOutput` control local message/output retention. Secret redaction is best-effort.
+
+The TUI should show the effective policy before a run, coworker change, or persistent-context mutation. Effective limits use the stricter project and workflow value; workflow-level settings can be stricter but cannot raise a project cap or override a project-level refusal. `settings.sharedContext` in a workflow may lower entry/size caps or tighten write/archive policies; storage remains project-wide. The same rule applies to integration and audit retention. See [Shared context](SHARED-CONTEXT.md) and [Terminal interface](TERMINAL-UI.md).
+
+When creating settings, the CLI initializes shared context as Git-tracked, accepts bounded agent additions/revisions, asks before agent archive requests, and marks entries stale after 180 days without verification. It initializes display to automatic color and animation, a visible Git tree, and the small dotted title at the upper right. Existing settings that omit these optional blocks use the same defaults until the user edits them.
 
 ## Workflow file
 
@@ -29,11 +67,14 @@ Core fields:
 - `headAgent`: the node that receives the user's task and coordinates completion.
 - `agents`: path or on-call nodes with profile path and provider runtime selector. Path nodes have an integer level; on-call nodes stay outside the normal graph.
 - `teams`: composite nodes that name their member agents, facilitator, consensus policy, and output contract.
+- `decisionRouters`: deterministic blocks that inspect a structured packet field and select a conditional outgoing branch.
 - `onCall`: trigger rules for on-call agents. Rules can match a supported event or allow manual invocation.
 - `relationships`: explicit delegation and communication links. A delegation target may be an agent or a team; communication links always connect agents.
 - `settings`: concurrency, worktree, audit, and integration policy.
 
 `settings.maxConcurrentAgents` limits simultaneously running provider processes. Team members count individually, as do the head and any active on-call agents.
+
+Decision routers use `inputKind` and a JSON Pointer into the packet `payload`. Each branch matches one exact scalar value and points to an agent, team, or another router. Their branch edges count toward reachability and cycle checks. Every router declares what happens when the packet kind/field/value does not match: ask the user, stop, or route to a named fallback. Routes are deterministic; they do not ask an LLM to infer a branch from prose. Router IDs share the workflow node namespace, but routers are not agents, team members, or on-call targets. Incoming work uses a `delegates` relationship; conditional outgoing edges are defined by the router's route table. Peer communication links remain agent-to-agent.
 
 Levels group path nodes visually. Relationships define ordinary task flow and peer message permissions. A team is addressed as one graph node; its members run inside the team boundary at their shared level. Team members cannot be the head or endpoints in ordinary relationships, so a member is never assigned both directly and through its team. The delegation graph must be acyclic. Agent and team IDs share one unique namespace. Every referenced agent, team, and profile must exist exactly once. On-call agents cannot appear in relationships or teams.
 
@@ -51,13 +92,46 @@ The first authoring flow should ask which cases deserve a specialist call and su
 
 ## Agent profile
 
-Profiles live under `.arena/.agents/<workflow-id>/` and describe the role's objective, instructions, capabilities, and constraints. They do not contain credentials. See [`../schemas/agent.schema.json`](../schemas/agent.schema.json).
+Workflow profiles live under `.arena/.agents/<workflow-id>/` and describe the role's objective, instructions, capabilities, and constraints. The reserved project control profile lives at `.arena/.agents/arena-system/arena-orchestrator.agent.json`. Profiles do not contain credentials. See [`../schemas/agent.schema.json`](../schemas/agent.schema.json).
 
 The CLI may offer built-in roles and custom role prompts. Editing a profile through the TUI should create a normal reviewable file change.
+
+Profiles with `role: "review"` must declare `reviewContract` with `format: "arena.review-verdict.v1"` and the stable outcomes `Approved`, `ChangesRequested`, `Deny`, and `NeedsMoreInformation`. Reviewer messages use the matching `review-result` protocol kind, with evidence, severity, open questions, and a next action. A team of reviewers uses these outcomes in its team contract.
 
 ## Provider runtime values
 
 `provider` chooses an installed adapter. `model` and optional `reasoningEffort` are passed through according to that adapter's documented interface. Arena does not maintain a fictional universal effort scale. Adapter metadata describes which options are supported and what they mean locally.
+
+For same-machine local inference, use `provider: "local"` and set `options.backend` to `ollama`, `lm-studio`, `llama.cpp`, `vllm`, or `openai-compatible`. The model ID is required; `options.endpoint` may identify a loopback server when the adapter cannot discover its configured endpoint. If the backend, model, or endpoint is ambiguous or unavailable, the builder asks instead of choosing a model or server. The local adapter verifies the selected model and advertises its actual tool, streaming, and reasoning controls. Local agents use the same task envelopes, graph links, teams, context, worktree isolation, review, and rollback as other agents. Their model servers must stay on the same machine for the local adapter; a remote inference service requires a separately configured provider integration.
+
+For Gemini, use `provider: "gemini"` and explicitly select `options.authMethod` as `google-ai-studio-api-key` or `vertex-ai`. The selected model ID is still required. Arena checks the selected route without collecting or writing the key or cloud credentials into project files; credential values stay in the provider-supported environment or Google Application Default Credentials. Gemini CLI personal OAuth is not a supported Arena-managed auth path; the setup flow must guide the user through Google's documented API-key or Vertex AI setup and verify readiness. If neither route is supported by the installed Arena adapter, update Arena through its supported installer before creating a Gemini agent.
+
+Example Gemini runtime fragment (the model ID must come from the selected adapter or the user):
+
+```json
+{
+  "provider": "gemini",
+  "model": "<model-id-reported-by-the-selected-adapter>",
+  "options": {
+    "authMethod": "vertex-ai"
+  }
+}
+```
+
+Example local runtime fragment:
+
+```json
+{
+  "provider": "local",
+  "model": "<model-id-reported-by-the-selected-backend>",
+  "options": {
+    "backend": "ollama",
+    "endpoint": "http://127.0.0.1:11434"
+  }
+}
+```
+
+The placeholder model ID is intentional: Arena must use the model the local backend reports or the user selects, not substitute one.
 
 ## Example fixture
 
@@ -74,3 +148,14 @@ The CLI may offer built-in roles and custom role prompts. Editing a profile thro
 - Teams have at least two distinct path-agent members at one shared level, exactly one member facilitator, and a configured verdict contract; an agent belongs to at most one team. Team members cannot be the head or relationship endpoints.
 - On-call entries reference on-call agents exactly once, include at least one valid trigger, and enforce the per-run invocation cap. On-call agents cannot be the head, team members, or relationship endpoints.
 - A delegation edge may target a team ID. Communication edges may target only path-agent IDs. Internal team deliberation does not require normal graph edges.
+
+## Per-arena background shader
+
+New arenas have `settings.backgroundShader` (`enabled`, `source`, `glyphs`), with
+source stored in `.arena/ID.background.hlsl` next to `.arena/ID.arena.json`.
+The default is a dot grid that fades toward the screen edges. Existing arenas
+without this optional setting get the embedded default. `arena shader create ID
+"description"` uses the project default model; `set`, `default`, and `off` manage
+it without hand-editing JSON. Source and settings have recoverable transactions,
+and concurrent source changes invalidate an outstanding edit. See
+[Background Shader Creation](BACKGROUND-SHADERS.md) for commands and HLSL limits.

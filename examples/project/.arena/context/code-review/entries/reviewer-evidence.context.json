@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "reviewer-evidence",
+  "workflowId": "code-review",
+  "title": "Review findings should include file evidence",
+  "content": "Each review finding cites the affected file and the evidence supporting its severity and recommendation.",
+  "tags": ["review", "evidence"],
+  "confidence": "verified",
+  "status": "active",
+  "createdAt": "2026-10-15T12:00:00Z",
+  "updatedAt": "2026-10-15T12:00:00Z",
+  "lastVerifiedAt": "2026-10-15T12:00:00Z",
+  "createdBy": {
+    "actorId": "user",
+    "actorType": "user",
+    "provider": null
+  },
+  "source": {
+    "runId": null,
+    "taskId": null
+  },
+  "evidence": [
+    {
+      "kind": "file",
+      "reference": "docs/INTEROPERABILITY.md",
+      "note": "Reviewer verdict contract"
+    }
+  ]
+}

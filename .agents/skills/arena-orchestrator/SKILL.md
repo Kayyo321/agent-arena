@@ -1,18 +1,50 @@
 ---
 name: arena-orchestrator
-description: Create, inspect, edit, run, and remove Agent Arena workflows through the Arena CLI. Use when a user asks to manage an arena or coordinate agents across provider CLIs.
+description: Create, inspect, edit, run, and remove Agent Arena workflows through the Arena CLI. Use when a user asks to manage an arena, create its ASCII background shader, or coordinate agents across provider CLIs and local model backends.
 ---
 
 # Manage Agent Arena workflows
 
-Use this skill only for Arena workflow management. The CLI owns generated `.arena` configuration and run state; do not create or edit those files directly.
+Use this skill for Arena workflow management and Background Shader Creation. The CLI owns generated `.arena` configuration and run state; do not create or edit those files directly.
 
-1. Check whether `arena` is installed with `arena --help` and inspect the available command help before acting. CLI syntax may change; prefer the installed CLI's help over remembered examples.
-2. For a new or changed workflow, gather only the choices the CLI cannot infer: the head agent, worker roles, provider/model selectors, peer communication links, any teams and their verdict labels, on-call specialists and their trigger scenarios, and merge/review policy. Keep each provider's model and reasoning-effort values in that provider's own vocabulary.
-3. Use the CLI's guided workflow builder or management commands. Let it validate the graph and write workflow and profile files. Show the resulting graph and policy summary before starting a run.
-4. Before running, check provider readiness and the selected workspace isolation/review policy. The provider owns authentication; never ask for or copy passwords, browser cookies, or provider tokens.
-5. During a run, use Arena's live view and structured handoffs. Forward task scope, relevant findings, files, validation results, risks, and unresolved questions; do not forward hidden chain-of-thought. Treat `arena.team-verdict.v1` as the team's single result format, and preserve `no-consensus` as unresolved. Let Arena invoke on-call agents only for configured triggers or an explicit user request.
-6. Before accepting changes, inspect the run history and diff. Use Arena's rollback command for a selected change; do not use a destructive Git reset to imitate rollback.
-7. If the CLI is missing or lacks the requested operation, explain that the installed CLI does not support it yet. Do not fall back to hand-authoring generated `.arena` files.
+1. Check whether `arena` is installed with `arena --help`, inspect command help, and run `arena status`. CLI syntax may change; prefer installed help over remembered examples. If Arena itself is missing or too old to support the requested operation, guide the user through the supported installation/update path, then re-check. Never hand-author generated `.arena` files as a substitute for a missing Arena feature.
+2. Treat missing prerequisites as setup work, not as the end of the request. For a requested provider agent (including Codex, Claude Code, and Gemini), inspect readiness for that provider. If the CLI/backend or Arena adapter is missing or too old, guide the user through its official installation/update path, then re-run `arena status`. If it is signed out, use only an authentication path explicitly supported for Arena's integration; start that provider-owned flow and let the user complete it directly. Re-run `arena status` to verify the CLI, compatible account/auth path, selected model, and supported options, then continue with the requested arena change. Never ask for, read, or copy passwords, browser cookies, or provider tokens. For Gemini, do not use or piggyback on Gemini CLI's personal Google OAuth session: ask whether to use the supported API-key or Vertex AI route, guide setup using Google's official instructions, and verify it with `arena status`. Do not imply that a consumer subscription is usable through Arena unless the current official integration terms explicitly allow it. If no approved adapter/auth path exists, state what is missing and finish any independent setup guidance without creating a non-runnable agent.
+3. For a local model agent, ask which supported backend and model the user wants when either is unspecified. Help install/start that backend using its official instructions, confirm the selected model is available, and re-run `arena status`. Do not substitute a model, endpoint, or backend without the user's choice. Local endpoints must meet Arena's same-machine adapter requirements.
+4. Decision routers are built-in graph blocks and need no model provider. If the requested router is incomplete, ask for its input packet kind, payload field, exact branch values and targets, and fallback behavior. If the installed Arena version lacks router support, guide the user through updating Arena, verify support, then insert the configured router and validate the arena.
+5. For `arena init`, check project settings and readiness first. If the default provider, model, or a supported reasoning-effort choice is missing, ask the user before launching the setup conversation. Do not select a default on their behalf. The project default is for bootstrap and the permanent control agent; do not apply it to new workers unless the user explicitly asks.
+6. For a new or changed workflow, gather the required choices the CLI cannot infer: head agent, worker roles, provider, model, reasoning effort when supported, local backend when applicable, peer links, teams and verdict labels, decision-router rules, on-call triggers, and merge/review policy. Ask for every missing required choice; do not invent a model, effort, provider, backend, role, trigger, or policy. If an adapter does not support an effort control, say so and omit that field. Routers branch only on structured packet fields, never a model's interpretation of free-form text.
+7. Once all requested prerequisites are ready, continue the original task: use the CLI's guided builder or management commands, validate the graph, insert/update the requested nodes, and show the resulting graph and policy summary. Do not stop after reporting that setup succeeded.
+8. Before running, check provider readiness and the selected workspace isolation/review policy. During a run, use Arena's live view and structured handoffs. Forward task scope, relevant findings, files, validation results, risks, and unresolved questions; do not forward hidden chain-of-thought. Preserve `no-consensus` as unresolved and use the standard review verdict outcomes.
+9. If an agent needs a coworker, submit a structured request through the Arena CLI to the permanent `arena-orchestrator`. Follow `arena-subagent-modification-inquiry`: refuse, ask the user, or accept a complete request within configured limits. For agent-originated requests, ask for missing choices unless `auto-refuse` declines the request; never infer a model or reasoning effort.
+10. Use the workflow's shared context for durable knowledge across runs. Search before adding duplicates; propose concise, evidence-backed entries with an honest confidence level. Follow context write/archive policies, never store secrets or hidden reasoning, and use Arena's context API rather than editing context files from an agent worktree.
+11. Before accepting changes, inspect run history and diffs. Use Arena's rollback command for selected code or context changes; do not use a destructive Git reset to imitate rollback.
 
-For team verdicts, on-call triggers, and message lifecycle rules, consult the repository's `docs/INTEROPERABILITY.md`. For merge and rollback expectations, consult `docs/AUDIT-AND-ROLLBACK.md`.
+For reviewer verdicts, team packets, decision routers, coworker requests, shared-context packets, on-call triggers, and message lifecycle rules, consult the repository's `docs/INTEROPERABILITY.md`. For local backend setup, runtime selection, context storage, and terminal readiness, read `docs/CONFIGURATION.md`, `docs/SHARED-CONTEXT.md`, and `docs/TERMINAL-UI.md`. For provider-specific install/auth setup, follow the official references linked in `docs/INTEROPERABILITY.md`; provider installation alone does not establish that its authentication mode is supported for Arena. For project policies, merge, and rollback expectations, consult `docs/AUDIT-AND-ROLLBACK.md`.
+
+## Background Shader Creation
+
+Use this built-in orchestrator skill when the user describes an ASCII background
+for an arena. Identify the target arena explicitly when several exist. Inspect
+`arena shader --help` and `arena shader show ID`, then run
+`arena shader create ID "USER DESCRIPTION"`. This command invokes the configured
+project default model, validates its HLSL profile v1 output, previews it, and saves
+through Arena's recoverable configuration transaction. Do not ask for a new model
+choice when the project already has a complete default runtime. If it is missing
+or unavailable, complete the normal runtime/readiness inquiry first.
+
+Use `--yes` when the user has authorized applying the described background; use
+`--dry-run` for a requested preview only. For supplied HLSL, use
+`arena shader set ID --input FILE` with an optional `--glyphs ' .:-=+*#%@'` ramp.
+Use `arena shader validate ID` and `arena shader preview ID` to inspect the saved
+result. `arena shader default ID` restores fading dots; `arena shader off ID`
+disables the background. Source lives at `.arena/ID.background.hlsl`, beside
+`.arena/ID.arena.json`; the CLI owns writes to both. Do not hand-edit settings.
+
+When invoked by Arena's embedded shader generator, return only the requested
+structured source and glyph ramp using the supplied HLSL profile/input contract;
+do not recursively call `arena shader create`. Use numeric timing, viewport, and
+workflow activity inputs to match the description. Preserve foreground legibility;
+Arena owns compositing and contrast. Unsupported HLSL must be revised rather than
+executed through shell commands, external compilers, or downloaded shader runners.
+A validation failure leaves the existing shader unchanged. Explain the diagnostic
+and revise the description/source before another explicitly requested generation.

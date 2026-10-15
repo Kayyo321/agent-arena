@@ -4,9 +4,9 @@
 
 Each run has a local ordered event journal under `.arena/.state/<run-id>/`. Events include a monotonic sequence, unique event ID, timestamp, run/workflow/agent IDs, event type, correlation/message IDs where relevant, and references to any files or Git objects involved.
 
-The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, change proposed/reviewed/integrated, and rollback created/completed. Team events record team start, member positions, each deliberation round, member affirmations, facilitator output, and whether the result reached unanimous consensus. On-call events record trigger matches, invocation start/completion, deduplication or cap decisions, the context sent, and the resulting agent invocation.
+The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, change proposed/reviewed/integrated, context proposed/accepted/revised/archived/restored, and rollback created/completed. Team events record team start, member positions, each deliberation round, member affirmations, facilitator output, and whether the result reached unanimous consensus. On-call events record trigger matches, invocation start/completion, deduplication or cap decisions, the context sent, and the resulting agent invocation. Coworker requests record the requesting agent, requested role and runtime, policy decision, user response when required, and the resulting config snapshot/change. Reviewer events preserve the standard verdict packet.
 
-For auditability, the journal records the workflow definition and policy snapshot or content hash used by the run, the initial repository HEAD, each agent's worktree and branch, base commits, process identity and exit status, handoff links, diffs/commit IDs, review decisions, and integration/rollback operations. An event chain may include hashes to detect accidental edits, but local hashes are not a security guarantee against an owner who can rewrite the entire state directory.
+For auditability, the journal records the project settings, default runtime, permanent orchestrator profile, workflow definition, and effective policy snapshot or content hash used by the run, along with the initial repository HEAD, each agent's worktree and branch, base commits, process identity and exit status, handoff links, diffs/commit IDs, review decisions, integration/rollback operations, and context entry IDs/versions read or proposed. Context mutations record actor, source task, policy decision, and before/after hashes. An event chain may include hashes to detect accidental edits, but local hashes are not a security guarantee against an owner who can rewrite the entire state directory.
 
 ## Message and output retention
 
@@ -33,6 +33,20 @@ Rollback accepts a run/change/event identifier and previews the affected paths, 
 
 If later work depends on the selected change, Arena records the rollback as a new event and preserves intervening work. It does not erase the journal, rewrite published history, force-push, or reset a user's branch. A rollback can itself be reverted by selecting the rollback event.
 
+Context rollback restores a prior entry version or active/archive state as a new recorded event. It never removes the proposal, approval decision, or previous content from the journal. Git-tracked context is also recoverable through normal Git history; local-only context uses Arena checkpoints and local journal history. See [Shared context](SHARED-CONTEXT.md).
+
 ## Non-Git workspaces
 
 The MVP requires a Git repository for multi-agent writes. Future non-Git support would need a complete filesystem snapshot and restore design for edits, renames, deletes, permissions, and binary files before it can promise equivalent rollback.
+
+## Implementation limits
+
+Checkpoints exclude ignored files and Arena runtime state, preserve the caller index, and refuse submodules or nested Git repositories because their independent object/index state is not yet covered. Dependent workers receive a combined pinned snapshot of prerequisite proposals; the queue records those dependencies and requires integration in that order. Worktrees and recovery refs remain local until explicitly retired or removed by the owner. Reduced retention omits packet/output bodies and compacts consumed or cancelled decision files; pending decisions temporarily retain the text needed for approval. A process crash can leave such a pending decision file for recovery. See [CLI operations](CLI.md) and [verification evidence](VALIDATION.md).
+
+User attachments are an explicit full-local input: exact file snapshots live under
+`.arena/.state/RUN/attachments/` (or `project/attachments/` for orchestrator chat),
+with private permissions and audited name/type/size/hash references. Binary files
+and attachment text are not passed through secret-redaction, since that would
+change the supplied input. These snapshots are excluded from Git checkpoints and
+remain until their containing history is removed. Reduced-retention modes refuse
+attachments. Unsent attachments live only in memory and are discarded on exit.

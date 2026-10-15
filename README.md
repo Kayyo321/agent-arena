@@ -1,76 +1,154 @@
 # Agent Arena
 
-Agent Arena is a planned local-first CLI for composing coding and research agents from different providers into one observable workflow. Arena coordinates the work around the provider CLIs users already run, carries messages between them, isolates code changes, and keeps a local history that people can inspect and roll back.
+Agent Arena is a local-first CLI for coordinating coding and research agents across
+provider integrations and same-machine model backends. It generates workflow and
+agent files, routes versioned packets, isolates writing agents in Git worktrees,
+and keeps a local history with reviewable integration and reversible rollback.
 
-This repository currently contains the product and interoperability foundation. The CLI is not implemented yet.
+The Go implementation includes workflow authoring, the permanent project control
+agent, teams, reviewers, deterministic routers, on-call agents, workflow context,
+and a Bubble Tea terminal interface. A real Codex read-only workflow has passed.
+**Live multi-provider verification is pending a second approved route.** Other
+adapters have contract coverage; that coverage does not establish live readiness.
+See [roadmap and exit checks](docs/ROADMAP.md) and [validation evidence](docs/VALIDATION.md).
 
-## Product goals
+## Build and install
 
-- Define an arena once and let the CLI create and maintain its files.
-- Show the workflow as a live graph: delegated work, peer messages, progress, and failures.
-- Run teams through bounded deliberation and return one recognizable verdict packet, preserving unresolved disagreement.
-- Keep specialist agents off the ordinary path and invoke them for configured events or manual escalation.
-- Let agents from different providers exchange a stable handoff format.
-- Give each writing agent an isolated Git worktree and control how its changes enter the project.
-- Keep a local audit trail and make rollback an explicit, reviewable operation.
-- Use provider-approved authentication and usage paths. Arena must not collect passwords, scrape browser sessions, copy provider tokens, pool subscriptions, or bypass usage limits.
+Supported targets are macOS and Linux on arm64/amd64, including Linux under WSL2.
+Packaged executables require no language runtime. Git and the selected provider
+CLI or model backend remain prerequisites. Building from source uses the Go
+toolchain selected by `go.mod` (Go 1.27.2 in CI).
 
-See [Product brief](docs/PRODUCT.md), [Architecture](docs/ARCHITECTURE.md), [Interoperability and handoffs](docs/INTEROPERABILITY.md), [Audit and rollback](docs/AUDIT-AND-ROLLBACK.md), and the [Roadmap](docs/ROADMAP.md).
+```sh
+make build
+./bin/arena --help
+make install PREFIX="$HOME/.local"
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-## Intended project files
+From an extracted standalone archive, install the executable directly:
 
-The CLI owns this generated layout; users should not need to author it by hand:
+```sh
+mkdir -p "$HOME/.local/bin"
+install -m 755 arena "$HOME/.local/bin/arena"
+```
+
+`make dist` builds four standalone archives, a corresponding source archive,
+checksums, provider compatibility metadata and third-party license notices under
+`dist/`. It does not upload or publish anything. Native Windows and network
+filesystems are outside this release's supported scope.
+
+## Create and run a workflow
+
+From a new directory, run `arena` (or `arena setup --project PATH`). Setup initializes
+Git when needed, asks for the project control runtime, installs its skill and starts
+the default orchestrator's conversation inside Arena's TUI. Tell it what you want
+to build; review its proposed workflow and use `/save` to create it and open the
+graph. Codex stays in the background. Once a workflow exists, `arena` opens
+its graph instead. Setup does not choose worker runtimes on your behalf.
+
+To use the direct guided builder inside an existing Git repository:
+
+```sh
+arena init --no-bootstrap
+arena workflow create development
+arena workflow validate development
+arena status --workflow development
+arena
+```
+
+Running `arena` opens the graph TUI. It automatically opens the sole arena in the
+current project, or asks you to choose when several exist. Opening a graph starts
+no task. Enter `run TASK` in its prompt to start an attached run. Use
+`arena --workflow development` to select one explicitly, or
+`arena run development 'Describe the task and acceptance criteria'` to start directly.
+
+Init asks for the exact default provider, model and supported effort, installs the
+shared skill, and starts Arena's embedded setup conversation. That runtime
+belongs to the permanent `arena-orchestrator`; each worker requires its own explicit
+runtime choice. The guided builder authors agents, links, teams, router branches,
+on-call rules and policy, then previews and validates before saving. Commit the
+initial repository state before running workers.
+
+For automation, `init --no-bootstrap --yes` and `workflow create` accept explicit
+runtime flags. `--input` is an optional schema-backed builder request. Users do not
+need to hand-author generated `.arena` configuration. Full command syntax and
+recovery procedures are in the [CLI guide](docs/CLI.md).
+
+```sh
+arena watch RUN_ID
+arena history RUN_ID --json
+arena changes RUN_ID
+arena changes RUN_ID CHANGE_ID
+arena integrate RUN_ID CHANGE_ID
+arena rollback RUN_ID CHANGE_ID
+arena context search development 'project convention'
+```
+
+Writing workers get isolated worktrees; downstream workers receive pinned snapshots
+of prerequisite proposals. Changes enter an audited review queue. Integration checks
+for conflicts and later user edits. Rollback makes a revert or a separate recovery
+worktree. It never silently resets or discards later work.
+
+The live interface shows the small purple dotted A2rena wordmark at the top right,
+the Git tree at the top left, graph, packet activity,
+teams and on-call rail, required providers, decisions and the `> memento mori` prompt.
+`/help` lists slash commands. `/view AGENT` opens a live mini-window and `/context AGENT`
+shows its role, task and workflow context. `/chat` talks to the control agent.
+Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, and
+`/quit` exits. Plain output is available for logs and automation.
+
+## Providers and credentials
+
+- Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
+- Claude Code uses bare programmatic mode with API-key or supported cloud authentication.
+- Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
+- Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
+
+Arena does not collect passwords, read or copy provider tokens, pool subscriptions,
+or bypass usage limits. Gemini CLI personal OAuth and Claude subscription OAuth
+are not Arena authentication routes. Readiness distinguishes interface, auth,
+advertised models and verified inference. See [provider boundaries and evidence](docs/PROVIDERS.md).
+
+## Project files and contracts
 
 ```text
 .arena/
-├── <workflow-id>.arena.json
-├── .agents/
-│   └── <workflow-id>/
-│       ├── <agent-id>.agent.json
-│       └── ...
-└── .state/                 # local run journal, checkpoints, and provider output
+  settings.arena.json       # project control agent, approval policies and limits
+  <workflow>.arena.json     # generated workflow
+  .agents/                 # generated project control and workflow profiles
+  context/                 # workflow context when configured as Git-tracked
+  locks/                   # atomic ownership locks; Git-ignored
+  .state/                  # local journal, packets, worktrees and recovery data
 ```
 
-Workflow definitions and agent profiles are ordinary reviewable project files. `.arena/.state/` is local run data and should be ignored by Git by default. It contains no provider credentials. See [Configuration format](docs/CONFIGURATION.md) and [schemas](schemas/).
+The canonical portable skill is [arena-orchestrator](.agents/skills/arena-orchestrator/SKILL.md).
+`arena skill targets` lists supported project/user host locations. Installations
+come from that single embedded source and preserve modified files through backups.
+Copilot and OpenCode are skill hosts; execution adapters are not advertised for them.
 
-## Intended CLI experience
+Product contracts: [product](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
+[interoperability](docs/INTEROPERABILITY.md), [configuration](docs/CONFIGURATION.md),
+[schemas](schemas/), [shared context](docs/SHARED-CONTEXT.md),
+[terminal UI](docs/TERMINAL-UI.md), and [audit/rollback](docs/AUDIT-AND-ROLLBACK.md).
+Implementation choices are recorded in [ADR 0001](docs/adr/0001-implementation-foundation.md).
 
-The commands below describe the proposed interface; they are not available in this repository yet.
+## Development checks
 
-```text
-arena init
-arena workflow create
-arena workflow list
-arena workflow edit <workflow-id>
-arena workflow delete <workflow-id>
-arena auth status
-arena run <workflow-id> "Implement the requested change"
-arena watch <run-id>
-arena history [<run-id>]
-arena rollback <run-id> <change-id>
-arena skill install --agent codex|claude|all
+```sh
+make generate
+make check
+make build
+make dist
 ```
 
-`arena workflow create` should launch a guided builder that asks for a head agent, workers, provider/model settings, hierarchy, peer links, optional team membership and verdict labels, on-call trigger scenarios, and workspace/review policy, then validates and writes the configuration. Arena, rather than the developer, creates profile files and keeps them in sync.
-
-## First-time agent setup
-
-The repository includes the `arena-orchestrator` skill in the shared Agent Skills format. Codex discovers it from `.agents/skills/arena-orchestrator/`. Claude Code uses the companion skill entry at `.claude/skills/arena-orchestrator/`. Other hosts can use the same `SKILL.md` after installation to a supported skill directory.
-
-The skill describes how an agent should manage arenas through the CLI. Since the CLI is not implemented yet, it will report that prerequisite rather than hand-edit generated `.arena` files.
-
-## Example
-
-See [`examples/project/.arena/`](examples/project/.arena/) for an illustrative cross-provider workflow with a deliberating review team, a single verdict packet, and an on-call escalation agent. It demonstrates the proposed file format; normal users should create equivalent files with the future CLI.
-
-## Development status
-
-The immediate product milestone is a local Git-backed CLI with two supported adapters, a live terminal graph, structured handoffs, and inspectable rollback. The full milestone breakdown and acceptance criteria are in [Roadmap](docs/ROADMAP.md).
-
-## Provider compatibility
-
-Provider authentication and automation support can change. Each adapter must be checked against the provider's current official documentation and terms before release. Arena should launch the provider's supported local CLI or integration, allow the provider to retain credential ownership, and show the user which account and usage path they selected. The initial OpenAI integration must be reviewed against [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) and the current [ChatGPT plan integration guidance](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites). Claude Code documents sign-in with Claude Pro or Max plans in its [setup guide](https://docs.anthropic.com/en/docs/claude-code/getting-started).
+Normal checks use local fixtures and temporary Git repositories, without paid
+inference. Live tests require explicit opt-in runtime choices; see
+[validation evidence](docs/VALIDATION.md). Submodules/nested Git repositories are
+refused rather than incompletely checkpointed. Worktrees and recovery objects are
+retained for inspection; audit export/import and permanent garbage collection are
+not implemented.
 
 ## License
 
-This project is licensed under GNU GPL v3.0; see [LICENSE](LICENSE).
+GNU GPL v3.0; see [LICENSE](LICENSE). Distribution archives include dependency notices.

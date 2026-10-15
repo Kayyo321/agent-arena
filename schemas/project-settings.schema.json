@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Arena project settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "permanentOnCallAgent", "approvalPolicies", "limits", "context", "audit"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "defaultModel": { "$ref": "#/$defs/runtime" },
+    "permanentOnCallAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "profile", "runtimeSource", "skill", "availability"],
+      "properties": {
+        "id": { "const": "arena-orchestrator" },
+        "profile": { "const": ".agents/arena-system/arena-orchestrator.agent.json" },
+        "runtimeSource": { "const": "defaultModel" },
+        "skill": { "const": "arena-orchestrator" },
+        "availability": { "const": "permanent-on-call" }
+      }
+    },
+    "approvalPolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arena-subagent-modification-inquiry",
+        "agent-workflow-edit",
+        "cross-provider-context-sharing",
+        "shell-command-execution",
+        "change-integration",
+        "workflow-deletion"
+      ],
+      "properties": {
+        "arena-subagent-modification-inquiry": { "enum": ["auto-refuse", "ask-user", "auto-accept"] },
+        "agent-workflow-edit": { "enum": ["auto-refuse", "ask-user", "auto-accept"] },
+        "cross-provider-context-sharing": { "enum": ["deny", "ask-user", "task-scoped"] },
+        "shell-command-execution": { "enum": ["adapter-default", "ask-user", "auto-refuse"] },
+        "change-integration": { "enum": ["human-review", "auto-if-clean"] },
+        "workflow-deletion": { "enum": ["auto-refuse", "ask-user", "auto-accept"] }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxConcurrentAgents", "maxTeamRounds", "maxOnCallInvocationsPerRun", "maxCoworkerAdditionsPerRun", "maxAgentRunMinutes", "maxRetriesPerAgent"],
+      "properties": {
+        "maxConcurrentAgents": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "maxTeamRounds": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "maxOnCallInvocationsPerRun": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "maxCoworkerAdditionsPerRun": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "maxAgentRunMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+        "maxRetriesPerAgent": { "type": "integer", "minimum": 0, "maximum": 10 }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["defaultHandoffScope", "maxFilesPerHandoff"],
+      "properties": {
+        "defaultHandoffScope": { "enum": ["task-scoped", "selected-files"] },
+        "maxFilesPerHandoff": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "sharedContext": {
+      "type": "object",
+      "description": "Durable per-workflow knowledge contributed by users and agents.",
+      "additionalProperties": false,
+      "required": ["storage", "agentWritePolicy", "agentDeletePolicy", "maxEntries", "maxEntryBytes", "maxTotalBytes", "staleAfterDays"],
+      "properties": {
+        "storage": { "enum": ["git-tracked", "local-only"], "default": "git-tracked" },
+        "agentWritePolicy": { "enum": ["auto-accept", "ask-user", "auto-refuse"], "default": "auto-accept" },
+        "agentDeletePolicy": { "enum": ["auto-refuse", "ask-user", "auto-accept"], "default": "ask-user" },
+        "maxEntries": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 500 },
+        "maxEntryBytes": { "type": "integer", "minimum": 256, "maximum": 1048576, "default": 32768 },
+        "maxTotalBytes": { "type": "integer", "minimum": 1024, "maximum": 104857600, "default": 2097152 },
+        "staleAfterDays": { "type": "integer", "minimum": 0, "maximum": 36500, "default": 180, "description": "Mark entries stale after this many days without verification; zero disables staleness marking." }
+      }
+    },
+    "display": {
+      "type": "object",
+      "description": "Terminal presentation preferences; layout still adapts to the current terminal size.",
+      "additionalProperties": false,
+      "properties": {
+        "colorMode": { "enum": ["auto", "always", "never"], "default": "auto" },
+        "animation": { "enum": ["auto", "on", "off"], "default": "auto" },
+        "gitTree": { "enum": ["show", "hide"], "default": "show" },
+        "asciiTitle": { "enum": ["show", "compact", "hide"], "default": "show" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retention", "redactSecrets", "processOutput"],
+      "properties": {
+        "retention": { "enum": ["full-local", "redacted-local", "metadata-only"] },
+        "redactSecrets": { "const": true },
+        "processOutput": { "enum": ["full", "summary", "none"] }
+      }
+    }
+  },
+  "$defs": {
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "reasoningEffort": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "object",
+          "description": "Opaque provider-specific values understood by the selected adapter.",
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "provider": { "const": "local" } }, "required": ["provider"] },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "object",
+                "required": ["backend"],
+                "properties": {
+                  "backend": { "enum": ["ollama", "lm-studio", "llama.cpp", "vllm", "openai-compatible"] },
+                  "endpoint": { "type": "string", "format": "uri" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "provider": { "const": "gemini" } }, "required": ["provider"] },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "object",
+                "required": ["authMethod"],
+                "properties": {
+                  "authMethod": { "enum": ["google-ai-studio-api-key", "vertex-ai"] }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
