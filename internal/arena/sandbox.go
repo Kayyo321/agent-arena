@@ -57,8 +57,11 @@ func SandboxedCommand(dir string, write bool, executable string, args []string) 
 			return fail(fmt.Errorf("bubblewrap is required for mediated command execution"))
 		}
 		argv := []string{"--die-with-parent", "--unshare-net", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--chdir", dir}
+		// Re-expose the assigned tree after the /tmp tmpfs, which would otherwise hide it.
 		if write {
 			argv = append(argv, "--bind", dir, dir)
+		} else {
+			argv = append(argv, "--ro-bind", dir, dir)
 		}
 		argv = append(argv, "--bind", scratch, scratch)
 		argv = append(argv, "--", path)
