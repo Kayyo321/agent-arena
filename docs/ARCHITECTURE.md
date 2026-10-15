@@ -44,7 +44,7 @@ flowchart LR
 - **Integration manager:** Reviews changes in an Arena-owned queue, checks for conflicts and stale bases, and applies a selected change according to workflow policy.
 - **Event journal:** Stores ordered state events and (according to retention settings) message bodies, process output, diffs, and checkpoint references under `.arena/.state/`.
 
-The permanent orchestrator occupies a project-level control slot in the on-call rail across every workflow. It is always available and wakes on a valid coworker request; it has no path edges. Arena displays its configured model and skill readiness. Agents submit coworker requests to the control plane; Arena applies the project `arena-subagent-modification-inquiry` policy before the orchestrator can add a profile or node. Accepted changes are a validated, reviewable config transaction with a journal entry and a reversible snapshot. `auto-accept` only applies to complete requests within project limits and supported adapter capabilities.
+The permanent orchestrator occupies a serialized project-level control slot in the on-call rail across every workflow. This slot is separate from the ordinary provider concurrency limit, so a requesting worker can await its control decision without holding the last available worker slot. Accepted coworker additions join an active run between scheduling waves; existing run roles and policy snapshots remain fixed. It is always available and wakes on a valid coworker request; it has no path edges. Arena displays its configured model and skill readiness. Agents submit coworker requests to the control plane; Arena applies the project `arena-subagent-modification-inquiry` policy before the orchestrator can add a profile or node. Accepted changes are a validated, reviewable config transaction with a journal entry and a reversible snapshot. `auto-accept` only applies to complete requests within project limits and supported adapter capabilities.
 
 ## Graph execution model
 
@@ -62,7 +62,7 @@ The graph renders each team as a single connected group node with its member age
 
 ## Team coordinator
 
-The team coordinator owns the deliberation state machine. Every round and member position is an auditable event. Member messages use the common envelope and are scoped to the team's task, not to an assumed shared provider session. The facilitator is a member of the team and composes the final `arena.team-verdict.v1` packet only after all members affirm the same configured verdict. If members still disagree at `maxRounds`, the facilitator emits a packet with `outcome: "no-consensus"`, a null verdict, the final positions, and an explicit next action. The caller must handle both outcomes.
+The team coordinator owns the deliberation state machine. Every round and member position is an auditable event. Member messages use the common envelope and are scoped to the team's task, not to an assumed shared provider session. The facilitator is a member of the team and uses a separate read-only snapshot to compose the final `arena.team-verdict.v1` packet only after all members affirm the same configured verdict. If members still disagree at `maxRounds`, the facilitator emits a packet with `outcome: "no-consensus"`, a null verdict, the final positions, and an explicit next action. The caller must handle both outcomes.
 
 Team settings define the available verdict labels and round limit. The first protocol version uses unanimous agreement; quorum or majority modes would need a separately named outcome and must not be presented as consensus.
 

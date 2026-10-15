@@ -23,7 +23,8 @@
       "level": 1,
       "runtime": {
         "provider": "claude-code",
-        "model": "sonnet"
+        "model": "sonnet",
+        "reasoningEffort": "high"
       }
     },
     {
@@ -44,7 +45,8 @@
       "level": 1,
       "runtime": {
         "provider": "claude-code",
-        "model": "sonnet"
+        "model": "sonnet",
+        "reasoningEffort": "high"
       }
     },
     {

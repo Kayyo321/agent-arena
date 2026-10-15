@@ -1,0 +1,110 @@
+# Validation evidence
+
+Checked locally on macOS arm64 with Go 1.27.2 and Git 2.50.1 (Apple Git-155) on 2026-10-15. Readiness, contract fixtures and actual
+inference are different evidence. No project changes were pushed, published or deployed.
+
+## Local exit checks
+
+| Area | Evidence |
+| --- | --- |
+| M0/M1 contracts and authoring | All repository fixtures validate; generation is reproducible. CLI create/show/validate/delete and stale-profile conflict checks pass. Setup tests cover creating Git/control configuration, bare empty-directory entry, explicit runtime requirements, cancellation, saved-control reuse and preserving staged files. Embedded-interview fixtures exercise questions, native provider question callbacks, reviewed draft saving, attached cancellation and versioned audited handoffs. Graph validation covers reachability, DAGs, teams, routers, on-call isolation, profile paths and explicit runtimes. |
+| M2 journal and context | Reopening state, detecting a corrupt mirror, preserving/repairing it, redacting secrets, context revision/archive/restore and workflow isolation pass. Reduced-retention decisions are compacted after use. |
+| M3 packets and orchestration | Fixture tests cover unanimous affirmation, no-consensus, unavailable members, writing-team artifacts/read-only composition, durable on-call caps, coworker control-slot/wave additions, peer permissions, MCP scope, routers and the local HTTP/tool contracts. They do not establish real provider readiness. |
+| M4 Git | Real temporary repositories exercise independent writer proposals, review, integration, preserving later commits, rollback and rollback-of-rollback, dirty/index/untracked checkpoints, prerequisite snapshots and isolated checkpoint restoration. |
+| M5 terminal and supervision | Width/height checks cover 140x40 down to 8x4. Bare-command tests cover sole-arena auto-open, explicit multiple-arena choice, cancellation, invalid/empty projects, subdirectory/nested-project discovery, no invented runs and attached-engine interruption (fixture invoker). Real PTY startup checks cover single/multiple/empty projects, prompt readiness refusal, resize and clean exit using metadata fixtures only. Earlier PTY checks cover init/create, Git proposal/patch pane, Git detail and resize (fixture events; no inference). Packet tests distinguish pending, delivered and failed states. Native sandbox execution checks private scratch space, read-only refusal and prevention of neighboring-tree writes. |
+| M6 skills and compatibility | Project/user target code uses one embedded canonical skill. Installation tests cover host locations, modified-file refusal and backed-up replacement. Installed CLI versions and compatibility drift are reported separately from inference. |
+
+`make check` (vet and race-enabled tests) passes. The standalone release builder cross-builds all four target executables and emits a corresponding source archive, third-party notices and SHA-256 checksums. All archive checksums, extraction, packaged file inventories and host-executable smoke checks pass. The extracted source archive rebuilds, passes generated-contract checks and installs successfully into a temporary prefix. Dependency checking with the
+Go 1.27.2-built `govulncheck` found **zero reachable vulnerabilities** after upgrading
+networking/auth transitives. It reported one advisory in a required module with no
+imported affected package; this is not a claim that every dependency is advisory-free.
+
+The compact dotted purple title is checked for top-right placement, gradient colors,
+absence of filled blocks/background/shadows, matching color/monochrome geometry,
+monochrome rendering, size limits, compact/hide preferences and non-Unicode fallback.
+A real PTY test of the new setup entry completed bare `arena` from an empty non-Git
+directory, explicit runtime answers, Git/control/skill creation, an orchestrator
+interview, a CLI-generated workflow, graph entry, resize and clean exit. Subsequent
+embedded-interview tests replace native CLI launch coverage: slash commands,
+activity/context mini-windows and profile/task/available-context separation pass.
+A PTY fixture completed chat, public activity streaming, popup context switching,
+explicit `/save` into the graph, resize and clean exit; it verified no native
+Codex screen, private reasoning sentinel or invented run. Private reasoning is
+explicitly excluded, and mediated non-Codex tool calls also emit public activity.
+
+The terminal refresh adds rounded Unicode borders with an ASCII fallback, a visible
+caret, cursor/word editing, multiline paste and a bounded session-local input history.
+Regression tests cover middle-of-message edits, combining characters and emoji,
+draft restoration after history recall, busy-input preservation, completion, view
+shortcuts, Unicode graph geometry and composer/popup resizing down to 8×4.
+A real PTY fixture exercises arrow-key editing and Delete, Up/Down recall without
+submission, the visible caret, rounded borders, setup chat, activity/context windows,
+explicit draft saving, resize and clean exit. This is terminal/fixture evidence,
+not additional live-provider verification.
+
+## Real provider evidence
+
+- **Codex:** installed `codex-cli 0.162.0-alpha.17.2`; documented app-server initialization,
+  account/model discovery and actual `gpt-6.1-sol` with `high` effort verified. The real
+  read-only test read `base.txt` from a pinned temporary worktree and returned its
+  actual `baseline` content in a validated result with retained task/result history.
+  The final live test also completed an actual Arena MCP context search through the
+  installed CLI, including its tool confirmation. A separate non-inference test
+  exercised the real CLI/MCP bridge directly.
+  The embedded setup interview also passed with `gpt-6.1-sol` / `high`: a real
+  background app-server returned a structured question for missing choices,
+  preserved the versioned/audited handoff, and saved no workflow or run. This is
+  backend inference evidence; the full terminal interaction above uses fixtures.
+- **Claude Code:** installed `2.1.224`; supported flags inspected. No approved API/cloud
+  route was available for inference. Subscription OAuth is refused for Arena.
+- **Gemini:** official Google GenAI SDK v1.75.0 builds. Live API-key/Vertex access has not
+  been exercised. Personal Gemini CLI OAuth is excluded.
+- **Local:** HTTP streaming, discovery and mediated tool contracts have fixture coverage.
+  A real backend/model has not been selected or exercised.
+
+The owner authorized Codex `gpt-6.1-sol` / `high` and will supply a second approved
+route. **M3 and the adapter-portability part of M6 remain pending that verification.**
+
+## Reproduce
+
+```sh
+make generate
+make check
+make build
+make dist
+(cd dist && shasum -a 256 -c SHA256SUMS)
+```
+
+Normal tests require no model account. Live tests spend provider usage and skip
+unless explicitly selected:
+
+```sh
+ARENA_INTEGRATION_BINARY="$PWD/bin/arena" \
+ARENA_LIVE_CODEX_MODEL='YOUR_SELECTED_MODEL' \
+ARENA_LIVE_CODEX_EFFORT='YOUR_SELECTED_EFFORT' \
+go test ./internal/arena -run '^TestLiveCodexReadOnlyWorkflow$' -v -count=1
+```
+
+The separate `TestLiveMultiProviderTeamWorkflow` additionally requires
+`ARENA_LIVE_SECOND_RUNTIME`, a JSON runtime object with the chosen provider, model,
+effort where supported, and non-secret route/backend options. Credentials remain
+in the provider-approved environment or credential manager. The test passes one
+task through a Codex head and a two-provider team, verifies real member positions
+and one valid consensus/no-consensus packet. Do not run it with an unapproved route.
+
+## Limits
+
+Linux amd64/arm64 and macOS amd64 are cross-build targets; native local execution
+here is macOS arm64. CI is configured for macOS/Linux but has not run remotely
+because nothing was pushed. WSL2 uses the Linux executable; native Windows is not
+supported. Mediated shell tools require an operational OS sandbox (sandbox-exec on
+macOS, bubblewrap on Linux); there is no unsandboxed fallback. Codex uses its native
+sandbox and supports the adapter-default shell policy, with stricter unsupported
+policies refused before launch.
+
+Submodules/nested repositories and network filesystems are refused/unsupported.
+Ignored files are excluded from checkpoints. Retained worktrees/refs need owner
+cleanup; retirement is recoverable local storage, not secure deletion. Reduced
+retention cannot replay omitted packets; pending operational decision text can
+remain after a crash. Audit export/import, native Windows, and skill-only host
+execution adapters are not implemented.

@@ -1,29 +1,112 @@
 # Terminal interface
 
+## Opening an arena
+
+Running `arena` without a command opens the terminal interface. A project with one
+configured workflow opens its graph automatically; several workflows require an
+explicit choice in a keyboard-navigable list. An empty directory or a project with
+no workflows starts `arena setup`, including Git initialization when needed.
+Setup asks for missing runtime choices and opens the configured default
+orchestrator's interview inside Arena. Codex runs as a background app-server;
+its native terminal interface is never launched. Type answers in Arena, review
+the proposed graph, and use `/save` to apply it and open the graph in the same TUI.
+`arena --workflow ID` selects one directly. Discovery uses the resolved project root
+and never inherits workflows across a nested Git project boundary.
+
+The initial graph is idle: it has no run ID or invented history. Required-provider
+readiness checks do not start inference. The prompt accepts `run TASK` to create and
+start an attached run with the normal runtime, policy and Git checks. Exiting waits
+for that supervisor to stop. Non-TTY startup prints a static graph and requires an
+explicit workflow ID when several are available.
+
 ## Screen layout
 
-The live CLI is a full-terminal view. It keeps the requested visual hierarchy: a large ASCII `A2rena` wordmark at the upper left, a boxed vertical Git worktree tree at the upper right, the live arena graph in the main viewport, and a status row plus command prompt across the bottom.
+The live CLI is a full-terminal view. A small `A2rena` wordmark sits at the upper
+right, with the Git worktree tree at the upper left. The wordmark uses dotted
+Braille lettering with a lavender-to-violet gradient and no backdrop or shadow.
+It is at most 27 columns by three rows, leaving the main viewport for the graph. The status
+row and command prompt span the bottom.
 
 ```text
-   /\     ____      ____    _____    _   _      /\   +-- git trees --------+
-  /  \   |___ \    |  _ \  | ____|  | \ | |    /  \  | ● head  main         |
- / /\ \    __) |   | |_) | |  _|    |  \| |   / /\ \ | ├─ codex  codex/task  |
-/ ____ \  / __/    |  _ <  | |___   | |\  |  / ____ \| └─ claude claude/rev  |
-/_/  \_\|_____|    |_| \_\ |_____|  |_| \_| /_/  \_\ +----------------------+
+╭─ git trees ─────────────────╮                                  A2rena
+│ base 1a2b3c4d               │                            (purple dots)
+│ ├─ builder arena/task       │
+╰────────────────────────────╯
 
-+----------------------+            +----------------------+     +--------------------+
-| HEAD · codex         |----------->| BUILDER · claude-code|---->| REVIEW · codex     |
-| gpt-6.1-sol · high   |            | sonnet-5.5 · medium  |     | ...                |
-| running              |            | running              |     | waiting             |
-+----------------------+            +----------------------+     +--------------------+
-                                               ---<!>--->
+             ╭──────────────────────────────╮
+             │ HEAD · codex                 │
+             │ gpt-6.1-sol · high            │
+             │ running                      │
+             ╰──────────────────────────────╯
+                            │
+                            ↓
+             ╭──────────────────────────────╮
+             │ BUILDER · claude-code        │
+             │ sonnet-5.5 · medium           │
+             │ waiting                      │
+             ╰──────────────────────────────╯
 
-(arena loaded: code-review) (providers: codex: good, claude-code: good) (run: running)
-+--------------------------------------------------------------------------------------+
+code-review · codex: good, claude-code: good · running · decisions: 0
+─ /help · ↑↓ history · PgUp/PgDn scroll ────────────────────────────────
 > memento mori
 ```
 
-The upper-left art spells `A2RENA` in a large ASCII face; the product name is written `A2rena` elsewhere in the interface. The upper-right tree is an independent bordered box. Agent cards use ASCII `+`, `-`, and `|` borders. The bottom prompt spans the terminal width. Its idle text is `> memento mori`; entering a command replaces the idle text. The single horizontal rule above the prompt has `+` at both ends, and the status row sits immediately above that rule.
+The dotted letters spell `A2rena`: `A2` is larger and `rena` is lowercase, smaller
+and aligned to its baseline. The compact plain-text form is `A2rena`. Narrow
+or short terminals use the compact title, aligned to the right. Non-Unicode
+locales and dumb terminals also use text. `NO_COLOR` removes color while preserving
+the same dotted lettering. The title appears in both the chooser and
+graph; `display.asciiTitle` retains its existing show/compact/hide controls.
+The Git tree, agent cards and detail windows share thin, rounded Unicode borders.
+ASCII borders remain the fallback for non-Unicode locales and dumb terminals.
+Agent ownership colors highlight card labels; the frame and footer stay quiet.
+The bottom prompt's idle text is `> memento mori`; typing replaces it. A thin
+full-width rule above the composer shows the most useful keyboard controls when
+space allows. The purple title keeps its existing placement and lettering.
+
+## Prompt commands and agent windows
+
+`/help` lists commands, and Tab completes command names and agent IDs. Ordinary
+text is an answer in the setup interview or a task in the loaded workflow. Letter
+keys remain text input; Ctrl+E/G/T/V open events/Git/teams/changes, and Ctrl+Q or
+`/quit` exits. The workflow chooser retains its arrow/j/k/Enter/q controls.
+
+The composer has a visible caret. Left/Right move one displayed character,
+including combined accents and emoji; Home/End move to the start/end of the draft.
+Alt+Left/Right (or Ctrl+Left/Right) move by word. Backspace/Delete edit at the caret,
+Ctrl+W removes the preceding word, and Ctrl+U/K clear before/after the caret.
+Up/Down recall submitted messages and commands, then restore the unfinished draft
+and its caret when returning to the newest position. History is bounded to the last
+100 distinct consecutive submissions in this UI session and is not separately
+persisted. Recalling or editing history never submits a task.
+
+Enter sends. Alt+Enter or Ctrl+J inserts a newline; Shift+Enter also works in
+terminals that report it distinctly. Bracketed paste inserts at the caret and
+preserves line breaks, stripping terminal control sequences. The composer wraps,
+grows to at most five rows, and keeps the caret visible after resizing. PageUp/
+PageDown scroll the conversation or current view; Ctrl+Home/End jump to its
+beginning/latest content. Alt+Up/Down select audit events or review changes,
+leaving ordinary arrows available for message editing and history.
+
+
+`/view AGENT_NAME` opens a centered, live mini-window with the selected agent's
+runtime, status, public progress/plan summaries, tools, and structured result.
+Agent IDs and unique display names are supported; ambiguous names require an ID.
+Tab switches the window between activity and context, PageUp/PageDown scrolls,
+Home/End selects the beginning/latest activity, and Esc closes it. Small terminals
+use a compact panel while retaining the prompt.
+
+`/context [AGENT_NAME]` opens the context side directly. It shows the role profile,
+instructions, capabilities, actual retained task envelope, and separately labelled
+shared workflow entries with provenance and confidence. Missing retained packets
+are reported as unavailable. Available entries are not presented as proof that
+they were sent to that agent. `/refresh` reloads the selected context. The control
+agent's context includes this setup conversation and its embedded skill/schema
+instructions. It does not assume access to worker sessions or another workflow.
+
+Only public activity is projected. Private reasoning items and raw thought streams
+are excluded from diagnostic callbacks, context stores and these windows. Redaction
+and retention policies apply to recorded setup messages, packets and activity.
 
 ## Arena graph
 
@@ -35,7 +118,11 @@ The graph also shows the active task or event, the selected run state, pending u
 
 ## Git tree and colors
 
-The upper-right tree lists the base branch and every active worktree/branch used by the currently loaded arena. Each writing agent has a stable color within the run; that color is reused for its node, branch line, and tree marker. Colors identify ownership only, never health or approval. The tree refreshes on worktree and branch events and marks detached, missing, conflicted, or integrated worktrees explicitly.
+The upper-left tree lists the base snapshot and active worktree/branch ownership
+for the currently loaded arena, with a count and `/git` detail view when space runs
+out. Each writing agent has a stable color within the run; that color is reused
+for its node and branch line. Colors identify ownership only, never health or
+approval. The tree refreshes from audited workspace state.
 
 The tree box may shrink or scroll when there are many worktrees. It must not hide worktree identity: selecting a row reveals full agent, branch, path, and state. Read-only agents without a dedicated worktree are shown under the base snapshot rather than as invented branches.
 

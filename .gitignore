@@ -1,2 +1,7 @@
 # Arena run data can contain prompts, tool output, and project patches.
 .arena/.state/
+.arena/locks/
+.arena-root
+/bin/
+/dist/
+.DS_Store

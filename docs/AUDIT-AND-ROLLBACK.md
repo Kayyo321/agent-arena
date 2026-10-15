@@ -38,3 +38,7 @@ Context rollback restores a prior entry version or active/archive state as a new
 ## Non-Git workspaces
 
 The MVP requires a Git repository for multi-agent writes. Future non-Git support would need a complete filesystem snapshot and restore design for edits, renames, deletes, permissions, and binary files before it can promise equivalent rollback.
+
+## Implementation limits
+
+Checkpoints exclude ignored files and Arena runtime state, preserve the caller index, and refuse submodules or nested Git repositories because their independent object/index state is not yet covered. Dependent workers receive a combined pinned snapshot of prerequisite proposals; the queue records those dependencies and requires integration in that order. Worktrees and recovery refs remain local until explicitly retired or removed by the owner. Reduced retention omits packet/output bodies and compacts consumed or cancelled decision files; pending decisions temporarily retain the text needed for approval. A process crash can leave such a pending decision file for recovery. See [CLI operations](CLI.md) and [verification evidence](VALIDATION.md).

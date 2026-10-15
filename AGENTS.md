@@ -1,6 +1,6 @@
 # Repository guidance for coding agents
 
-This repository is defining and building Agent Arena, a local-first coordinator for provider coding CLIs. The CLI is not implemented yet; do not describe planned commands as working features.
+This repository implements Agent Arena, a local-first coordinator for provider coding CLIs and approved model integrations. Build with `make build` and check with `make check`. Keep implemented behavior distinct from contract-fixture coverage and real provider verification; consult `docs/VALIDATION.md` and `docs/ROADMAP.md` before claiming an adapter is verified.
 
 ## Product invariants
 

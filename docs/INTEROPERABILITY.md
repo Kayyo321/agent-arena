@@ -285,3 +285,18 @@ Provider plans, supported integrations, and terms change. Release checks must ve
 - [Codex skills](https://developers.openai.com/codex/skills): documents repository discovery from `.agents/skills/`.
 
 These links are release-time references, not promises that a command or feature will remain stable. Adapters must be version-aware and check supported behavior.
+
+## Arena implementation extensions
+
+The implementation preserves optional outer-envelope extensions. `arenaChangeIds`
+identifies verified proposal artifacts needed by downstream workers; Arena composes
+their pinned snapshot and records integration prerequisites. `arenaSourceProviders`
+preserves provider provenance for a composite team result, so the synthetic `arena`
+sender cannot bypass cross-provider context policy. `arenaRoutingInputs` is a local
+router bundle containing the unchanged inputs selected for each downstream target.
+These fields do not replace the versioned task/result contracts or reinterpret
+provider options. An external reader may preserve extensions without executing them.
+
+Team verdict prose is composed in a separate read-only snapshot. Writing members'
+proposal IDs remain attached to the single team result, including no-consensus
+results, so disagreement never discards their code.

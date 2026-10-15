@@ -20,7 +20,7 @@ Each entry follows [`../schemas/context-entry.schema.json`](../schemas/context-e
 
 ## Agent writes
 
-Agents submit typed `context-proposal` packets through the Arena context API. They do not write context files directly from their worktree. A proposal adds, revises, or requests archiving an entry. A revision creates a new entry ID whose `supersedes` field points to the prior entry; the previous entry remains recoverable. The configured `agentWritePolicy` governs additions and revisions; `agentDeletePolicy` governs archive requests. An archive hides an entry from normal search but remains recoverable.
+Agents submit typed `context-proposal` packets through the Arena context API. They do not write context files directly from their worktree. A proposal adds, revises, or requests archiving an entry. A revision creates a new entry ID whose `supersedes` field points to the prior entry; the previous entry remains recoverable. Restoring a version archives any other active version in the same lineage. The configured `agentWritePolicy` governs additions and revisions; `agentDeletePolicy` governs archive requests. An archive hides an entry from normal search but remains recoverable.
 
 Every accepted mutation is serialized by the context manager, checked against entry/size limits, and recorded in the event journal with the actor, run/task, policy decision, entry ID, and before/after hashes. A rejected or user-pending proposal receives a `context-result` packet and does not change the store. Rollback restores a prior entry version or its active/archive state without erasing the audit event.
 
@@ -28,7 +28,7 @@ Agents should save information only when it is likely to help a later task in th
 
 ## CLI surface
 
-The planned commands are:
+The implemented commands are:
 
 ```text
 arena context list <workflow-id>

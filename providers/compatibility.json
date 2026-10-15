@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-15",
+  "platforms": [
+    "darwin/arm64",
+    "darwin/amd64",
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "adapters": [
+    {
+      "id": "codex",
+      "interface": "installed Codex CLI app-server over stdio",
+      "observedVersions": [
+        "codex-cli 0.162.0-alpha.17.2"
+      ],
+      "requiredMethods": [
+        "initialize",
+        "account/read",
+        "model/list",
+        "thread/start",
+        "turn/start",
+        "mcpServerStatus/list"
+      ],
+      "auth": "provider-owned Codex authentication",
+      "verification": "real read-only inference and Arena MCP context search; separate opt-in live tests",
+      "source": "https://learn.chatgpt.com/docs/app-server"
+    },
+    {
+      "id": "claude-code",
+      "interface": "claude --bare -p --tools '' --output-format stream-json",
+      "observedVersions": [
+        "2.1.224 (Claude Code)"
+      ],
+      "requiredFlags": [
+        "--bare",
+        "--output-format",
+        "--effort"
+      ],
+      "auth": "API key or supported cloud route; subscription OAuth refused",
+      "verification": "installed CLI and flags checked; live inference requires approved credentials",
+      "source": "https://code.claude.com/docs/en/legal-and-compliance"
+    },
+    {
+      "id": "gemini",
+      "interface": "Google GenAI Go SDK",
+      "observedVersions": [
+        "google.golang.org/genai v1.75.0"
+      ],
+      "auth": "Google AI Studio API-key or Vertex AI ADC only",
+      "verification": "SDK contract compiled; live verification requires approved credentials",
+      "source": "https://ai.google.dev/gemini-api/docs/libraries"
+    },
+    {
+      "id": "local",
+      "interface": "Ollama chat or loopback OpenAI-compatible chat completions",
+      "backends": [
+        "ollama",
+        "lm-studio",
+        "llama.cpp",
+        "vllm",
+        "openai-compatible"
+      ],
+      "observedVersions": [],
+      "auth": "same-machine loopback service; no provider credentials",
+      "verification": "HTTP contract fixtures; no real local model selected yet",
+      "source": "https://docs.ollama.com/api/chat"
+    }
+  ]
+}
