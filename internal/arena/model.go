@@ -264,6 +264,8 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 			}
 		}
 	}
+	type loopEdge struct{ router, route, to string }
+	loops := []loopEdge{}
 	for _, r := range w.DecisionRouters {
 		matches := map[string]bool{}
 		ids := map[string]bool{}
@@ -278,6 +280,21 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 			}
 			matches[k] = true
 			ids[route.Id] = true
+			if route.MaxIterations != nil && !LoopRoute(route) {
+				return fmt.Errorf("router %s route %s sets maxIterations without loop: true", r.Id, route.Id)
+			}
+			if LoopRoute(route) {
+				// A loop route is the only permitted back edge; it stays out of
+				// the cycle walk and must be capped and point at an ancestor.
+				if route.MaxIterations == nil {
+					return fmt.Errorf("router %s loop route %s needs maxIterations (1-5) so the revision loop is bounded", r.Id, route.Id)
+				}
+				if _, ok := nodes[route.To]; !ok || members[route.To] != "" || agents[route.To].Activation == "on-call" || route.To == r.Id {
+					return fmt.Errorf("router %s loop route %s must target an earlier path node, not %s", r.Id, route.Id, route.To)
+				}
+				loops = append(loops, loopEdge{r.Id, route.Id, route.To})
+				continue
+			}
 			if !targets[route.To] {
 				if e := edge(r.Id, route.To); e != nil {
 					return e
@@ -341,6 +358,11 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 	if e := walk(w.HeadAgent); e != nil {
 		return e
 	}
+	for _, l := range loops {
+		if !Has(descendants(edges, l.to), l.router) {
+			return fmt.Errorf("router %s loop route %s must return to an ancestor on its delegates path; %s does not lead to %s", l.router, l.route, l.to, l.router)
+		}
+	}
 	incoming := map[string]bool{}
 	for _, targets := range edges {
 		for _, to := range targets {
@@ -379,6 +401,22 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 		return e
 	}
 	return nil
+}
+
+// LoopRoute reports whether a router route is an explicitly capped back edge.
+func LoopRoute(r c.WorkflowDecisionRoute) bool { return r.Loop != nil && *r.Loop }
+
+// descendants lists the nodes reachable from id over forward edges, id included.
+func descendants(edges map[string][]string, id string) []string {
+	out := []string{id}
+	for i := 0; i < len(out); i++ {
+		for _, to := range edges[out[i]] {
+			if !Has(out, to) {
+				out = append(out, to)
+			}
+		}
+	}
+	return out
 }
 func isTeam(w Workflow, id string) bool {
 	for _, t := range w.Teams {

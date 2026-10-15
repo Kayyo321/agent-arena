@@ -28,6 +28,8 @@ type RunState struct {
 	Completed map[string]map[string]any `json:"completed"`
 	Pending   int                       `json:"pending"`
 	LastEvent string                    `json:"lastEvent"`
+	// Iterations is the current pass of agents a loop route restarted.
+	Iterations map[string]int `json:"iterations,omitempty"`
 }
 
 func (p *Project) CreateRun(w Workflow, profiles map[string]Profile, s Settings, objective, base string) (Run, error) {
@@ -135,6 +137,20 @@ func Reduce(events []Event) (RunState, error) {
 			s.Agents[e.AgentID] = "failed"
 		case "agent.cancelled":
 			s.Agents[e.AgentID] = "cancelled"
+		case "loop.iteration":
+			// A loop route starts the next pass of its body: the earlier
+			// pass stays in the journal, the projection shows the new one.
+			if s.Iterations == nil {
+				s.Iterations = map[string]int{}
+			}
+			for _, id := range stringSlice(e.Data["agents"]) {
+				if s.Agents[id] == "running" || s.Agents[id] == "waiting" {
+					return s, fmt.Errorf("loop restarted %s while it was %s", id, s.Agents[id])
+				}
+				delete(s.Agents, id)
+				delete(s.Completed, id)
+				s.Iterations[id] = max(1, s.Iterations[id]) + 1
+			}
 		case "decision.requested":
 			s.Pending++
 		case "decision.answered":

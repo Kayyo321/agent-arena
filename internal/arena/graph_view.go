@@ -16,6 +16,8 @@ type graphCard struct {
 type graphEdge struct {
 	from, to, label string
 	peer, both      bool
+	// loop marks a capped return edge from a router back to an earlier node.
+	loop bool
 }
 
 // Graph positions are a projection of the validated graph; layout never schedules.
@@ -71,6 +73,9 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		if status == "running" || status == "queued" {
 			status = withSpinner(spin, status)
 		}
+		if n := state.Iterations[a.Id]; n > 1 {
+			status += fmt.Sprintf(" · pass %d", n)
+		}
 		cards[a.Id] = &graphCard{id: a.Id, first: first, second: second, status: status}
 	}
 	for _, r := range w.DecisionRouters {
@@ -86,6 +91,16 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		cards[r.Id] = &graphCard{id: r.Id, first: "ROUTER · " + r.Id, second: r.InputKind + " " + r.PayloadPointer, status: status}
 		ranks[r.Id] = -1
 		for _, branch := range r.Routes {
+			if LoopRoute(branch) && branch.MaxIterations != nil {
+				used := 0
+				for _, v := range events {
+					if v.Type == "loop.iteration" && str(v.Data["routerId"]) == r.Id && str(v.Data["target"]) == branch.To {
+						used++
+					}
+				}
+				edges = append(edges, graphEdge{from: r.Id, to: branch.To, label: fmt.Sprintf("%d/%d\x00=%s", used, *branch.MaxIterations, strings.TrimSpace(string(JSON(branch.Equals)))), loop: true})
+				continue
+			}
 			edges = append(edges, graphEdge{from: r.Id, to: branch.To, label: "=" + strings.TrimSpace(string(JSON(branch.Equals)))})
 		}
 		if r.Fallback.Action == "route" {
@@ -98,7 +113,7 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 	for n := 0; n < len(cards); n++ {
 		changed := false
 		for _, edge := range edges {
-			if !edge.peer && ranks[edge.from] >= 0 && ranks[edge.to] < 0 {
+			if !edge.peer && !edge.loop && ranks[edge.from] >= 0 && ranks[edge.to] < 0 {
 				ranks[edge.to] = ranks[edge.from] + 1
 				changed = true
 			}
@@ -252,9 +267,67 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		unicode, ascii string
 	}
 	joints := []joint{}
+	gutters := 0
 	for i, edge := range edges {
 		from, to := cards[edge.from], cards[edge.to]
 		if from == nil || to == nil {
+			continue
+		}
+		if edge.loop {
+			// A return edge leaves the router's side, climbs a gutter beside
+			// the cards and re-enters its target from the side, so it never
+			// shares the downward lanes that carry ordinary delegation. It
+			// takes the side where both ends are outermost in their rows and
+			// climbs past every card between them.
+			top, bottom := min(from.y, to.y), max(from.y, to.y)
+			right, left := 0, width
+			rightClear, leftClear := true, true
+			for _, card := range cards {
+				if card.y < top || card.y > bottom {
+					continue
+				}
+				right, left = max(right, card.x+cardWidth+1+gutters), min(left, card.x-2-gutters)
+				for _, end := range []*graphCard{from, to} {
+					if card.y == end.y && card.x > end.x {
+						rightClear = false
+					}
+					if card.y == end.y && card.x < end.x {
+						leftClear = false
+					}
+				}
+			}
+			gutters++
+			gutter, x1, x2, tail, head, tailUnicode, headUnicode, headASCII := right, from.x+cardWidth, to.x+cardWidth, from.x+cardWidth-1, to.x+cardWidth, "├", "◀", "<"
+			if right >= width || !rightClear && leftClear && left >= 0 {
+				gutter, x1, x2, tail, head, tailUnicode, headUnicode, headASCII = left, from.x-1, to.x-1, from.x, to.x-1, "┤", "▶", ">"
+			}
+			if gutter < 0 || gutter >= width {
+				continue
+			}
+			y1, y2 := from.y+2, to.y+2
+			connect(cell{x1, y1}, cell{gutter, y1})
+			connect(cell{gutter, y1}, cell{gutter, y2})
+			connect(cell{gutter, y2}, cell{x2, y2})
+			joints = append(joints, joint{tail, y1, tailUnicode, "+"}, joint{head, y2, headUnicode, headASCII})
+			recordPath(edge.from, edge.to, point{x1, y1}, point{gutter, y1}, point{gutter, y2}, point{x2, y2})
+			// The count always shows; the matched value follows when it fits.
+			count, match, _ := strings.Cut(edge.label, "\x00")
+			text := "↺ " + count
+			if !unicodeLettering() {
+				text = "loop " + count
+			}
+			ly := (y1 + y2) / 2
+			if gutter > max(from.x, to.x) {
+				if room := width - gutter - 2; ansi.StringWidth(text+" "+match) <= room {
+					text += " " + match
+				}
+				labels = append(labels, label{x: min(gutter+2, max(0, width-ansi.StringWidth(text))), y: ly, text: text})
+			} else {
+				if ansi.StringWidth(text+" "+match) <= gutter-1 {
+					text += " " + match
+				}
+				labels = append(labels, label{x: max(0, gutter-1-ansi.StringWidth(text)), y: ly, text: text})
+			}
 			continue
 		}
 		x1, x2 := from.x+cardWidth/2, to.x+cardWidth/2
@@ -400,6 +473,18 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 	legend := "▼ delegates · dotted peer links · = structured branch · Ctrl+E events"
 	if !unicodeLettering() {
 		legend = "v delegates · dotted peer links · = structured branch · Ctrl+E events"
+	}
+	for _, edge := range edges {
+		if edge.loop {
+			loop := " · ↺ capped loop · Ctrl+E"
+			if !unicodeLettering() {
+				loop = " · loop: capped return · Ctrl+E"
+			}
+			if longer := strings.Replace(legend, " · Ctrl+E", loop, 1); ansi.StringWidth(longer) <= width {
+				legend = longer
+			}
+			break
+		}
 	}
 	lines = append(lines, legend)
 	return lines

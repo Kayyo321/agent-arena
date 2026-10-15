@@ -145,7 +145,7 @@ Before delivery, Arena checks that every configured member appears once, every v
 
 A decision-router block consumes a structured envelope kind and reads one JSON Pointer relative to its `payload`. It compares the resulting scalar to configured exact-match values and routes the original packet along the matching branch. For example, a router may inspect `/outcome` from `review-result` and branch on `Approved`, `ChangesRequested`, or `Deny`. It does not invoke a model or infer a value from prose.
 
-Every router has an explicit fallback for an unrecognized packet kind/value or missing field: ask the user, stop the path with a recorded unhandled outcome, or route to a configured fallback node. Workflow validation requires unique match values, valid branch targets, and an acyclic graph including all conditional branch edges. A selected branch records the source packet ID, field value, rule ID, target, and fallback decision when applicable. It passes the packet and its provenance to the target agent or team.
+Every router has an explicit fallback for an unrecognized packet kind/value or missing field: ask the user, stop the path with a recorded unhandled outcome, or route to a configured fallback node. Workflow validation requires unique match values, valid branch targets, and an acyclic graph including all conditional branch edges, except for explicitly capped loop routes (below). A selected branch records the source packet ID, field value, rule ID, target, and fallback decision when applicable. It passes the packet and its provenance to the target agent or team.
 
 Example router definition:
 
@@ -157,12 +157,20 @@ Example router definition:
   "payloadPointer": "/outcome",
   "routes": [
     { "id": "approved", "equals": "Approved", "to": "integrator" },
-    { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer" },
+    { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer", "loop": true, "maxIterations": 2 },
     { "id": "denied", "equals": "Deny", "to": "request-owner" }
   ],
   "fallback": { "action": "ask-user" }
 }
 ```
+
+### Loop routes
+
+A route with `"loop": true` is the only permitted back edge. It must set `maxIterations` (1-5) and its `to` must be an ancestor of the router: a node that reaches the router through forward edges, such as the implementer whose work the reviewers examined. Loop routes are excluded from the cycle check; every other cycle is rejected.
+
+When a loop route matches and fewer than `maxIterations` revisions have run for that router and target, Arena journals `loop.iteration` (router, route, target, iteration, cap, the restarted nodes and the feedback packet IDs) and starts the next pass of the loop body: every node reachable from the target through forward edges is reset to pending and runs again. Nodes outside the body, such as a tester that feeds the same review team, keep their earlier result. The target receives its original parent packets plus an Arena note and the routed verdict packet (for a team, the `team-result` with `memberPositions` and `dissent`). Agents in later passes get iteration-suffixed task IDs and worktrees (`implementer-iter2`) whose base includes the change IDs the verdict carried, so a revision builds on the reviewed change and records it as a dependency; the earlier proposal stays in the integration queue. The restart waits until nothing in the body is still running.
+
+When the cap is spent, the matching value is treated as unmatched: Arena journals `loop.capped` and applies the router's fallback (`ask-user` no longer offers the capped target). The terminal graph draws a loop route as a side return edge labelled with the used and allowed revisions, for example `↺ 1/2`.
 
 The `to` values refer to existing agent, team, or router IDs in the same arena. On-call agents are not valid path targets; use an event trigger to invoke them.
 
