@@ -211,7 +211,15 @@ func invokeCodex(ctx context.Context, in Invocation) (map[string]any, error) {
 				return nil
 			}
 			if item["type"] == "mcpToolCall" && item["server"] == "arena" && in.Diagnostic != nil {
-				if err := in.Diagnostic("provider.arena-tool-completed", map[string]any{"tool": item["tool"], "status": item["status"], "error": item["error"]}); err != nil {
+				data := map[string]any{"tool": item["tool"], "status": item["status"], "error": item["error"]}
+				if item["status"] == "failed" {
+					// Arena's own refusal text tells the user (and the
+					// stall diagnosis) why the call failed.
+					if message := toolResultText(item["result"]); message != "" {
+						data["message"] = short(Redact(message), 500)
+					}
+				}
+				if err := in.Diagnostic("provider.arena-tool-completed", data); err != nil {
 					return err
 				}
 			}
@@ -338,4 +346,14 @@ func parseOutput(text string) (map[string]any, error) {
 		return nil, fmt.Errorf("provider returned invalid structured output")
 	}
 	return out, nil
+}
+
+func toolResultText(v any) string {
+	result, _ := v.(map[string]any)
+	for _, item := range anySlice(result["content"]) {
+		if content, ok := item.(map[string]any); ok && content["type"] == "text" {
+			return str(content["text"])
+		}
+	}
+	return ""
 }

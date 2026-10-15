@@ -102,7 +102,13 @@ func visibleActivity(e Event) string {
 		}
 		return fmt.Sprintf("Output recorded: %v bytes (body omitted by retention policy)", data["bytes"])
 	case "provider.arena-tool-completed":
-		return "Arena tool: " + str(data["tool"]) + " " + str(data["status"])
+		line := "Arena tool: " + str(data["tool"]) + " " + str(data["status"])
+		if message := str(data["message"]); message != "" {
+			line += " · " + message
+		}
+		return line
+	case "packet.rejected":
+		return "Rejected packet to " + str(data["to"]) + " (" + str(data["kind"]) + "): " + str(data["error"])
 	}
 	return ""
 }

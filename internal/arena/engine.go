@@ -515,15 +515,23 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		}
 		return nil, err
 	}
+	// An undeliverable extra packet is the agent's mistake, not a run failure:
+	// its result already returns to the delegator, so reject and continue.
 	for _, packet := range anySlice(result["packets"]) {
 		m, _ := packet.(map[string]any)
 		payload := map[string]any{}
-		if err := json.Unmarshal([]byte(str(m["payloadJson"])), &payload); err != nil {
-			return nil, fmt.Errorf("invalid emitted packet JSON")
+		err := json.Unmarshal([]byte(str(m["payloadJson"])), &payload)
+		if err == nil {
+			m["payload"] = payload
+			_, err = e.Project.AgentPacket(ctx, e.Run, a.Id, m)
 		}
-		m["payload"] = payload
-		if _, err := e.Project.AgentPacket(ctx, e.Run, a.Id, m); err != nil {
-			return nil, err
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if _, eventErr := e.event(a.Id, "packet.rejected", map[string]any{"to": str(m["to"]), "kind": str(m["kind"]), "error": Redact(err.Error())}); eventErr != nil {
+				return nil, eventErr
+			}
 		}
 	}
 	if err := e.finishWorkspace(ctx, workspace); err != nil {

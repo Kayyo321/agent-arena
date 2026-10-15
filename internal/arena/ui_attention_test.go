@@ -145,3 +145,30 @@ func TestReadinessFoldsDuplicateRuntimes(t *testing.T) {
 		t.Fatalf("readiness not folded: %v", lines)
 	}
 }
+
+func TestUndeliverableResultPacketIsRejectedWithoutFailingRun(t *testing.T) {
+	p := committedProject(t)
+	r := teamRun(t, p)
+	fake := testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
+		if in.Schema["properties"].(map[string]any)["verdict"] != nil {
+			return map[string]any{"verdict": "Approved", "affirm": true, "summary": "fixture", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+		}
+		result := ordinaryResult()
+		result["packets"] = []any{map[string]any{"to": "nobody", "kind": "message", "payloadJson": `{"text":"hi"}`}, map[string]any{"to": "nobody", "kind": "message", "payloadJson": "not json"}}
+		return result, nil
+	})
+	if err := NewEngine(p, r, fake).Execute(context.Background(), false, false); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := p.Events(r.ID)
+	rejected, succeeded := 0, false
+	for _, event := range events {
+		if event.Type == "packet.rejected" {
+			rejected++
+		}
+		succeeded = succeeded || event.Type == "workflow.succeeded"
+	}
+	if rejected == 0 || !succeeded {
+		t.Fatalf("rejected=%d succeeded=%v", rejected, succeeded)
+	}
+}

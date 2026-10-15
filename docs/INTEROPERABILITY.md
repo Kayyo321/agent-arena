@@ -74,6 +74,7 @@ stateDiagram-v2
 - A question includes the missing decision and blocks only its own work item unless the scheduler has a dependency on it.
 - A worker result returns to its delegator. Peer messages use declared communication links.
 - Peers run concurrently. Over MCP, `arena_send` with kind `message` reaches a peer and `arena_inbox` with `newOnly` and `waitSeconds` (at most 120) blocks until an unseen message arrives, so an agent can wait for agreement before returning. A result returned first ends that agent's side of the conversation.
+- Extra packets in a worker's result that cannot be delivered (an unlinked peer, invalid JSON, a refused proposal) are journaled as `packet.rejected` and skipped; the result itself still returns to the delegator and the run continues.
 - A retry gets a new attempt ID and retains the same correlation ID.
 - Delivery is at least once across process recovery; consumers deduplicate by `messageId`.
 - Cancellation is a request with a recorded outcome. Arena does not claim a provider stopped until the adapter confirms process exit.
