@@ -103,7 +103,7 @@ run's evidence and pins a short diagnosis. For a router fallback it picks a
 branch and Arena applies it (policy `orchestrator-stall-recovery: answer-routing`,
 the default); the banner counts down so you can answer first. Other decisions,
 or `recommend-only`, get a recommendation that `/accept` applies. Every
-diagnosis and applied answer is journaled as `orchestrator.stall-diagnosed`. A router waiting on you shows `⚑ waiting for you`.
+diagnosis and applied answer is journaled as `orchestrator.stall-diagnosed`. The note clears from the banner once the run ends; the journal keeps it. A router waiting on you shows `⚑ waiting for you`.
 
 A line starting with `$` runs that shell command in the project root with your
 environment (two-minute limit, 256 KiB of output) and shows the output in a

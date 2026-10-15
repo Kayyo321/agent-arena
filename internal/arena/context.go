@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 )
@@ -343,13 +345,57 @@ func agentByID(w Workflow, id string) (Agent, bool) {
 	}
 	return Agent{}, false
 }
+
+// ContextSearch ranks entries by how many distinct query words they share,
+// counting title and tag hits twice; newer entries win ties. An empty query
+// (or one made only of stop words) lists every entry, newest first. Whole-
+// phrase matching made natural queries such as "ledger API money" and task
+// objectives find nothing, so agents never saw or reused shared context.
 func ContextSearch(entries []ContextEntry, query string) []ContextEntry {
-	found := []ContextEntry{}
-	query = strings.ToLower(query)
+	terms := searchTerms(query)
+	type scored struct {
+		entry ContextEntry
+		score int
+	}
+	ranked := []scored{}
 	for _, e := range entries {
-		if strings.Contains(strings.ToLower(e.Title+" "+e.Content+" "+strings.Join(e.Tags, " ")), query) {
-			found = append(found, e)
+		heading := searchTerms(e.Title + " " + strings.Join(e.Tags, " "))
+		body := searchTerms(e.Content)
+		score := 0
+		for term := range terms {
+			if heading[term] {
+				score += 2
+			} else if body[term] {
+				score++
+			}
+		}
+		if len(terms) == 0 || score > 0 {
+			ranked = append(ranked, scored{e, score})
 		}
 	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		return ranked[i].entry.CreatedAt > ranked[j].entry.CreatedAt
+	})
+	found := []ContextEntry{}
+	for _, r := range ranked {
+		found = append(found, r.entry)
+	}
 	return found
+}
+
+var contextStopWords = map[string]bool{"the": true, "and": true, "for": true, "with": true, "that": true, "this": true, "from": true, "into": true, "are": true, "was": true, "its": true, "use": true, "using": true, "should": true, "must": true, "before": true, "after": true, "about": true, "what": true, "which": true, "when": true, "where": true, "how": true, "all": true, "any": true, "each": true, "both": true, "not": true, "but": true, "you": true, "your": true, "our": true, "has": true, "have": true}
+
+func searchTerms(text string) map[string]bool {
+	terms := map[string]bool{}
+	for _, word := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) {
+		if len(word) >= 3 && !contextStopWords[word] {
+			terms[word] = true
+		}
+	}
+	return terms
 }

@@ -79,6 +79,11 @@ func (m LiveModel) attentionLines(width int, color bool) []string {
 		}
 		lines = append(lines, styled(short(text, width), "1;38;5;214", color), styled(short("  "+hint, width), sgrMuted, color))
 	}
+	// A diagnosis explains a live stall; once the run has ended it is history
+	// (still in the journal), not something the user needs to act on.
+	if m.State.Status != "running" && !m.StallBusy {
+		return lines
+	}
 	if m.StallBusy {
 		lines = append(lines, short(m.spinner(color)+" arena-orchestrator is diagnosing why the run stopped", width+20))
 	} else if m.Stall != nil && m.Stall.RunID == m.Run.ID {

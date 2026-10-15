@@ -81,3 +81,42 @@ func TestWaitInboxBlocksUntilPeerReplyAndSkipsSeen(t *testing.T) {
 		t.Fatalf("seen message returned again: %d %v", len(packets), err)
 	}
 }
+
+func TestContextSearchMatchesWordsNotWholePhrases(t *testing.T) {
+	entries := []ContextEntry{
+		{Id: "old", Title: "Ledger module API and money convention", Content: "Amounts are Decimal; expenses positive.", Tags: []string{"ledger", "api"}, CreatedAt: "2026-10-15T23:00:00Z"},
+		{Id: "new", Title: "Ledger v1 API", Content: "Use Decimal for money.", Tags: []string{"ledger"}, CreatedAt: "2026-10-15T23:30:00Z"},
+		{Id: "other", Title: "Deployment notes", Content: "Unrelated.", CreatedAt: "2026-10-15T23:40:00Z"},
+	}
+	ids := func(found []ContextEntry) []string {
+		out := []string{}
+		for _, e := range found {
+			out = append(out, e.Id)
+		}
+		return out
+	}
+	if got := ids(ContextSearch(entries, "ledger API money convention")); len(got) != 2 || got[0] != "old" {
+		t.Fatalf("natural query: %v", got)
+	}
+	objective := "Implement ledger v1: python3 -m ledger summary FILE.csv. Record the module API and the money-handling convention in shared context."
+	if got := ids(ContextSearch(entries, objective)); !Has(got, "old") || !Has(got, "new") || Has(got, "other") {
+		t.Fatalf("task objective did not surface relevant context: %v", got)
+	}
+	if got := ids(ContextSearch(entries, "")); len(got) != 3 || got[0] != "other" {
+		t.Fatalf("empty query should list all, newest first: %v", got)
+	}
+	if got := ContextSearch(entries, "kubernetes"); len(got) != 0 {
+		t.Fatalf("unrelated query matched: %v", ids(got))
+	}
+}
+
+func TestStallBannerClearsWhenRunEnds(t *testing.T) {
+	m := LiveModel{Run: Run{ID: "run-x", Settings: DefaultSettings(Runtime{})}, State: RunState{Status: "succeeded"}, Stall: &stallDiagnosis{RunID: "run-x", Summary: "stalled", Applied: true, DecisionID: "d", Answer: "builder"}}
+	if lines := m.attentionLines(100, false); len(lines) != 0 {
+		t.Fatalf("finished run still shows the stall note: %v", lines)
+	}
+	m.State.Status = "running"
+	if lines := m.attentionLines(100, false); len(lines) == 0 {
+		t.Fatal("running run hides the stall note")
+	}
+}
