@@ -36,7 +36,8 @@
         "cross-provider-context-sharing": { "enum": ["deny", "ask-user", "task-scoped"] },
         "shell-command-execution": { "enum": ["adapter-default", "ask-user", "auto-refuse"] },
         "change-integration": { "enum": ["human-review", "auto-if-clean"] },
-        "workflow-deletion": { "enum": ["auto-refuse", "ask-user", "auto-accept"] }
+        "workflow-deletion": { "enum": ["auto-refuse", "ask-user", "auto-accept"] },
+        "orchestrator-stall-recovery": { "enum": ["answer-routing", "recommend-only"] }
       }
     },
     "limits": {

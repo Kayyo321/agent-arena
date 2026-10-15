@@ -99,9 +99,11 @@ one is pending, typing one of its choices answers it (`/answer TEXT` also omits
 the ID). If a run stops making progress (nothing executing and a decision older
 than 15 seconds, or no events for a minute) Arena wakes the permanent
 `arena-orchestrator` once per stall (at most three times per run). It reads the
-run's evidence and pins a short diagnosis and recommendation; `/accept` applies
-its suggested answer. The diagnosis is journaled as `orchestrator.stall-diagnosed`
-and never answers on its own. A router waiting on you shows `⚑ waiting for you`.
+run's evidence and pins a short diagnosis. For a router fallback it picks a
+branch and Arena applies it (policy `orchestrator-stall-recovery: answer-routing`,
+the default); the banner counts down so you can answer first. Other decisions,
+or `recommend-only`, get a recommendation that `/accept` applies. Every
+diagnosis and applied answer is journaled as `orchestrator.stall-diagnosed`. A router waiting on you shows `⚑ waiting for you`.
 
 A line starting with `$` runs that shell command in the project root with your
 environment (two-minute limit, 256 KiB of output) and shows the output in a

@@ -46,6 +46,7 @@ Other useful settings include:
 - `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode.
 - `approvalPolicies.change-integration`: `human-review` or `auto-if-clean` for eligible patches.
 - `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.
+- `approvalPolicies.orchestrator-stall-recovery` (optional): `answer-routing` (default when absent) lets the permanent orchestrator answer a stalled router fallback itself, choosing only among that router's declared branches or `stop`; `recommend-only` makes it suggest an answer for `/accept`. Agent questions and permission approvals are never answered by the orchestrator.
 - `limits.maxConcurrentAgents`, `maxTeamRounds`, `maxOnCallInvocationsPerRun`, `maxCoworkerAdditionsPerRun`, and `maxAgentRunMinutes` bound parallelism, deliberation, escalations, config growth, and execution time.
 - `context.defaultHandoffScope` and `context.maxFilesPerHandoff` bound what Arena forwards to provider sessions.
 - `sharedContext.storage` chooses Git-tracked project files or persistent local-only entries. `agentWritePolicy` controls agent additions/revisions, `agentDeletePolicy` controls archive requests, and entry/total limits bound the store. Stale entries are marked for review rather than deleted.

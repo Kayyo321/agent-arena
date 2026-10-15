@@ -60,7 +60,7 @@ func DefaultSettings(r Runtime) Settings {
 	return convert[Settings](map[string]any{
 		"schemaVersion": 1, "defaultModel": r,
 		"permanentOnCallAgent": map[string]any{"id": "arena-orchestrator", "profile": ".agents/arena-system/arena-orchestrator.agent.json", "runtimeSource": "defaultModel", "skill": "arena-orchestrator", "availability": "permanent-on-call"},
-		"approvalPolicies":     map[string]any{"arena-subagent-modification-inquiry": "ask-user", "agent-workflow-edit": "ask-user", "cross-provider-context-sharing": "ask-user", "shell-command-execution": "adapter-default", "change-integration": "human-review", "workflow-deletion": "ask-user"},
+		"approvalPolicies":     map[string]any{"arena-subagent-modification-inquiry": "ask-user", "agent-workflow-edit": "ask-user", "cross-provider-context-sharing": "ask-user", "shell-command-execution": "adapter-default", "change-integration": "human-review", "workflow-deletion": "ask-user", "orchestrator-stall-recovery": "answer-routing"},
 		"limits":               map[string]any{"maxConcurrentAgents": 4, "maxTeamRounds": 2, "maxOnCallInvocationsPerRun": 3, "maxCoworkerAdditionsPerRun": 1, "maxAgentRunMinutes": 30, "maxRetriesPerAgent": 1},
 		"context":              map[string]any{"defaultHandoffScope": "task-scoped", "maxFilesPerHandoff": 50},
 		"sharedContext":        map[string]any{"storage": "git-tracked", "agentWritePolicy": "auto-accept", "agentDeletePolicy": "ask-user", "maxEntries": 500, "maxEntryBytes": 32768, "maxTotalBytes": 2097152, "staleAfterDays": 180},

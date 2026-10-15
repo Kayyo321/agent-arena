@@ -33,6 +33,7 @@ func pendingDecisionModel(t *testing.T) (LiveModel, chan string) {
 
 func TestStalledRunIsDiagnosedAndRecommendationAccepted(t *testing.T) {
 	m, answered := pendingDecisionModel(t)
+	m.Run.Settings.ApprovalPolicies.OrchestratorStallRecovery = "recommend-only"
 	id := m.Decisions[0].ID
 	m.Invoker = testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
 		if !strings.Contains(in.Prompt, id) || in.Write || in.Runtime.Model != m.Run.Settings.DefaultModel.Model {
@@ -170,5 +171,47 @@ func TestUndeliverableResultPacketIsRejectedWithoutFailingRun(t *testing.T) {
 	}
 	if rejected == 0 || !succeeded {
 		t.Fatalf("rejected=%d succeeded=%v", rejected, succeeded)
+	}
+}
+
+func TestOrchestratorAnswersStalledRouterFallbackItself(t *testing.T) {
+	m, answered := pendingDecisionModel(t)
+	if !strings.Contains(strings.Join(m.attentionLines(100, false), "\n"), "arena-orchestrator is deciding") {
+		t.Fatalf("banner does not say the orchestrator will decide: %v", m.attentionLines(100, false))
+	}
+	m.Invoker = testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
+		schema := in.Schema["properties"].(map[string]any)
+		if !Has(stringSlice(schema["answer"].(map[string]any)["enum"]), "fixer") || !strings.Contains(in.Prompt, "applies your decisionId") {
+			t.Errorf("diagnosis is not constrained to the decision's choices")
+		}
+		return map[string]any{"summary": "Reviewers requested changes.", "recommendation": "Routing to fixer.", "decisionId": "", "answer": "fixer"}, nil
+	})
+	cmd := m.watchStall()
+	next, _ := m.Update(cmd())
+	m = next.(LiveModel)
+	select {
+	case answer := <-answered:
+		if answer != "fixer" {
+			t.Fatal(answer)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("orchestrator did not answer the router fallback")
+	}
+	if m.Stall == nil || !m.Stall.Applied || !strings.Contains(strings.Join(m.attentionLines(100, false), "\n"), "orchestrator answered") {
+		t.Fatalf("applied answer not shown: %+v", m.Stall)
+	}
+}
+
+func TestOrchestratorNeverAnswersAgentQuestions(t *testing.T) {
+	s := DefaultSettings(Runtime{})
+	if orchestratorMayAnswer(s, Decision{Kind: "question"}) || orchestratorMayAnswer(s, Decision{Kind: "shell-command-execution"}) {
+		t.Fatal("orchestrator may answer a user question or approval")
+	}
+	if !orchestratorMayAnswer(s, Decision{Kind: "router.fallback"}) {
+		t.Fatal("default policy should allow routing answers")
+	}
+	s.ApprovalPolicies.OrchestratorStallRecovery = "recommend-only"
+	if orchestratorMayAnswer(s, Decision{Kind: "router.fallback"}) {
+		t.Fatal("recommend-only policy ignored")
 	}
 }

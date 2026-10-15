@@ -24,7 +24,25 @@ const (
 type stallDiagnosis struct {
 	RunID, Key                                  string
 	Summary, Recommendation, DecisionID, Answer string
-	Err                                         error
+	// Applied is set when the orchestrator answered a router fallback itself.
+	Applied bool
+	Err     error
+}
+
+// stallRecovery is the project's orchestrator-stall-recovery policy. Absent
+// means answer-routing: the orchestrator may resolve router fallbacks, which
+// only choose among the workflow's own declared branches.
+func stallRecovery(s Settings) string {
+	if policy := s.ApprovalPolicies.OrchestratorStallRecovery; policy != "" {
+		return policy
+	}
+	return "answer-routing"
+}
+
+// orchestratorMayAnswer limits autonomous answers to routing choices; agent
+// questions and permission approvals always stay with the user.
+func orchestratorMayAnswer(s Settings, d Decision) bool {
+	return d.Kind == "router.fallback" && stallRecovery(s) == "answer-routing"
 }
 
 // attentionLines pin pending decisions and the orchestrator's diagnosis
@@ -47,6 +65,15 @@ func (m LiveModel) attentionLines(width int, color bool) []string {
 		if len(m.Decisions) > 1 || len(d.Choices) == 0 {
 			hint = "/answer " + d.ID + " ANSWER"
 		}
+		if orchestratorMayAnswer(m.Run.Settings, d) {
+			if created, err := time.Parse(time.RFC3339Nano, d.CreatedAt); err == nil {
+				if wait := stallDecisionAge - time.Since(created); wait > 0 {
+					hint += fmt.Sprintf(", or arena-orchestrator decides in %ds", int(wait.Seconds())+1)
+				} else {
+					hint += "; arena-orchestrator is deciding"
+				}
+			}
+		}
 		lines = append(lines, styled(short(text, width), "1;38;5;214", color), styled(short("  "+hint, width), sgrMuted, color))
 	}
 	if m.StallBusy {
@@ -54,6 +81,11 @@ func (m LiveModel) attentionLines(width int, color bool) []string {
 	} else if m.Stall != nil && m.Stall.RunID == m.Run.ID {
 		if m.Stall.Err != nil {
 			lines = append(lines, styled(short("Orchestrator diagnosis failed: "+Redact(m.Stall.Err.Error()), width), "38;5;203", color))
+		} else if m.Stall.Applied {
+			lines = append(lines, styled(short("◆ orchestrator answered "+m.Stall.DecisionID+" with "+m.Stall.Answer+": "+m.Stall.Summary, width), "38;5;141", color))
+			if m.Stall.Recommendation != "" {
+				lines = append(lines, short("  "+m.Stall.Recommendation, width))
+			}
 		} else {
 			lines = append(lines, styled(short("◆ orchestrator: "+m.Stall.Summary, width), "38;5;141", color))
 			if m.Stall.Recommendation != "" {
@@ -148,7 +180,24 @@ func (m LiveModel) diagnoseStall(key string) tea.Cmd {
 			}
 			fmt.Fprintf(&evidence, "%d %s %s %s\n", event.Sequence, event.AgentID, event.Type, short(string(JSON(event.Data)), 300))
 		}
-		in := Invocation{Runtime: settings.DefaultModel, Dir: p.Root, AgentID: "arena-orchestrator", Prompt: "You are the permanent arena-orchestrator, the project control agent. This run has stopped making progress. Using only the evidence below, explain in one or two sentences why it is stuck, and recommend the user's next step in one sentence. If a pending decision should be answered, set decisionId and answer to exactly one of its listed choices; otherwise leave both empty. You cannot act yourself: Arena shows your recommendation and the user decides. Never include private reasoning.\n" + Redact(evidence.String()), Schema: objectSchema(map[string]any{"summary": map[string]any{"type": "string"}, "recommendation": map[string]any{"type": "string"}, "decisionId": map[string]any{"type": "string"}, "answer": map[string]any{"type": "string"}})}
+		// The schema only admits real decision IDs and choices, so a routing
+		// answer is always structured rather than buried in prose.
+		ids, choices := []any{""}, []any{""}
+		routing := false
+		for _, d := range decisions {
+			ids = append(ids, d.ID)
+			for _, choice := range d.Choices {
+				if !Has(stringSlice(choices), choice) {
+					choices = append(choices, choice)
+				}
+			}
+			routing = routing || orchestratorMayAnswer(settings, d)
+		}
+		authority := "You cannot act yourself: Arena shows your recommendation and the user decides."
+		if routing {
+			authority = "For a router.fallback decision Arena applies your decisionId and answer directly, so choose the branch that best moves the task toward its acceptance criteria (for example, send unmet acceptance criteria or requested changes to the agent that fixes them). For any other decision Arena only shows your recommendation."
+		}
+		in := Invocation{Runtime: settings.DefaultModel, Dir: p.Root, AgentID: "arena-orchestrator", Prompt: "You are the permanent arena-orchestrator, the project control agent. This run has stopped making progress. Using only the evidence below, explain in one or two sentences why it is stuck, and give the next step in one sentence. Whenever a pending decision has a sensible answer, set decisionId and answer to that decision and exactly one of its listed choices; leave both empty only when no listed choice fits. " + authority + " Never include private reasoning.\n" + Redact(evidence.String()), Schema: objectSchema(map[string]any{"summary": map[string]any{"type": "string"}, "recommendation": map[string]any{"type": "string"}, "decisionId": map[string]any{"type": "string", "enum": ids}, "answer": map[string]any{"type": "string", "enum": choices}})}
 		bounded, cancel := inferenceDeadline(ctx, settings.Limits.MaxAgentRunMinutes)
 		defer cancel()
 		out, err := invoker.Invoke(bounded, in)
@@ -157,15 +206,26 @@ func (m LiveModel) diagnoseStall(key string) tea.Cmd {
 		} else {
 			result.Summary, result.Recommendation = strings.TrimSpace(str(out["summary"])), strings.TrimSpace(str(out["recommendation"]))
 			result.DecisionID, result.Answer = strings.TrimSpace(str(out["decisionId"])), strings.TrimSpace(str(out["answer"]))
-			valid := false
-			for _, d := range decisions {
-				valid = valid || d.ID == result.DecisionID && (len(d.Choices) == 0 || Has(d.Choices, result.Answer))
+			if result.DecisionID == "" && len(decisions) == 1 && result.Answer != "" {
+				result.DecisionID = decisions[0].ID
 			}
-			if !valid {
+			var chosen *Decision
+			for i, d := range decisions {
+				if d.ID == result.DecisionID && result.Answer != "" && (len(d.Choices) == 0 || Has(d.Choices, result.Answer)) {
+					chosen = &decisions[i]
+				}
+			}
+			if chosen == nil {
 				result.DecisionID, result.Answer = "", ""
+			} else if orchestratorMayAnswer(settings, *chosen) {
+				if err := p.Answer(r.ID, chosen.ID, result.Answer); err == nil {
+					result.Applied = true
+				} else if !strings.Contains(err.Error(), "already answered") {
+					result.Err = fmt.Errorf("answer %s: %w", chosen.ID, err)
+				}
 			}
 		}
-		data := map[string]any{"key": key, "summary": result.Summary, "recommendation": result.Recommendation, "decisionId": result.DecisionID, "answer": result.Answer}
+		data := map[string]any{"key": key, "summary": result.Summary, "recommendation": result.Recommendation, "decisionId": result.DecisionID, "answer": result.Answer, "applied": result.Applied, "policy": stallRecovery(settings)}
 		if result.Err != nil {
 			data["error"] = Redact(result.Err.Error())
 		}
