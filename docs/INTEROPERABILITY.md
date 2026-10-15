@@ -49,11 +49,11 @@ For a common interoperable record, implementations must preserve these fields:
 - Provider context as an opaque object; adapters may add fields but must not reinterpret another provider's values.
 - Optional `invocation` metadata identifies team-member work (`mode: "team-member"`, `teamId`) or on-call work (`mode: "on-call"`, trigger, trigger event ID, and source ID). Adapters preserve this metadata so agents and audit tools can distinguish how the task was routed.
 
-Team result messages and tasks with `invocation` metadata use protocol version `1.1` or newer. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
+Reviewer result messages, team result messages, coworker requests, and tasks with `invocation` metadata use protocol version `1.1` or newer. Shared-context proposals and results use protocol version `1.2` or newer. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
 
 ## Message kinds and lifecycle
 
-`task`, `question`, `message`, `result`, `team-result`, `error`, and `cancel` are the initial kinds. The scheduler records state transitions separately from message bodies.
+`task`, `question`, `message`, `result`, `review-result`, `team-result`, `coworker-request`, `context-proposal`, `context-result`, `error`, and `cancel` are the initial kinds. The scheduler records state transitions separately from message bodies.
 
 ```mermaid
 stateDiagram-v2
@@ -77,6 +77,39 @@ stateDiagram-v2
 - Delivery is at least once across process recovery; consumers deduplicate by `messageId`.
 - Cancellation is a request with a recorded outcome. Arena does not claim a provider stopped until the adapter confirms process exit.
 
+## Reviewer verdict contract
+
+An agent whose role is `review` returns a `review-result` envelope with `format: "arena.review-verdict.v1"`. The standard outcomes are:
+
+- `Approved`: no blocking issue remains; the caller may continue to its integration policy.
+- `ChangesRequested`: the change can be reconsidered after the listed findings are addressed.
+- `Deny`: the request or change is not acceptable under its stated scope or policy.
+- `NeedsMoreInformation`: the reviewer cannot make a supported decision yet.
+
+Every result includes a concise rationale, evidence-backed findings with severity and file/line references, open questions, and a next action. A review team uses the same labels as its member verdicts, then wraps the unanimous team decision in `arena.team-verdict.v1`. The team packet remains distinct from an individual review result.
+
+Example review-result payload:
+
+```json
+{
+  "format": "arena.review-verdict.v1",
+  "outcome": "ChangesRequested",
+  "summary": "Constrain the callback redirect target.",
+  "rationale": "The current code accepts an untrusted destination.",
+  "findings": [
+    {
+      "severity": "high",
+      "file": "src/auth/callback.ts",
+      "line": 42,
+      "evidence": "The request parameter is passed to the redirect without validation.",
+      "recommendation": "Allow only relative paths or an explicit host allowlist."
+    }
+  ],
+  "openQuestions": [],
+  "nextAction": "Validate the redirect target and request another review."
+}
+```
+
 ## Team deliberation and verdict packet
 
 Arena launches each member of a team with the same objective, acceptance criteria, context, constraints, and workspace base. It collects each member's position in a structured response, then shares the team's positions for up to the configured number of deliberation rounds. The provider sessions remain separate; Arena carries only explicit messages between them.
@@ -88,13 +121,13 @@ Team protocol version `1.1` requires unanimity. Every member must affirm the sam
   "teamId": "release-review",
   "format": "arena.team-verdict.v1",
   "outcome": "consensus",
-  "verdict": "request-changes",
+  "verdict": "ChangesRequested",
   "summary": "The patch needs one authorization check before release.",
   "rationale": "Both reviewers found that the callback accepts an unvalidated redirect target.",
   "evidence": ["src/auth/callback.ts:42"],
   "memberPositions": [
-    { "agentId": "reviewer", "verdict": "request-changes", "status": "affirmed", "summary": "Validate redirect targets.", "evidence": ["src/auth/callback.ts:42"] },
-    { "agentId": "security-reviewer", "verdict": "request-changes", "status": "affirmed", "summary": "The redirect target is not constrained.", "evidence": ["src/auth/callback.ts:42"] }
+    { "agentId": "reviewer", "verdict": "ChangesRequested", "status": "affirmed", "summary": "Validate redirect targets.", "evidence": ["src/auth/callback.ts:42"] },
+    { "agentId": "security-reviewer", "verdict": "ChangesRequested", "status": "affirmed", "summary": "The redirect target is not constrained.", "evidence": ["src/auth/callback.ts:42"] }
   ],
   "dissent": [],
   "rounds": 1,
@@ -105,6 +138,31 @@ Team protocol version `1.1` requires unanimity. Every member must affirm the sam
 The same packet shape is returned when the members cannot agree. In that case `outcome` is `no-consensus`, `verdict` is `null`, and `dissent` explains the unresolved positions. This is not approval and must not be collapsed to a majority verdict. Downstream agents can branch on the stable `format` and `outcome` fields. Arena journals each member position, deliberation round, facilitator synthesis, and final packet; the packet itself does not include hidden chain-of-thought.
 
 Before delivery, Arena checks that every configured member appears once, every verdict is allowed by the team's output contract, and a consensus packet records unanimous final affirmation of the same verdict. A member that cannot return a final position is marked `unavailable`; that prevents consensus and is included in `dissent`. A provider process failure is also recorded as an agent failure and can trigger on-call routing. The JSON Schema describes the packet shape; these workflow-aware checks are enforced by the runtime.
+
+## Decision routers
+
+A decision-router block consumes a structured envelope kind and reads one JSON Pointer relative to its `payload`. It compares the resulting scalar to configured exact-match values and routes the original packet along the matching branch. For example, a router may inspect `/outcome` from `review-result` and branch on `Approved`, `ChangesRequested`, or `Deny`. It does not invoke a model or infer a value from prose.
+
+Every router has an explicit fallback for an unrecognized packet kind/value or missing field: ask the user, stop the path with a recorded unhandled outcome, or route to a configured fallback node. Workflow validation requires unique match values, valid branch targets, and an acyclic graph including all conditional branch edges. A selected branch records the source packet ID, field value, rule ID, target, and fallback decision when applicable. It passes the packet and its provenance to the target agent or team.
+
+Example router definition:
+
+```json
+{
+  "id": "review-gate",
+  "name": "Review gate",
+  "inputKind": "review-result",
+  "payloadPointer": "/outcome",
+  "routes": [
+    { "id": "approved", "equals": "Approved", "to": "integrator" },
+    { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer" },
+    { "id": "denied", "equals": "Deny", "to": "request-owner" }
+  ],
+  "fallback": { "action": "ask-user" }
+}
+```
+
+The `to` values refer to existing agent, team, or router IDs in the same arena. On-call agents are not valid path targets; use an event trigger to invoke them.
 
 ## On-call invocation
 
@@ -125,6 +183,64 @@ The task envelope identifies the route, rather than relying on a prompt conventi
 
 For a manual invocation, `sourceId` identifies the user and Arena still records a trigger event ID. For an internal team-member task, `invocation` is `{ "mode": "team-member", "teamId": "release-review" }`.
 
+## Coworker requests
+
+An active agent can ask for another agent through `arena agent request <workflow-id>`. The request is a `coworker-request` envelope addressed to the Arena control plane (`to.provider: "arena"`, `to.agentId: "arena-orchestrator"`). Arena records the request and wakes the permanent orchestrator using the project's default model; the request does not create a provider process or edit configuration by itself. The envelope includes the target workflow, requesting agent/run, role, objective, provider, model, reasoning effort (or explicit `null` when that provider has no such control), required capabilities, workspace scope, files, and reason for the coworker.
+
+The request payload must be complete before it is submitted. When the provider has a reasoning control, a missing effort is a clarification request, not an invitation to copy the default model's effort. For providers without that control, the request includes `reasoningEffort: null`.
+
+Example coworker request payload:
+
+```json
+{
+  "workflowId": "code-review",
+  "role": "test-engineer",
+  "objective": "Add focused regression coverage for the changed authentication behavior.",
+  "runtime": {
+    "provider": "claude-code",
+    "model": "sonnet-5.5",
+    "reasoningEffort": "medium"
+  },
+  "capabilities": ["read", "write", "run_commands"],
+  "workspaceMode": "write",
+  "files": ["src/auth/", "tests/auth/"],
+  "reason": "The implementation and review agents identified a regression path that needs an isolated test change."
+}
+```
+
+The orchestrator applies `approvalPolicies.arena-subagent-modification-inquiry` before using CLI operations to create anything:
+
+- `auto-refuse` records a refusal for workflow-agent requests without prompting the user.
+- `ask-user` presents the complete proposal and waits for the user's decision.
+- `auto-accept` applies a complete proposal only when provider readiness, project limits, graph validation, and adapter capability checks pass.
+
+If a request is missing a required value, the orchestrator asks the user for it instead of inventing it, except when `auto-refuse` has already declined that agent-originated request. A direct request from the user to create an agent always gets clarification when required details are missing. All accepted changes are written through the CLI as a reversible configuration transaction.
+
+## Shared-context packets
+
+Agents from any provider use the same Arena context API for durable workflow knowledge. They can search/read entries and submit a `context-proposal`; they do not write context files from their provider worktree. A proposal uses `operation: "add"`, `"revise"`, or `"archive"`. Add/revise proposals include a title, concise content, tags, confidence, and evidence. Revise/archive also identify the entry. The outer envelope records the provider and run; the context manager adds actor, timestamps, and entry version metadata.
+
+The context manager applies `sharedContext.agentWritePolicy` to additions/revisions and `sharedContext.agentDeletePolicy` to archive requests. Its `context-result` response uses `format: "arena.context-result.v1"` and one of `accepted`, `needs-user`, `refused`, or `not-found`. Only `accepted` mutates the store. Accepted changes are serialized, retain prior versions, and are recoverable through Arena rollback. Each workflow's entries are visible only in that workflow's context scope; packet routing does not grant cross-workflow access.
+
+Example add proposal payload:
+
+```json
+{
+  "workflowId": "code-review",
+  "operation": "add",
+  "entryId": null,
+  "title": "Review verdicts require file evidence",
+  "content": "Each finding should cite the affected file and the evidence supporting the verdict.",
+  "tags": ["review", "evidence"],
+  "confidence": "verified",
+  "evidence": [
+    { "kind": "file", "reference": "docs/INTEROPERABILITY.md", "note": "Reviewer verdict contract" }
+  ]
+}
+```
+
+Context entries are not transcripts. Agents must preserve uncertainty in the confidence field, cite supporting evidence, and never submit credentials, secrets, hidden reasoning, or unrelated conversation history. See [Shared context](SHARED-CONTEXT.md) for storage, retention, and user commands.
+
 ## Handoff content
 
 Each handoff should contain enough information to continue without access to the sender's hidden conversation:
@@ -144,19 +260,28 @@ When Arena forwards a task, selected context and file contents may be sent to th
 
 ## Provider and model mapping
 
-Provider identifiers are stable adapter IDs such as `codex` and `claude-code`. Model IDs and effort labels are provider-defined strings. The UI may display them, but it must not claim that two providers' `high` settings mean the same thing. Missing or unsupported options are rejected or omitted with a clear notice; never silently substitute a different model.
+Provider identifiers are stable adapter IDs such as `codex`, `claude-code`, `gemini`, and `local`. Model IDs and effort labels are provider-defined strings. The UI may display them, but it must not claim that two providers' `high` settings mean the same thing. Missing or unsupported options are rejected or omitted with a clear notice; never silently substitute a different model.
+
+## Local model agents
+
+A local agent is a regular workflow agent with `provider: "local"`, an explicit model ID, and an explicit backend such as `ollama`, `lm-studio`, `llama.cpp`, `vllm`, or `openai-compatible`. It uses the same versioned task/result/review/team/context packets as other agents. Arena identifies it as `local` plus its backend/model in the UI, and `arena status` checks the local model server only when the loaded arena requires it. An adapter reports model availability and actual capabilities; it does not assume support for tools, streaming, or reasoning effort based on another provider's behavior.
+
+The MVP local adapter connects only to same-machine loopback services. It does not send prompts to a hosted provider or use a consumer subscription. The local model process still receives the task scope and workspace permissions selected for its agent, and any writes stay in that agent's isolated worktree. A remote self-hosted endpoint is a separate integration and must not be presented as local.
 
 ## Authentication and subscription handling
 
-Use the provider's supported local sign-in or an approved integration. The CLI checks readiness without reading or displaying secrets. Arena stores no passwords, session cookies, or reusable provider tokens and does not relay credentials between agent processes.
+Use the provider's supported local sign-in or an approved integration, such as the configured Gemini API-key or Vertex AI route. The CLI checks readiness without reading or displaying secrets. Arena stores no passwords, session cookies, API-key values, or reusable provider tokens and does not relay credentials between agent processes.
 
-Provider plans, supported integrations, and terms change. Release checks must verify the exact supported sign-in and automation path. For OpenAI, an integration that uses ChatGPT plan usage must follow [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) and current [partner-app guidance](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites), including user authorization and app-specific use. For Claude Code, use Anthropic's [documented setup and authentication options](https://docs.anthropic.com/en/docs/claude-code/getting-started). Do not infer that because a human can use a consumer plan in one CLI, a third-party scheduler may use it through any method.
+Provider plans, supported integrations, and terms change. Release checks must verify the exact supported sign-in and automation path. For OpenAI, an integration that uses ChatGPT plan usage must follow [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) and current [partner-app guidance](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites), including user authorization and app-specific use. For Claude Code, use Anthropic's [documented setup and authentication options](https://docs.anthropic.com/en/docs/claude-code/getting-started). Gemini CLI's published FAQ says third-party tools must not harvest or piggyback on its OAuth session; it points third-party coding agents to Vertex AI or Google AI Studio API keys. Arena must therefore reject Gemini CLI OAuth as an Arena-managed auth path and guide setup only through a currently approved API-key or Vertex adapter. Do not infer that because a human can use a consumer plan in one CLI, a third-party scheduler may use it through any method.
 
 ## Current adapter references
 
 - [Codex CLI](https://developers.openai.com/codex/cli/): consult the current CLI reference for supported local commands and options.
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code/cli-usage): documents non-interactive `-p` mode, structured output options, model selection, and turn limits.
 - [Claude Code Agent Skills](https://code.claude.com/docs/en/skills): documents the portable `SKILL.md` format and Claude Code's project skill directory.
+- [Gemini CLI installation](https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/installation.mdx) and [authentication setup](https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx): use these to guide installation and the user-selected API-key or Vertex path; do not reuse Gemini CLI's personal OAuth session.
+- [Gemini CLI Agent Skills](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/using-agent-skills.md): documents workspace skill discovery, including the shared `.agents/skills/` location.
+- [Gemini CLI FAQ](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/faq.md): documents the restriction on third-party tools piggybacking on Gemini CLI OAuth and the API-key/Vertex alternatives.
 - [Codex skills](https://developers.openai.com/codex/skills): documents repository discovery from `.agents/skills/`.
 
 These links are release-time references, not promises that a command or feature will remain stable. Adapters must be version-aware and check supported behavior.

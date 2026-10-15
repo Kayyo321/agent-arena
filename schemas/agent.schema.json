@@ -26,6 +26,23 @@
     "constraints": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "reviewContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "outcomes"],
+      "properties": {
+        "format": { "const": "arena.review-verdict.v1" },
+        "outcomes": {
+          "const": ["Approved", "ChangesRequested", "Deny", "NeedsMoreInformation"]
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "role": { "const": "review" } }, "required": ["role"] },
+      "then": { "required": ["reviewContract"] }
+    }
+  ]
 }

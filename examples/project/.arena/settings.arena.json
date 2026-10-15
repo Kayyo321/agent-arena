@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "defaultModel": {
+    "provider": "claude-code",
+    "model": "sonnet-5.5",
+    "reasoningEffort": "medium"
+  },
+  "permanentOnCallAgent": {
+    "id": "arena-orchestrator",
+    "profile": ".agents/arena-system/arena-orchestrator.agent.json",
+    "runtimeSource": "defaultModel",
+    "skill": "arena-orchestrator",
+    "availability": "permanent-on-call"
+  },
+  "approvalPolicies": {
+    "arena-subagent-modification-inquiry": "ask-user",
+    "agent-workflow-edit": "ask-user",
+    "cross-provider-context-sharing": "ask-user",
+    "shell-command-execution": "adapter-default",
+    "change-integration": "human-review",
+    "workflow-deletion": "ask-user"
+  },
+  "limits": {
+    "maxConcurrentAgents": 4,
+    "maxTeamRounds": 2,
+    "maxOnCallInvocationsPerRun": 3,
+    "maxCoworkerAdditionsPerRun": 1,
+    "maxAgentRunMinutes": 30,
+    "maxRetriesPerAgent": 1
+  },
+  "context": {
+    "defaultHandoffScope": "task-scoped",
+    "maxFilesPerHandoff": 50
+  },
+  "sharedContext": {
+    "storage": "git-tracked",
+    "agentWritePolicy": "auto-accept",
+    "agentDeletePolicy": "ask-user",
+    "maxEntries": 500,
+    "maxEntryBytes": 32768,
+    "maxTotalBytes": 2097152,
+    "staleAfterDays": 180
+  },
+  "display": {
+    "colorMode": "auto",
+    "animation": "auto",
+    "gitTree": "show",
+    "asciiTitle": "show"
+  },
+  "audit": {
+    "retention": "full-local",
+    "redactSecrets": true,
+    "processOutput": "summary"
+  }
+}

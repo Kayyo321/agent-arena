@@ -19,6 +19,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/team" }
     },
+    "decisionRouters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/decisionRouter" }
+    },
     "onCall": {
       "type": "array",
       "items": { "$ref": "#/$defs/onCallRule" }
@@ -70,6 +74,90 @@
           "description": "Provider-specific options. The selected adapter owns their meaning.",
           "additionalProperties": true
         }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "provider": { "const": "local" } }, "required": ["provider"] },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "object",
+                "required": ["backend"],
+                "properties": {
+                  "backend": { "enum": ["ollama", "lm-studio", "llama.cpp", "vllm", "openai-compatible"] },
+                  "endpoint": { "type": "string", "format": "uri" }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "provider": { "const": "gemini" } }, "required": ["provider"] },
+          "then": {
+            "required": ["options"],
+            "properties": {
+              "options": {
+                "type": "object",
+                "required": ["authMethod"],
+                "properties": {
+                  "authMethod": { "enum": ["google-ai-studio-api-key", "vertex-ai"] }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "decisionRouter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "inputKind", "payloadPointer", "routes", "fallback"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "inputKind": { "enum": ["review-result", "team-result", "result", "error", "context-result"] },
+        "payloadPointer": { "type": "string", "pattern": "^/" },
+        "routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/decisionRoute" }
+        },
+        "fallback": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action"],
+              "properties": { "action": { "const": "ask-user" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action"],
+              "properties": { "action": { "const": "stop" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action", "to"],
+              "properties": {
+                "action": { "const": "route" },
+                "to": { "$ref": "#/$defs/id" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "decisionRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "equals", "to"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "equals": { "type": ["string", "number", "boolean", "null"] },
+        "to": { "$ref": "#/$defs/id" }
       }
     },
     "relationship": {
@@ -231,6 +319,19 @@
           "required": ["retention"],
           "properties": {
             "retention": { "enum": ["full-local", "redacted-local"] }
+          }
+        },
+        "sharedContext": {
+          "type": "object",
+          "description": "Optional workflow-level restrictions; values may tighten project settings but never loosen them.",
+          "additionalProperties": false,
+          "properties": {
+            "agentWritePolicy": { "enum": ["auto-refuse", "ask-user", "auto-accept"] },
+            "agentDeletePolicy": { "enum": ["auto-refuse", "ask-user", "auto-accept"] },
+            "maxEntries": { "type": "integer", "minimum": 1 },
+            "maxEntryBytes": { "type": "integer", "minimum": 256 },
+            "maxTotalBytes": { "type": "integer", "minimum": 1024 },
+            "staleAfterDays": { "type": "integer", "minimum": 0 }
           }
         }
       }

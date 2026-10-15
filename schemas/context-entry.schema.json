@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Arena shared context entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "workflowId", "title", "content", "tags", "confidence", "status", "createdAt", "updatedAt", "createdBy", "source", "evidence"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
+    "workflowId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "content": { "type": "string", "minLength": 1, "maxLength": 1048576 },
+    "tags": { "type": "array", "uniqueItems": true, "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 48 } },
+    "confidence": { "enum": ["verified", "inferred", "unverified"] },
+    "status": { "enum": ["active", "stale", "archived"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "lastVerifiedAt": { "type": ["string", "null"], "format": "date-time" },
+    "createdBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorId", "actorType"],
+      "properties": {
+        "actorId": { "type": "string", "minLength": 1 },
+        "actorType": { "enum": ["user", "agent"] },
+        "provider": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "actorType": { "const": "agent" } }, "required": ["actorType"] },
+          "then": { "required": ["provider"], "properties": { "provider": { "type": "string", "minLength": 1 } } }
+        },
+        {
+          "if": { "properties": { "actorType": { "const": "user" } }, "required": ["actorType"] },
+          "then": { "properties": { "provider": { "type": "null" } } }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "taskId"],
+      "properties": {
+        "runId": { "type": ["string", "null"] },
+        "taskId": { "type": ["string", "null"] }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "reference"],
+        "properties": {
+          "kind": { "enum": ["file", "url", "decision", "message", "other"] },
+          "reference": { "type": "string", "minLength": 1 },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "supersedes": { "type": ["string", "null"] }
+  }
+}

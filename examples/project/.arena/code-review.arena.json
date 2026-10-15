@@ -70,7 +70,7 @@
       },
       "outputContract": {
         "format": "arena.team-verdict.v1",
-        "verdicts": ["approve", "request-changes", "needs-more-evidence"]
+        "verdicts": ["Approved", "ChangesRequested", "Deny", "NeedsMoreInformation"]
       }
     }
   ],
