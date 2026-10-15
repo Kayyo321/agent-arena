@@ -42,8 +42,9 @@ disables the background. Source lives at `.arena/ID.background.hlsl`, beside
 
 When invoked by Arena's embedded shader generator, return only the requested
 structured source and glyph ramp using the supplied HLSL profile/input contract;
-do not recursively call `arena shader create`. Use numeric timing, viewport, and
-workflow activity inputs to match the description. Preserve foreground legibility;
+do not recursively call `arena shader create`. Use the numeric timing, viewport,
+workflow state, event-age, focus, and envelope inputs to match the description.
+Prefer envelopes and ages for smooth transitions, and `workTime` for speed changes. Preserve foreground legibility;
 Arena owns compositing and contrast. Unsupported HLSL must be revised rather than
 executed through shell commands, external compilers, or downloaded shader runners.
 A validation failure leaves the existing shader unchanged. Explain the diagnostic

@@ -123,8 +123,12 @@ The terminal's Git tree shows active branches and worktrees for the loaded arena
 ## Graph shader presentation
 
 `internal/shader` compiles Arena's bounded HLSL profile into an immutable CPU
-program. The TUI samples numeric viewport/time/activity uniforms, converts output
-to ASCII luminance, and composes it only outside protected foreground spans.
+program. Uniforms are referenced lazily, and work that does not depend on the cell is
+hoisted to once per frame. The TUI projects audited state into numeric uniforms:
+counts, lifecycle flags, event ages, a focus position and envelopes eased on each
+shader tick. The journal summary is cached until events change. Output becomes
+ASCII luminance plus an optional softened hue, composed only outside protected
+foreground spans.
 Shader ticks are separate from journal polling, so an idle arena can animate
 without inventing a run. Invalid source disables decoration with a diagnostic.
 `arena shader` owns per-workflow source/settings transactions; model-generated

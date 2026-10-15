@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/Kayyo321/agent-arena/internal/shader"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -354,5 +356,158 @@ func TestShaderMidtonesRemainVisibleOnCharcoalBackground(t *testing.T) {
 	}
 	if shaderCell(black, ".", shader.Inputs{}, 40, 12, 80, 24, true) != " " {
 		t.Fatal("zero luminance must remain empty")
+	}
+}
+
+func TestShaderInputsProjectEveryStateChannel(t *testing.T) {
+	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	restore := shaderClock
+	shaderClock = func() time.Time { return now }
+	defer func() { shaderClock = restore }()
+	at := func(seconds float64) string {
+		return now.Add(-time.Duration(seconds * float64(time.Second))).Format(time.RFC3339Nano)
+	}
+	w := Workflow{Id: "alpha", Agents: []Agent{{Id: "planner"}, {Id: "coder"}, {Id: "tester"}, {Id: "reviewer"}}}
+	m := LiveModel{Run: Run{Workflow: w, Settings: DefaultSettings(Runtime{})}, Prompt: "héllo", Attachments: []Attachment{{}}, Error: "boom", ChatBusy: true, ShaderInputAt: now.Add(-2 * time.Second)}
+	m.State = RunState{Status: "running", Agents: map[string]string{"planner": "succeeded", "coder": "running", "tester": "failed", "reviewer": "queued"}}
+	m.Decisions = []Decision{{ID: "d1", AgentID: "coder", CreatedAt: at(30)}}
+	m.Changes = []Change{{State: "integrated"}, {State: "conflicted"}, {State: "requested"}}
+	m.Trees = []Workspace{{Write: true}, {}}
+	m.Readiness = []Readiness{{CanStart: true}, {State: "unavailable"}, {State: "unknown"}}
+	m.Events = []Event{
+		{Sequence: 1, At: at(100), Type: "workflow.started"},
+		{Sequence: 2, At: at(50), Type: "message.sent", AgentID: "planner", Data: map[string]any{"messageId": "q", "kind": "question", "to": map[string]any{"agentId": "user"}}},
+		{Sequence: 3, At: at(40), Type: "agent.succeeded", AgentID: "planner"},
+		{Sequence: 4, At: at(20), Type: "agent.failed", AgentID: "tester"},
+		{Sequence: 5, At: at(10), Type: "change.touches-paths", AgentID: "coder"},
+		{Sequence: 6, At: at(8), Type: "context.searched", AgentID: "coder"},
+		{Sequence: 7, At: at(6), Type: "team.round", AgentID: "team"},
+		{Sequence: 8, At: at(4), Type: "decision.requested", AgentID: "coder"},
+		{Sequence: 9, At: at(1), Type: "agent.progress", AgentID: "coder"},
+	}
+	in := m.shaderInputs(100, 25)
+	near := func(got, want float64) bool { return math.Abs(got-want) < 1e-6 }
+	checks := map[string][2]float64{
+		"agentCount": {in.AgentCount, 4}, "running": {in.RunningAgents, 1}, "queued": {in.QueuedAgents, 1}, "succeeded": {in.SucceededAgents, 1}, "failed": {in.FailedAgents, 1},
+		"runActive": {in.RunActive, 1}, "runIdle": {in.RunIdle, 0}, "runTime": {in.RunTime, 100},
+		"pendingPackets": {in.PendingPackets, 1}, "pendingQuestions": {in.PendingQuestions, 1}, "totalPackets": {in.TotalPackets, 1},
+		"pendingDecisions": {in.PendingDecisions, 1}, "awaitingUser": {in.AwaitingUser, 1}, "decisionAge": {in.DecisionAge, 30},
+		"changes": {in.Changes, 3}, "integrated": {in.ChangesIntegrated, 1}, "conflicted": {in.ChangesConflicted, 1}, "changesPending": {in.ChangesPending, 1},
+		"worktrees": {in.Worktrees, 2}, "writing": {in.WritingWorktrees, 1}, "ready": {in.ProvidersReady, 1}, "blocked": {in.ProvidersBlocked, 1},
+		"teamRounds": {in.TeamRounds, 1}, "eventCount": {in.EventCount, 9},
+		"eventAge": {in.EventAge, 1}, "messageAge": {in.MessageAge, 50}, "successAge": {in.SuccessAge, 40}, "failureAge": {in.FailureAge, 20}, "changeAge": {in.ChangeAge, 10},
+		"contextAge": {in.ContextAge, 8}, "teamAge": {in.TeamAge, 6}, "decisionRequestAge": {in.DecisionRequestAge, 4}, "progressAge": {in.ProgressAge, 1}, "startAge": {in.StartAge, 100},
+		"decisionAnswerAge": {in.DecisionAnswerAge, shader.NeverAge}, "inputAge": {in.InputAge, 2},
+		"promptLength": {in.PromptLength, 5}, "attachments": {in.Attachments, 1}, "busy": {in.Busy, 1}, "errorActive": {in.ErrorActive, 1},
+	}
+	for name, c := range checks {
+		if !near(c[0], c[1]) {
+			t.Errorf("%s = %v, want %v", name, c[0], c[1])
+		}
+	}
+	if in.Seed <= 0 || in.Seed >= 1 {
+		t.Errorf("seed outside (0,1): %v", in.Seed)
+	}
+	if _, _, focus := m.shaderState(now); focus != "coder" {
+		t.Errorf("focus should follow the agent asking the user, got %q", focus)
+	}
+	m.Decisions = nil
+	if _, _, focus := m.shaderState(now); focus != "coder" {
+		t.Errorf("focus should follow the active running agent, got %q", focus)
+	}
+	m.State.Agents["coder"] = "succeeded"
+	if _, _, focus := m.shaderState(now); focus != "tester" {
+		t.Errorf("focus should fall back to the failed agent, got %q", focus)
+	}
+}
+
+func TestShaderEnvelopesEaseInsteadOfSnapping(t *testing.T) {
+	w := Workflow{Id: "alpha", Agents: []Agent{{Id: "one"}}}
+	m := LiveModel{Run: Run{Workflow: w, Settings: DefaultSettings(Runtime{})}, State: RunState{Status: "running", Agents: map[string]string{"one": "running"}}}
+	m.Decisions = []Decision{{ID: "d", AgentID: "one", CreatedAt: Now()}}
+	m.advanceShader(.15)
+	first := m.ShaderEnv.Attention
+	if first <= 0 || first >= .5 {
+		t.Fatalf("attention should ease in, got %f after one tick", first)
+	}
+	for range 40 {
+		m.advanceShader(.15)
+	}
+	if m.ShaderEnv.Attention < .95 || m.ShaderEnv.Energy < .5 || m.ShaderEnv.FocusStrength < .9 {
+		t.Fatalf("envelopes did not settle: %+v", m.ShaderEnv)
+	}
+	m.Decisions = nil
+	m.advanceShader(.15)
+	if m.ShaderEnv.Attention < .5 {
+		t.Fatalf("answered question should fade out smoothly, got %f", m.ShaderEnv.Attention)
+	}
+	before := m.ShaderEnv.WorkTime
+	m.Events = []Event{{Sequence: 1, Type: "agent.started", At: Now()}}
+	m.advanceShader(.15)
+	m.Events = append(m.Events, Event{Sequence: 2, Type: "agent.progress", At: Now()}, Event{Sequence: 3, Type: "agent.progress", At: Now()})
+	m.advanceShader(.15)
+	if m.ShaderEnv.Activity <= 0 || m.ShaderEnv.WorkTime <= before {
+		t.Fatalf("new events did not raise activity: %+v", m.ShaderEnv)
+	}
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = next.(LiveModel)
+	m.advanceShader(.15)
+	if m.ShaderEnv.Typing <= 0 || m.ShaderInputAt.IsZero() {
+		t.Fatal("typing did not register")
+	}
+	m.Run.Settings.Display.Animation = "off"
+	m.Decisions = []Decision{{ID: "d", AgentID: "one", CreatedAt: Now()}}
+	in := m.shaderInputs(80, 24)
+	if in.Attention != 1 || in.Typing != 0 || in.EventAge != shader.NeverAge || in.WorkTime != 0 {
+		t.Fatalf("static inputs should snap to state without transients: %+v", in)
+	}
+}
+
+func TestShaderFocusFollowsAgentCardAndTintsQuestions(t *testing.T) {
+	lines := []string{"HEADER", "", "      ╭────────────╮", "      │ coder · x  │", "      ╰────────────╯", "", "", "", "", "", "", "", "FOOTER"}
+	if _, ok := focusPosition(lines, "code", 1, 12, 60, 24); ok {
+		t.Fatal("matched a partial agent ID")
+	}
+	pos, ok := focusPosition(lines, "coder", 1, 12, 60, 24)
+	if !ok || math.Abs(pos.V[0]-10.5/60) > 1e-9 || math.Abs(pos.V[1]-4.5/24) > 1e-9 {
+		t.Fatalf("wrong focus position: %v %v", pos, ok)
+	}
+	program, err := shader.Compile(`float4 main(float2 uv){return float4(1.0, 0.6, 0.1, 1.0);}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := shaderCell(program, ".", shader.Inputs{}, 1, 1, 80, 24, true)
+	var r, g, b int
+	if _, err := fmt.Sscanf(cell, "\x1b[38;2;%d;%d;%dm", &r, &g, &b); err != nil {
+		t.Fatal(err)
+	}
+	if !(r > g && g > b) || r > 205 {
+		t.Fatalf("amber hue lost or too bright: %d,%d,%d", r, g, b)
+	}
+
+	// A pending decision lights the default background amber around the asker.
+	w := NewWorkflow("test", "test")
+	w.HeadAgent = "coder"
+	w.Agents = []Agent{{Id: "coder"}}
+	m := LiveModel{Run: Run{Workflow: w, Settings: DefaultSettings(Runtime{})}, State: RunState{Status: "running", Agents: map[string]string{"coder": "running"}}}
+	plain := m.background(append([]string{}, lines...), 1, 12, 60, 24, true)
+	m.Decisions = []Decision{{ID: "d", AgentID: "coder", CreatedAt: Now()}}
+	for range 30 {
+		m.advanceShader(.15)
+	}
+	m.ShaderTime = math.Pi / 2 / 3.2
+	asking := m.background(append([]string{}, lines...), 1, 12, 60, 24, true)
+	warmth := func(out []string) (warm int) {
+		for _, line := range out {
+			for _, part := range strings.Split(line, "\x1b[38;2;")[1:] {
+				if _, err := fmt.Sscanf(part, "%d;%d;%dm", &r, &g, &b); err == nil && r > b+20 {
+					warm++
+				}
+			}
+		}
+		return warm
+	}
+	if warmth(plain) != 0 || warmth(asking) == 0 {
+		t.Fatalf("question did not warm the background: %d -> %d", warmth(plain), warmth(asking))
 	}
 }

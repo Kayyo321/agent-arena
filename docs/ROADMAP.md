@@ -107,7 +107,8 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 ## Graph background shaders
 
 Implemented: per-arena settings and adjacent HLSL scripts, a bounded CPU HLSL
-profile, ASCII conversion, edge-fading default dots, protected foreground spans,
+profile, ASCII conversion with optional hue, state-rich inputs (counts, event ages,
+focus and smoothed envelopes), reactive edge-fading default dots, protected foreground spans,
 and default-model Background Shader Creation through the permanent orchestrator.
 Real Codex default-model generation and animated PTY playback passed; see
 [validation evidence](VALIDATION.md). Full HLSL/GPU compatibility and other-provider
