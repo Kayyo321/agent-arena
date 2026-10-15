@@ -24,6 +24,9 @@ func interviewModel(t *testing.T) LiveModel {
 	chat.probe = func(context.Context, string, Runtime) Readiness {
 		return Readiness{CanStart: true, State: "fixture only"}
 	}
+	chat.discover = func(context.Context, string, Runtime) ([]ModelOption, error) {
+		return []ModelOption{{ID: "explicit-test-model", Efforts: []string{"low", "high"}}}, nil
+	}
 	session.interviews = append(session.interviews, chat)
 	t.Cleanup(session.close)
 	return LiveModel{Project: p, Run: Run{Workflow: NewWorkflow("setup", "Setup"), Settings: s}, State: RunState{Status: "setup"}, ChatMode: true, Interview: chat, Session: session, Context: session.ctx, Width: 120, Height: 32}
@@ -245,5 +248,42 @@ func TestMediatedProviderToolsEmitPublicActivityWithoutArguments(t *testing.T) {
 	})
 	if err != nil || len(events) != 2 || !strings.Contains(visibleActivity(events[0]), "read_file") || strings.Contains(string(SafeJSON(events)), "fixture content") {
 		t.Fatalf("mediated activity: %v %v", events, err)
+	}
+}
+
+func TestInvalidDraftIsRepairedByOrchestratorBeforeUserSeesIt(t *testing.T) {
+	m := interviewModel(t)
+	calls := 0
+	m.Interview.invoker = testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
+		calls++
+		if err := in.Delivered(); err != nil {
+			return nil, err
+		}
+		if !strings.Contains(in.Prompt, "explicit-test-model") || !strings.Contains(in.Prompt, "Project settings") {
+			return nil, fmt.Errorf("catalog or settings missing from setup prompt")
+		}
+		w := NewWorkflow("repaired", "Repaired")
+		w.HeadAgent = "head"
+		w.Agents = []Agent{{Id: "head", Level: Int(0), Profile: ".agents/repaired/head.agent.json", Runtime: in.Runtime}, {Id: "worker", Level: Int(1), Profile: ".agents/repaired/worker.agent.json", Runtime: in.Runtime}}
+		if calls == 2 {
+			if !strings.Contains(in.Prompt, "path node worker is unreachable") {
+				return nil, fmt.Errorf("repair prompt lacks validation error")
+			}
+			w.Relationships = []Relationship{{Type: "delegates", From: "head", To: "worker"}}
+		}
+		profiles := map[string]Profile{"head": NewProfile("head", "lead", "Plan", "Use evidence", []string{"read"}), "worker": NewProfile("worker", "builder", "Build", "Use evidence", []string{"read"})}
+		return map[string]any{"question": "Draft ready.", "complete": true, "builderRequestJson": string(JSON(WorkflowDraft{w, profiles}))}, nil
+	})
+	next, cmd := m.submit("Build it; you pick everything")
+	m = pumpInterview(t, next.(LiveModel), cmd, "")
+	if m.Error != "" || m.Draft == nil || calls != 2 {
+		t.Fatalf("draft not repaired: calls=%d err=%s", calls, m.Error)
+	}
+	repaired := false
+	for _, event := range m.ControlEvents {
+		repaired = repaired || event.Type == "setup.repair"
+	}
+	if !repaired {
+		t.Fatal("repair attempt not audited")
 	}
 }

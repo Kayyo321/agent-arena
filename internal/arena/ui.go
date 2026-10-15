@@ -315,6 +315,15 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.Error = ""
 		}
+	case tea.MouseWheelMsg:
+		// Capturing the wheel stops terminals from translating it into Up/Down,
+		// which would recall prompt history instead of scrolling.
+		switch v.Button {
+		case tea.MouseWheelUp:
+			m.scrollBy(-3)
+		case tea.MouseWheelDown:
+			m.scrollBy(3)
+		}
 	case tea.PasteMsg:
 		m.noteShaderInput()
 		if !m.pasteAttachments(v.Content) {
@@ -416,23 +425,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "alt+right", "ctrl+right", "alt+f":
 			m.input.cursor = m.wordBoundary(1)
 		case "pgup":
-			if m.PopupAgent != "" {
-				if m.PopupOffset >= 1<<29 {
-					m.PopupOffset = m.scrollEnd(true)
-				}
-				m.PopupOffset = max(0, m.PopupOffset-10)
-				return m, nil
-			}
-			if m.Offset >= 1<<29 {
-				m.Offset = m.scrollEnd(false)
-			}
-			m.Offset = max(0, m.Offset-10)
+			m.scrollBy(-10)
 		case "pgdown":
-			if m.PopupAgent != "" {
-				m.PopupOffset = min(m.scrollEnd(true), m.PopupOffset+10)
-				return m, nil
-			}
-			m.Offset = min(m.scrollEnd(false), m.Offset+10)
+			m.scrollBy(10)
 		case "home", "ctrl+a":
 			if m.PopupAgent != "" && s == "home" {
 				m.PopupOffset = 0
@@ -489,6 +484,20 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// scrollBy moves the agent mini-window when open, otherwise the body.
+func (m *LiveModel) scrollBy(lines int) {
+	popup := m.PopupAgent != ""
+	offset := &m.Offset
+	if popup {
+		offset = &m.PopupOffset
+	}
+	if *offset >= 1<<29 {
+		*offset = m.scrollEnd(popup)
+	}
+	*offset = max(0, min(m.scrollEnd(popup), *offset+lines))
+}
+
 func (m *LiveModel) showDetail(panel string) {
 	open := panel == "git" && m.GitDetail || panel == "events" && m.Detail || panel == "changes" && m.ChangeDetail
 	m.ChatMode, m.Panel, m.PopupAgent, m.Offset = false, "", "", 0
@@ -570,6 +579,7 @@ func (m LiveModel) View() tea.View {
 	lines = m.overlay(lines, width, height)
 	view := tea.NewView(strings.Join(lines, "\n"))
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.Cursor = tea.NewCursor(cursorX, promptY+cursorY)
 	view.Cursor.Shape = tea.CursorBar
 	return view
@@ -580,7 +590,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		body = append(body, m.Panel+" · /close to return")
 		body = append(body, m.PanelText...)
 	} else if m.ChatMode {
-		body = append(body, m.chatBody()...)
+		// The styled transcript is appended after plain lines are wrapped.
 	} else if m.ChangeDetail {
 		body = append(body, "Review queue · Alt+↑/↓ select a change · PageUp/PageDown scroll · /close to return")
 		for i, change := range m.Changes {
@@ -663,10 +673,13 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		if m.Run.ID == "" {
 			label += " · type a task or /run TASK"
 		}
+		if m.Executing {
+			label = m.spinner(color) + " " + label
+		}
 		body = append([]string{label}, body...)
 	}
 	if m.Starting {
-		body = append([]string{"Starting task · checking readiness, policies and Git isolation…"}, body...)
+		body = append([]string{m.spinner(color) + " Starting task · checking readiness, policies and Git isolation"}, body...)
 	}
 	if m.ShaderError != "" {
 		body = append([]string{"Background shader disabled: " + Redact(m.ShaderError)}, body...)
@@ -676,6 +689,9 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	}
 	if m.Detail || m.GitDetail || m.ChangeDetail || m.Panel != "" || m.ChatMode {
 		body = plainUILines(body, width)
+	}
+	if m.ChatMode && m.Panel == "" {
+		body = append(body, m.chatBody(width, color)...)
 	}
 	return body
 }

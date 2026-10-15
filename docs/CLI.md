@@ -15,11 +15,18 @@ arena setup --project ~/my-new-project
 
 Setup can create that directory and initialize Git. It asks for the permanent
 orchestrator's provider, exact model and supported effort before writing anything,
-then confirms initialization. It installs the skill and launches the selected
+then confirms initialization. The model prompt lists the exact IDs the provider
+reports (Codex app-server catalog, Gemini SDK, local `/api/tags` or `/models`) with
+their supported efforts; enter a number or type an exact ID. Claude Code exposes
+no catalog, so its model is typed. A listed model is not proof of inference access. It installs the skill and launches the selected
 default orchestrator: describe what you want to build and answer its questions
 about the workflow in Arena's own TUI. Codex runs invisibly through app-server,
 with no native Codex terminal screen. Review the proposed graph and enter `/save`;
-Arena validates and saves it, then opens its graph in the same TUI. Until saved, bare `arena` re-enters
+Arena validates and saves it, then opens its graph in the same TUI. Choices you
+delegate ("you pick the efforts") are made by the orchestrator from the reported
+catalog and listed in its reply. If a draft fails validation, Arena returns the
+error to the orchestrator for up to two automatic repairs (journaled as
+`setup.repair`) before reporting it. Until saved, bare `arena` re-enters
 setup using the saved control runtime. No worker runtime is inferred from it.
 
 To prepare configuration without starting the conversation:

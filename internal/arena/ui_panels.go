@@ -204,20 +204,16 @@ func (m LiveModel) overlay(lines []string, width, height int) []string {
 	return lines
 }
 
-func (m LiveModel) chatBody() []string {
-	lines := []string{"Project orchestrator · describe your project · /help commands"}
-	for _, line := range m.Chat {
-		role := line.Role
-		if role == "you" {
-			role = "You"
-		}
-		lines = append(lines, role, line.Text, "")
-	}
+// chatBody is already sanitized and styled; callers must not wrap it again.
+func (m LiveModel) chatBody(width int, color bool) []string {
+	lines := []string{muted(short("Project orchestrator · describe your project · /help commands", width), color), ""}
+	lines = append(lines, m.chatTranscript(width, color)...)
 	if m.Draft != nil {
-		lines = append(lines, "WORKFLOW PREVIEW:", GraphSummary(m.Draft.Workflow), "Review runtimes and policy above. /save applies this draft; typing revises it.")
+		lines = append(lines, chatRule("Workflow preview", width, color))
+		lines = append(lines, plainUILines([]string{GraphSummary(m.Draft.Workflow), "Review runtimes and policy above. /save applies this draft; typing revises it."}, width)...)
 	}
 	if m.ChatBusy {
-		lines = append(lines, "Working… · /view arena-orchestrator for activity")
+		lines = append(lines, short(m.spinner(color)+" Working · /view arena-orchestrator for activity", width+20))
 	}
 	return lines
 }

@@ -172,40 +172,51 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		return cli.runtimeCommand(ctx, p, pos, o)
 	}
 }
+
+// choose lists options and accepts either a number or an exact value. With an
+// empty list it falls back to free entry; strict rejects unlisted values.
+func (cli *CLI) choose(label string, options, notes []string, strict bool) (string, error) {
+	if len(options) == 0 {
+		return cli.ask(label, "", true)
+	}
+	for i, option := range options {
+		line := fmt.Sprintf("  %2d) %s", i+1, option)
+		if i < len(notes) && notes[i] != "" {
+			line += "  " + notes[i]
+		}
+		fmt.Fprintln(cli.Out, line)
+	}
+	for {
+		answer, e := cli.ask(label+" (number or exact value)", "", true)
+		if e != nil {
+			return "", e
+		}
+		if n, err := strconv.Atoi(answer); err == nil && n >= 1 && n <= len(options) {
+			return options[n-1], nil
+		}
+		if !strict || Has(options, answer) {
+			return answer, nil
+		}
+		fmt.Fprintf(cli.Out, "%q is not in the list above.\n", answer)
+	}
+}
+
 func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Options) (Runtime, error) {
 	var e error
-	for _, x := range []struct {
-		key, label string
-		target     *string
-	}{{"provider", "Provider (codex, claude-code, gemini, local)", &r.Provider}, {"model", "Exact model ID", &r.Model}} {
-		if v := o.Get(x.key); v != "" {
-			*x.target = v
-		}
-		if *x.target == "" {
-			*x.target, e = cli.ask(x.label, "", true)
-			if e != nil {
-				return r, e
-			}
-		}
+	if v := o.Get("provider"); v != "" {
+		r.Provider = v
 	}
-	if v := o.Get("effort"); v != "" {
-		r.ReasoningEffort = v
+	if r.Provider == "" {
+		fmt.Fprintln(cli.Out, "Provider:")
+		r.Provider, e = cli.choose("Provider", []string{"codex", "claude-code", "gemini", "local"}, []string{"Codex CLI, its own sign-in", "Claude Code CLI, API key or cloud auth", "Google GenAI SDK, API key or Vertex AI", "Ollama or OpenAI-compatible server on this machine"}, true)
+		if e != nil {
+			return r, e
+		}
 	}
 	if r.Options == nil {
 		r.Options = map[string]any{}
 	}
-	if r.Provider == "codex" || r.Provider == "claude-code" {
-		if r.ReasoningEffort == "" {
-			status := Probe(ctx, p.Root, r)
-			if len(status.Efforts) > 0 {
-				fmt.Fprintf(cli.Out, "Installed CLI reports efforts: %s\n", strings.Join(status.Efforts, ", "))
-			}
-			r.ReasoningEffort, e = cli.ask("Provider-specific reasoning effort", "", true)
-			if e != nil {
-				return r, e
-			}
-		}
-	}
+	// Connection choices come first so the model catalog can be queried.
 	if r.Provider == "local" {
 		for _, x := range []struct{ key, label string }{{"backend", "Backend (ollama, lm-studio, llama.cpp, vllm, openai-compatible)"}, {"endpoint", "Loopback HTTP endpoint"}} {
 			value := o.Get(x.key)
@@ -227,12 +238,62 @@ func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Opti
 			v = str(r.Options["authMethod"])
 		}
 		if v == "" {
-			v, e = cli.ask("Auth method (google-ai-studio-api-key, vertex-ai)", "", true)
+			v, e = cli.choose("Auth method", []string{"google-ai-studio-api-key", "vertex-ai"}, nil, true)
 			if e != nil {
 				return r, e
 			}
 		}
 		r.Options["authMethod"] = v
+	}
+	if v := o.Get("model"); v != "" {
+		r.Model = v
+	}
+	var catalog []ModelOption
+	if r.Model == "" {
+		fmt.Fprintf(cli.Out, "Discovering models from %s...\n", r.Provider)
+		catalog, e = DiscoverModels(ctx, p.Root, r)
+		if e != nil || len(catalog) == 0 {
+			if e == nil {
+				e = fmt.Errorf("the provider reported no models")
+			}
+			fmt.Fprintf(cli.Out, "Model discovery unavailable: %s\n", Redact(e.Error()))
+		} else {
+			fmt.Fprintln(cli.Out, "Models reported by the provider (listing does not prove inference access):")
+		}
+		ids, notes := []string{}, []string{}
+		for _, model := range catalog {
+			ids = append(ids, model.ID)
+			note := model.Name
+			if len(model.Efforts) > 0 {
+				note = strings.TrimSpace(note + "  efforts: " + strings.Join(model.Efforts, ", "))
+			}
+			notes = append(notes, note)
+		}
+		r.Model, e = cli.choose("Exact model ID", ids, notes, false)
+		if e != nil {
+			return r, e
+		}
+	}
+	if v := o.Get("effort"); v != "" {
+		r.ReasoningEffort = v
+	}
+	if (r.Provider == "codex" || r.Provider == "claude-code") && r.ReasoningEffort == "" {
+		efforts := []string{}
+		for _, model := range catalog {
+			if model.ID == r.Model {
+				efforts = model.Efforts
+			}
+		}
+		if len(efforts) == 0 {
+			efforts = Probe(ctx, p.Root, r).Efforts
+		}
+		if len(efforts) > 0 {
+			fmt.Fprintf(cli.Out, "Reasoning efforts supported by %s:\n", r.Model)
+		}
+		r.ReasoningEffort, e = cli.choose("Provider-specific reasoning effort", efforts, nil, len(efforts) > 0)
+		if e != nil {
+			return r, e
+		}
 	}
 	return r, ValidateRuntime(r)
 }

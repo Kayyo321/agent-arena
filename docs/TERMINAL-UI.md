@@ -88,9 +88,21 @@ keyboard reporting (requested automatically). Alt+Enter or Ctrl+J also inserts a
 newline, including in older terminals that cannot distinguish Shift+Enter. Bracketed paste inserts at the caret and
 preserves line breaks, stripping terminal control sequences. The composer wraps,
 grows to at most five rows, and keeps the caret visible after resizing. PageUp/
-PageDown scroll the conversation or current view; Ctrl+Home/End jump to its
-beginning/latest content. Alt+Up/Down select audit events or review changes,
-leaving ordinary arrows available for message editing and history.
+PageDown and the mouse wheel scroll the conversation, current view or open agent
+window; Ctrl+Home/End jump to its beginning/latest content. Arena captures the
+wheel so terminals cannot turn it into Up/Down history recall; hold Shift while
+dragging to select text with the terminal. Alt+Up/Down select audit events or
+review changes, leaving ordinary arrows available for message editing and history.
+
+The orchestrator transcript opens each message with a full-width rule in the
+speaker's color: a heavy cyan rule for you, purple for `arena-orchestrator`, and
+amber for Arena notices (failures in red). Agent replies are rendered from
+Markdown by Arena: headings, bold/italic/strikethrough, inline code on a dark
+background, fenced code blocks, quotes, lists, rules, tables and links. Provider
+escape sequences are stripped before Arena applies its own styles. While work is
+in progress the status line shows a Unicode loading animation that switches to a
+different set about every four seconds; `display.animation: off` (or a
+non-UTF-8 locale) shows a static ellipsis instead.
 
 
 `/view AGENT_NAME` opens a centered, live mini-window with the selected agent's

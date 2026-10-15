@@ -341,13 +341,33 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 	if e := walk(w.HeadAgent); e != nil {
 		return e
 	}
+	incoming := map[string]bool{}
+	for _, targets := range edges {
+		for _, to := range targets {
+			incoming[to] = true
+		}
+	}
+	for _, r := range w.DecisionRouters {
+		if !incoming[r.Id] {
+			return fmt.Errorf("router %s has no incoming delegates edge; add one from the node that produces its %s packets (for a team verdict, delegate from the team to the router)", r.Id, r.InputKind)
+		}
+	}
+	unreachable := []string{}
 	for id := range nodes {
 		if agents[id].Activation == "on-call" || members[id] != "" {
 			continue
 		}
 		if !visited[id] {
-			return fmt.Errorf("path node %s is unreachable from head %s", id, w.HeadAgent)
+			unreachable = append(unreachable, id)
 		}
+	}
+	if len(unreachable) > 0 {
+		sort.Strings(unreachable)
+		noun := "path node " + unreachable[0] + " is"
+		if len(unreachable) > 1 {
+			noun = "path nodes " + strings.Join(unreachable, ", ") + " are"
+		}
+		return fmt.Errorf("%s unreachable from head %s; connect each through a delegates edge (or a router route) from a node on the path", noun, w.HeadAgent)
 	}
 	if w.Settings.MaxConcurrentAgents > s.Limits.MaxConcurrentAgents {
 		return fmt.Errorf("workflow concurrency exceeds project limit")
