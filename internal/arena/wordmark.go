@@ -125,8 +125,8 @@ func (m LiveModel) header(width, height int, color bool) []string {
 				if !unicodeLettering() {
 					connector = "|- "
 				}
-				label := b.row(connector+tree.AgentID+" "+branch+" "+tree.State, boxWidth)
-				left = append(left, agentColor(tree.AgentID, label, color))
+				label := tree.AgentID + " " + branch + " " + tree.State
+				left = append(left, b.row(connector+agentColor(tree.AgentID, label, color), boxWidth))
 			}
 			if len(m.Trees) == 0 || len(m.Trees) > 2 {
 				label := fmt.Sprintf("%d worktrees · /git details", len(m.Trees))

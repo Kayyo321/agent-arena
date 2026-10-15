@@ -343,7 +343,8 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 			}
 			sort.Slice(owned, func(i, j int) bool { return owned[i].x > owned[j].x })
 			for _, card := range owned {
-				text = ansi.Cut(text, 0, card.x) + agentColor(card.id, ansi.Cut(text, card.x, card.x+cardWidth), true) + ansi.Cut(text, card.x+cardWidth, width)
+				start, end := card.x+2, card.x+cardWidth-2
+				text = ansi.Cut(text, 0, start) + agentColor(card.id, ansi.Cut(text, start, end), true) + ansi.Cut(text, end, width)
 			}
 		}
 		lines = append(lines, strings.TrimRight(text, " "))
