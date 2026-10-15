@@ -8,6 +8,8 @@ import (
 )
 
 var slashHelp = []string{
+	"/shader DESCRIPTION         Create a background shader with the default model",
+	"/shader-save /shader-off    Apply the preview or disable the background",
 	"/help                       Commands and keyboard controls",
 	"/agents                     Agents, roles and selected runtimes",
 	"/view NAME                  Live agent activity mini-window",
@@ -34,7 +36,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -68,6 +70,8 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 		name := strings.TrimPrefix(parts[0], "/")
 		arg := strings.TrimSpace(strings.TrimPrefix(text, parts[0]))
 		switch name {
+		case "shader", "shader-save", "shader-off":
+			return m.shaderCommand(name, arg)
 		case "quit", "exit":
 			return m, tea.Quit
 		case "help":
@@ -164,7 +168,7 @@ func (m LiveModel) submit(input string) (tea.Model, tea.Cmd) {
 			if m.PopupAgent != "" {
 				return m, m.loadAgentContext(m.PopupAgent)
 			}
-			return m, m.probeReadiness()
+			return m, tea.Batch(m.probeReadiness(), m.loadShader())
 		case "decisions":
 			m.Panel, m.PanelText = "Pending decisions", []string{"Use /answer ID TEXT"}
 			for _, d := range m.Decisions {

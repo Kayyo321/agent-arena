@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	c "github.com/Kayyo321/agent-arena/internal/contract"
+	"github.com/Kayyo321/agent-arena/internal/shader"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -19,6 +21,15 @@ type uiReadinessResult struct {
 	Results  []Readiness
 }
 type LiveModel struct {
+	ShaderProgram           *shader.Program
+	ShaderConfig            *c.WorkflowSettingsBackgroundShader
+	ShaderError             string
+	ShaderFrame             int
+	ShaderTime, ShaderDelta float64
+	ShaderLast              time.Time
+	ShaderBusy              bool
+	ShaderDraft             *shaderGenerated
+
 	input              promptEditor
 	GitDetail          bool
 	Project            *Project
@@ -61,9 +72,9 @@ type LiveModel struct {
 
 func (m LiveModel) Init() tea.Cmd {
 	if m.Run.ID == "" {
-		return m.probeReadiness()
+		return tea.Batch(m.probeReadiness(), m.loadShader(), tickShader(m.Run.Workflow.Id))
 	}
-	return tickUI(m.Run.ID)
+	return tea.Batch(tickUI(m.Run.ID), m.loadShader(), tickShader(m.Run.Workflow.Id))
 }
 func (m LiveModel) probeReadiness() tea.Cmd {
 	runtimes := Required([]Workflow{m.Run.Workflow}, m.Run.Settings)
@@ -80,6 +91,45 @@ func tickUI(runID string) tea.Cmd {
 }
 func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
+	case shaderTick:
+		if v.Workflow != m.Run.Workflow.Id {
+			return m, nil
+		}
+		m.ShaderFrame++
+		if !m.ShaderLast.IsZero() {
+			m.ShaderDelta = v.At.Sub(m.ShaderLast).Seconds()
+			m.ShaderTime += m.ShaderDelta
+		}
+		m.ShaderLast = v.At
+		return m, tickShader(v.Workflow)
+	case shaderLoaded:
+		if v.Workflow != m.Run.Workflow.Id {
+			return m, nil
+		}
+		m.ShaderProgram, m.ShaderConfig, m.ShaderError = v.Program, &v.Config, ""
+		if v.Err != nil {
+			m.ShaderError = v.Err.Error()
+		}
+	case shaderGenerated:
+		m.ShaderBusy = false
+		if v.Err != nil {
+			m.Error = v.Err.Error()
+			m.PanelText = []string{"Shader creation failed; the saved shader is unchanged."}
+			return m, nil
+		}
+		m.ShaderDraft = &v
+		program, _ := shader.Compile(v.Draft.Source)
+		m.Panel, m.PanelText = "Background Shader Creation", append([]string{"Preview · /shader-save to apply · /close to return", "Source: " + v.Workflow.Id + ".background.hlsl"}, strings.Split(shaderPreview(program, v.Draft.Glyphs), "\n")...)
+	case shaderSaved:
+		m.ShaderBusy = false
+		if v.Err != nil {
+			m.Error = v.Err.Error()
+			return m, nil
+		}
+		m.ShaderDraft = nil
+		m.Panel = ""
+		m.ChatMode = false
+		return m, m.loadShader()
 	case tea.WindowSizeMsg:
 		m.Width = v.Width
 		m.Height = v.Height
@@ -444,6 +494,7 @@ func (m LiveModel) View() tea.View {
 	prompt, cursorX, cursorY := m.promptView(width, height, color)
 	footerHeight := 2 + len(prompt)
 	lines = lines[:min(len(lines), max(0, height-footerHeight-1))]
+	backgroundStart := len(lines)
 	budget := max(0, height-len(lines)-footerHeight)
 	offset := min(m.Offset, max(0, len(body)-max(1, budget)))
 	end := min(len(body), offset+budget)
@@ -459,6 +510,7 @@ func (m LiveModel) View() tea.View {
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], width, "")
 	}
+	lines = m.background(lines, backgroundStart, height-footerHeight, width, height, color)
 	lines = m.overlay(lines, width, height)
 	view := tea.NewView(strings.Join(lines, "\n"))
 	view.AltScreen = true
@@ -555,6 +607,9 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	}
 	if m.Starting {
 		body = append([]string{"Starting task · checking readiness, policies and Git isolation…"}, body...)
+	}
+	if m.ShaderError != "" {
+		body = append([]string{"Background shader disabled: " + Redact(m.ShaderError)}, body...)
 	}
 	if m.Error != "" {
 		body = append([]string{"Error: " + Redact(m.Error)}, body...)

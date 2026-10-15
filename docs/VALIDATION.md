@@ -108,3 +108,24 @@ cleanup; retirement is recoverable local storage, not secure deletion. Reduced
 retention cannot replay omitted packets; pending operational decision text can
 remain after a crash. Audit export/import, native Windows, and skill-only host
 execution adapters are not implemented.
+
+## Background shaders
+
+Local checks on 2026-10-15: `make check` (vet and race-enabled tests) and
+`make build` pass with the shader feature. Tests cover HLSL-profile vector math,
+activity inputs, center-to-edge default fading, non-finite output, syntax/resource
+limits, source isolation, recoverable transactions, concurrent source conflicts,
+missing-file repair, symlink refusal, and foreground/monochrome/animation behavior.
+A short two-worker compiler/evaluator fuzz run completed 306,825 executions without
+a failure. The default evaluator benchmark on the local Apple M2 Pro measured
+about 0.91 microseconds per cell with zero heap allocations (not a cross-platform
+performance guarantee).
+
+A local rendered fixture was inspected with the graph at 140×40; foreground and
+popup comparisons also passed down to 8×4. The first PNG export used Menlo alone,
+which lacks the logo's Braille glyphs; the corrected export uses Apple Symbols
+for those glyphs. This was preview font coverage, not corrupted terminal output.
+The existing terminal logo geometry/fallback checks pass. No new real-terminal
+font compatibility or provider inference verification is claimed. Default-model
+shader generation, read-only permissions and versioned/audited handoffs are tested
+with a fixture invoker; live shader generation has not been exercised.

@@ -296,6 +296,16 @@
       "additionalProperties": false,
       "required": ["maxConcurrentAgents", "workspace", "integration", "audit"],
       "properties": {
+        "backgroundShader": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "source", "glyphs"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "source": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*\\.background\\.hlsl$", "maxLength": 96 },
+            "glyphs": { "type": "string", "pattern": "^[ .,:;~+=*#%@-]{1,16}$" }
+          }
+        },
         "maxConcurrentAgents": { "type": "integer", "minimum": 1 },
         "workspace": {
           "type": "object",

@@ -141,3 +141,16 @@ Color is supplementary: every state has a text label or symbol. `display.colorMo
 ## Preferences
 
 Project `display` settings may choose color mode (`auto`, `always`, `never`), packet animation (`auto`, `on`, `off`), Git tree visibility, and title size (`show`, `compact`, `hide`). Automatic layout still protects legibility and adapts to the current terminal. These settings affect presentation only and do not change scheduling, permissions, or audit behavior.
+
+## ASCII shader background
+
+Each arena can select a CPU-evaluated HLSL-profile shader behind its graph. The
+shipped dots fade toward every screen edge. Full occupied text spans, card
+interiors, headers, footer, composer and popups stay opaque. Detail/chat views and
+very small terminals omit the decoration. `NO_COLOR` uses monochrome dithering;
+`display.animation` freezes animation inputs when off. Invalid/missing source
+shows a diagnostic and disables the background, leaving the graph usable.
+
+`/shader DESCRIPTION` invokes the default orchestrator model and previews validated
+source; `/shader-save` applies it, `/shader-off` disables it, and `/refresh` reloads
+external CLI changes. See [the shader contract](BACKGROUND-SHADERS.md).

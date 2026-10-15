@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -154,6 +154,8 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		return cli.init(ctx, p, o)
 	case "workflow":
 		return cli.workflow(ctx, p, pos[1:], o)
+	case "shader":
+		return cli.shader(ctx, p, pos[1:], o)
 	case "settings":
 		return cli.settings(p, pos[1:], o)
 	case "status", "auth":
@@ -857,6 +859,9 @@ arena init [--provider ID --model ID --effort VALUE] [--no-bootstrap] [--yes]
 arena bootstrap
 arena workflow create|edit ID [--input BUILDER-REQUEST] [--dry-run] [--yes]
 arena workflow list|show|validate|delete [ID]
+arena shader show|validate|preview|default|off ID
+arena shader set ID --input FILE [--glyphs RAMP] [--yes]
+arena shader create ID "description" [--yes] [--dry-run]
 arena settings show|edit [--set /pointer=JSON-value] [--yes]
 arena status [--workflow ID] [--json]
 arena auth status

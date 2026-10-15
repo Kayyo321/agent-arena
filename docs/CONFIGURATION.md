@@ -148,3 +148,14 @@ The placeholder model ID is intentional: Arena must use the model the local back
 - Teams have at least two distinct path-agent members at one shared level, exactly one member facilitator, and a configured verdict contract; an agent belongs to at most one team. Team members cannot be the head or relationship endpoints.
 - On-call entries reference on-call agents exactly once, include at least one valid trigger, and enforce the per-run invocation cap. On-call agents cannot be the head, team members, or relationship endpoints.
 - A delegation edge may target a team ID. Communication edges may target only path-agent IDs. Internal team deliberation does not require normal graph edges.
+
+## Per-arena background shader
+
+New arenas have `settings.backgroundShader` (`enabled`, `source`, `glyphs`), with
+source stored in `.arena/ID.background.hlsl` next to `.arena/ID.arena.json`.
+The default is a dot grid that fades toward the screen edges. Existing arenas
+without this optional setting get the embedded default. `arena shader create ID
+"description"` uses the project default model; `set`, `default`, and `off` manage
+it without hand-editing JSON. Source and settings have recoverable transactions,
+and concurrent source changes invalidate an outstanding edit. See
+[Background Shader Creation](BACKGROUND-SHADERS.md) for commands and HLSL limits.

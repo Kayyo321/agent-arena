@@ -1,11 +1,11 @@
 ---
 name: arena-orchestrator
-description: Create, inspect, edit, run, and remove Agent Arena workflows through the Arena CLI. Use when a user asks to manage an arena or coordinate agents across provider CLIs and local model backends.
+description: Create, inspect, edit, run, and remove Agent Arena workflows through the Arena CLI. Use when a user asks to manage an arena, create its ASCII background shader, or coordinate agents across provider CLIs and local model backends.
 ---
 
 # Manage Agent Arena workflows
 
-Use this skill only for Arena workflow management. The CLI owns generated `.arena` configuration and run state; do not create or edit those files directly.
+Use this skill for Arena workflow management and Background Shader Creation. The CLI owns generated `.arena` configuration and run state; do not create or edit those files directly.
 
 1. Check whether `arena` is installed with `arena --help`, inspect command help, and run `arena status`. CLI syntax may change; prefer installed help over remembered examples. If Arena itself is missing or too old to support the requested operation, guide the user through the supported installation/update path, then re-check. Never hand-author generated `.arena` files as a substitute for a missing Arena feature.
 2. Treat missing prerequisites as setup work, not as the end of the request. For a requested provider agent (including Codex, Claude Code, and Gemini), inspect readiness for that provider. If the CLI/backend or Arena adapter is missing or too old, guide the user through its official installation/update path, then re-run `arena status`. If it is signed out, use only an authentication path explicitly supported for Arena's integration; start that provider-owned flow and let the user complete it directly. Re-run `arena status` to verify the CLI, compatible account/auth path, selected model, and supported options, then continue with the requested arena change. Never ask for, read, or copy passwords, browser cookies, or provider tokens. For Gemini, do not use or piggyback on Gemini CLI's personal Google OAuth session: ask whether to use the supported API-key or Vertex AI route, guide setup using Google's official instructions, and verify it with `arena status`. Do not imply that a consumer subscription is usable through Arena unless the current official integration terms explicitly allow it. If no approved adapter/auth path exists, state what is missing and finish any independent setup guidance without creating a non-runnable agent.
@@ -20,3 +20,31 @@ Use this skill only for Arena workflow management. The CLI owns generated `.aren
 11. Before accepting changes, inspect run history and diffs. Use Arena's rollback command for selected code or context changes; do not use a destructive Git reset to imitate rollback.
 
 For reviewer verdicts, team packets, decision routers, coworker requests, shared-context packets, on-call triggers, and message lifecycle rules, consult the repository's `docs/INTEROPERABILITY.md`. For local backend setup, runtime selection, context storage, and terminal readiness, read `docs/CONFIGURATION.md`, `docs/SHARED-CONTEXT.md`, and `docs/TERMINAL-UI.md`. For provider-specific install/auth setup, follow the official references linked in `docs/INTEROPERABILITY.md`; provider installation alone does not establish that its authentication mode is supported for Arena. For project policies, merge, and rollback expectations, consult `docs/AUDIT-AND-ROLLBACK.md`.
+
+## Background Shader Creation
+
+Use this built-in orchestrator skill when the user describes an ASCII background
+for an arena. Identify the target arena explicitly when several exist. Inspect
+`arena shader --help` and `arena shader show ID`, then run
+`arena shader create ID "USER DESCRIPTION"`. This command invokes the configured
+project default model, validates its HLSL profile v1 output, previews it, and saves
+through Arena's recoverable configuration transaction. Do not ask for a new model
+choice when the project already has a complete default runtime. If it is missing
+or unavailable, complete the normal runtime/readiness inquiry first.
+
+Use `--yes` when the user has authorized applying the described background; use
+`--dry-run` for a requested preview only. For supplied HLSL, use
+`arena shader set ID --input FILE` with an optional `--glyphs ' .:-=+*#%@'` ramp.
+Use `arena shader validate ID` and `arena shader preview ID` to inspect the saved
+result. `arena shader default ID` restores fading dots; `arena shader off ID`
+disables the background. Source lives at `.arena/ID.background.hlsl`, beside
+`.arena/ID.arena.json`; the CLI owns writes to both. Do not hand-edit settings.
+
+When invoked by Arena's embedded shader generator, return only the requested
+structured source and glyph ramp using the supplied HLSL profile/input contract;
+do not recursively call `arena shader create`. Use numeric timing, viewport, and
+workflow activity inputs to match the description. Preserve foreground legibility;
+Arena owns compositing and contrast. Unsupported HLSL must be revised rather than
+executed through shell commands, external compilers, or downloaded shader runners.
+A validation failure leaves the existing shader unchanged. Explain the diagnostic
+and revise the description/source before another explicitly requested generation.

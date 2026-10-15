@@ -119,3 +119,14 @@ The terminal's Git tree shows active branches and worktrees for the loaded arena
 - A user cancellation stops new work first, then requests cancellation from active adapters, checkpoints writable worktrees, and records any process that did not stop cleanly.
 - A missing adapter feature, invalid auth state, or unsupported model selector is surfaced before task launch.
 - A corrupt or unsupported journal is preserved and reported; Arena does not silently truncate it.
+
+## Graph shader presentation
+
+`internal/shader` compiles Arena's bounded HLSL profile into an immutable CPU
+program. The TUI samples numeric viewport/time/activity uniforms, converts output
+to ASCII luminance, and composes it only outside protected foreground spans.
+Shader ticks are separate from journal polling, so an idle arena can animate
+without inventing a run. Invalid source disables decoration with a diagnostic.
+`arena shader` owns per-workflow source/settings transactions; model-generated
+source is returned as data by the default orchestrator runtime and validated
+before application. See [Background Shader Creation](BACKGROUND-SHADERS.md).

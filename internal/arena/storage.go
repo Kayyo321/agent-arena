@@ -15,6 +15,7 @@ import (
 	"time"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
+	"github.com/Kayyo321/agent-arena/internal/shader"
 )
 
 type Project struct{ Root string }
@@ -403,6 +404,9 @@ func (p *Project) List() ([]string, error) {
 	return ids, nil
 }
 func (p *Project) Save(w Workflow, profiles map[string]Profile, expected string) (string, error) {
+	return p.saveWithShader(w, profiles, expected, nil)
+}
+func (p *Project) saveWithShader(w Workflow, profiles map[string]Profile, expected string, source *string) (string, error) {
 	l, e := p.WaitLock("config")
 	if e != nil {
 		return "", e
@@ -431,7 +435,37 @@ func (p *Project) Save(w Workflow, profiles map[string]Profile, expected string)
 			return "", fmt.Errorf("workflow, profile or settings changed during editing; reload before saving")
 		}
 	}
+	if current == nil && w.Settings.BackgroundShader == nil {
+		w.Settings.BackgroundShader = defaultShader(w.Id)
+		if _, err := os.Lstat(p.Path(w.Settings.BackgroundShader.Source)); err == nil {
+			return "", fmt.Errorf("shader source already exists; preserve it by explicitly selecting it in the workflow builder request")
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		value := shader.DefaultSource
+		source = &value
+	}
+	if source != nil {
+		if _, err := shader.Compile(*source); err != nil {
+			return "", err
+		}
+	}
+	if e = ValidateWorkflow(w, profiles, s); e != nil {
+		return "", e
+	}
 	files := map[string][]byte{w.Id + ".arena.json": JSON(w)}
+	if source != nil {
+		files[w.Settings.BackgroundShader.Source] = []byte(*source)
+	}
+	if source == nil && w.Settings.BackgroundShader != nil && w.Settings.BackgroundShader.Enabled {
+		text, err := p.shaderSource(w)
+		if err != nil {
+			return "", err
+		}
+		if _, err = shader.Compile(text); err != nil {
+			return "", err
+		}
+	}
 	for _, a := range w.Agents {
 		files[a.Profile] = JSON(profiles[a.Id])
 	}
@@ -474,6 +508,9 @@ func (p *Project) configFingerprint(id string) (string, error) {
 	for _, a := range w.Agents {
 		paths = append(paths, a.Profile)
 	}
+	if w.Settings.BackgroundShader != nil {
+		paths = append(paths, w.Settings.BackgroundShader.Source)
+	}
 	sort.Strings(paths)
 	var combined strings.Builder
 	for _, rel := range paths {
@@ -482,7 +519,7 @@ func (p *Project) configFingerprint(id string) (string, error) {
 			return "", err
 		}
 		b, err := os.ReadFile(path)
-		if err != nil {
+		if err != nil && !(os.IsNotExist(err) && strings.HasSuffix(rel, ".background.hlsl")) {
 			return "", err
 		}
 		combined.WriteString(rel)

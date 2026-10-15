@@ -126,6 +126,14 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 	if w.Id == "settings" || w.Id == "arena-system" {
 		return fmt.Errorf("reserved workflow ID %q", w.Id)
 	}
+	if cfg := w.Settings.BackgroundShader; cfg != nil {
+		if cfg.Source != w.Id+".background.hlsl" {
+			return fmt.Errorf("shader source must be %s.background.hlsl", w.Id)
+		}
+		if err := validateGlyphs(cfg.Glyphs); err != nil {
+			return err
+		}
+	}
 	agents := map[string]Agent{}
 	nodes := map[string]int{}
 	members := map[string]string{}

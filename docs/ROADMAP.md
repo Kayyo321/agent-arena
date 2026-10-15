@@ -103,3 +103,11 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 - Repository-generated typed Go models and lightweight validators from the public JSON Schemas.
 - Portable atomic lock directories inside `.arena/`; attached process-group supervision; macOS/Linux including WSL2.
 - Direct installed Codex CLI through its documented app-server interface; no partner identity implementation. See [ADR 0001](adr/0001-implementation-foundation.md) and [reviewed provider references](PROVIDERS.md).
+
+## Graph background shaders
+
+Implemented: per-arena settings and adjacent HLSL scripts, a bounded CPU HLSL
+profile, ASCII conversion, edge-fading default dots, protected foreground spans,
+and default-model Background Shader Creation through the permanent orchestrator.
+This does not claim full HLSL/GPU compatibility or real-provider shader generation
+verification. See [the profile and command contract](BACKGROUND-SHADERS.md).
