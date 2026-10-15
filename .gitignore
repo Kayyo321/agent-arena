@@ -1,0 +1,2 @@
+# Arena run data can contain prompts, tool output, and project patches.
+.arena/.state/

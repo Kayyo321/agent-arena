@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Arena protocol message envelope",
+  "type": "object",
+  "required": ["protocolVersion", "messageId", "runId", "kind", "from", "to", "createdAt", "correlationId", "attemptId", "replyTo", "payload", "providerContext"],
+  "properties": {
+    "protocolVersion": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "messageId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["task", "question", "message", "result", "error", "cancel"] },
+    "from": { "$ref": "#/$defs/actor" },
+    "to": { "$ref": "#/$defs/actor" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "correlationId": { "type": "string", "minLength": 1 },
+    "attemptId": { "type": "string", "minLength": 1 },
+    "replyTo": { "type": ["string", "null"] },
+    "payload": { "type": "object" },
+    "providerContext": {
+      "type": "object",
+      "description": "Opaque provider-specific values. Forward unchanged unless the target adapter explicitly handles them.",
+      "properties": {
+        "model": { "type": "string" },
+        "reasoningEffort": { "type": ["string", "null"] },
+        "options": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "task" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["objective", "acceptanceCriteria", "context", "constraints", "files", "expectedOutput", "workspace"],
+            "properties": {
+              "objective": { "type": "string", "minLength": 1 },
+              "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
+              "context": { "type": "array", "items": { "type": "string" } },
+              "constraints": { "type": "array", "items": { "type": "string" } },
+              "files": { "type": "array", "items": { "type": "string" } },
+              "expectedOutput": { "type": "array", "items": { "type": "string" } },
+              "workspace": { "$ref": "#/$defs/workspace" },
+              "deadline": { "type": ["string", "null"], "format": "date-time" }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "question" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["question", "decisionNeeded"],
+            "properties": {
+              "question": { "type": "string", "minLength": 1 },
+              "decisionNeeded": { "type": "string", "minLength": 1 },
+              "context": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "message" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["text"],
+            "properties": { "text": { "type": "string", "minLength": 1 } },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "result" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["summary", "changedFiles", "validation", "limitations", "nextAction"],
+            "properties": {
+              "summary": { "type": "string" },
+              "changedFiles": { "type": "array", "items": { "type": "string" } },
+              "commit": { "type": ["string", "null"] },
+              "checkpoint": { "type": ["string", "null"] },
+              "validation": { "type": "array", "items": { "type": "object", "required": ["command", "outcome"], "properties": { "command": { "type": "string" }, "outcome": { "type": "string" }, "details": { "type": "string" } }, "additionalProperties": true } },
+              "limitations": { "type": "array", "items": { "type": "string" } },
+              "nextAction": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "error" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["code", "message", "retryable"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "retryable": { "type": "boolean" },
+              "details": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "cancel" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["reason"],
+            "properties": { "reason": { "type": "string" } },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "required": ["agentId", "provider"],
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["baseCommit", "mode"],
+      "properties": {
+        "baseCommit": { "type": ["string", "null"] },
+        "mode": { "enum": ["read-only", "write"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

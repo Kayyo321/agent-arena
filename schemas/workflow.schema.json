@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Arena workflow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "headAgent", "agents", "relationships", "settings"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "headAgent": { "$ref": "#/$defs/id" },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/agentNode" }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/relationship" }
+    },
+    "settings": { "$ref": "#/$defs/settings" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "maxLength": 64
+    },
+    "agentNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "profile", "level", "runtime"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "profile": {
+          "type": "string",
+          "pattern": "^\\.agents/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\\.agent\\.json$"
+        },
+        "level": { "type": "integer", "minimum": 0 },
+        "runtime": { "$ref": "#/$defs/runtime" }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "reasoningEffort": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "object",
+          "description": "Provider-specific options. The selected adapter owns their meaning.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "relationship": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "from", "to"],
+          "properties": {
+            "type": { "const": "delegates" },
+            "from": { "$ref": "#/$defs/id" },
+            "to": { "$ref": "#/$defs/id" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "from", "to", "direction"],
+          "properties": {
+            "type": { "const": "communicates" },
+            "from": { "$ref": "#/$defs/id" },
+            "to": { "$ref": "#/$defs/id" },
+            "direction": { "enum": ["one-way", "two-way"] }
+          }
+        }
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxConcurrentAgents", "workspace", "integration", "audit"],
+      "properties": {
+        "maxConcurrentAgents": { "type": "integer", "minimum": 1 },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["writeIsolation"],
+          "properties": {
+            "writeIsolation": { "enum": ["git-worktree-per-task"] }
+          }
+        },
+        "integration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy"],
+          "properties": {
+            "policy": { "enum": ["human-review", "auto-if-clean"] }
+          }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["retention"],
+          "properties": {
+            "retention": { "enum": ["full-local", "redacted-local"] }
+          }
+        }
+      }
+    }
+  }
+}

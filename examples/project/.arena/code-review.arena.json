@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "code-review",
+  "name": "Cross-provider implementation and review",
+  "description": "A coordinator delegates implementation and independent review, then presents changes for integration.",
+  "headAgent": "orchestrator",
+  "agents": [
+    {
+      "id": "orchestrator",
+      "profile": ".agents/code-review/orchestrator.agent.json",
+      "level": 0,
+      "runtime": {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "implementer",
+      "profile": ".agents/code-review/implementer.agent.json",
+      "level": 1,
+      "runtime": {
+        "provider": "claude-code",
+        "model": "sonnet"
+      }
+    },
+    {
+      "id": "reviewer",
+      "profile": ".agents/code-review/reviewer.agent.json",
+      "level": 1,
+      "runtime": {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high"
+      }
+    }
+  ],
+  "relationships": [
+    { "type": "delegates", "from": "orchestrator", "to": "implementer" },
+    { "type": "delegates", "from": "orchestrator", "to": "reviewer" },
+    { "type": "communicates", "from": "implementer", "to": "reviewer", "direction": "two-way" },
+    { "type": "communicates", "from": "orchestrator", "to": "implementer", "direction": "two-way" },
+    { "type": "communicates", "from": "orchestrator", "to": "reviewer", "direction": "two-way" }
+  ],
+  "settings": {
+    "maxConcurrentAgents": 2,
+    "workspace": {
+      "writeIsolation": "git-worktree-per-task"
+    },
+    "integration": {
+      "policy": "human-review"
+    },
+    "audit": {
+      "retention": "full-local"
+    }
+  }
+}
