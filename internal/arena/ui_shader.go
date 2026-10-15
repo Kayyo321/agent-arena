@@ -144,7 +144,9 @@ func shaderCell(program *shader.Program, glyphs string, in shader.Inputs, x, y, 
 		return " "
 	}
 	if color {
-		shade := int(math.Round(24 + light*60))
+		// Lift midtones so sparse dots remain visible on charcoal terminal
+		// backgrounds. Keep zero transparent and cap highlights below text.
+		shade := int(math.Round(30 + 135*math.Sqrt(light)))
 		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%c\x1b[0m", shade, shade, shade, glyph)
 	}
 	// Ordered dither keeps low contrast and brightness variation without ANSI.

@@ -321,3 +321,38 @@ func TestShaderTUIDraftRequiresApplyAndReloads(t *testing.T) {
 		t.Fatal("shader-off did not remove background")
 	}
 }
+
+func TestShaderMidtonesRemainVisibleOnCharcoalBackground(t *testing.T) {
+	shades := []int{}
+	for _, light := range []float64{0.02, 0.25, 0.5, 1} {
+		program, err := shader.Compile(fmt.Sprintf("float4 main(float2 uv){return float4(%f,%f,%f,1);}", light, light, light))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cell := shaderCell(program, ".", shader.Inputs{}, 40, 12, 80, 24, true)
+		var r, g, b int
+		if _, err := fmt.Sscanf(cell, "\x1b[38;2;%d;%d;%dm", &r, &g, &b); err != nil {
+			t.Fatal(err)
+		}
+		if r != g || g != b {
+			t.Fatal("background lost neutral shading")
+		}
+		shades = append(shades, r)
+	}
+	// Midtones must stand out against #1e1e1e while remaining quieter than text.
+	if shades[1] < 95 || shades[2] < 120 || shades[3] > 165 {
+		t.Fatalf("insufficient contrast or excessive highlights: %v", shades)
+	}
+	for i := 1; i < len(shades); i++ {
+		if shades[i] <= shades[i-1] {
+			t.Fatalf("edge fade is not monotonic: %v", shades)
+		}
+	}
+	black, err := shader.Compile("float4 main(float2 uv){return float4(0,0,0,1);}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shaderCell(black, ".", shader.Inputs{}, 40, 12, 80, 24, true) != " " {
+		t.Fatal("zero luminance must remain empty")
+	}
+}

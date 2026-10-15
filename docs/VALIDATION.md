@@ -155,3 +155,18 @@ for this Codex runtime. TUI `/shader` preview/apply still has fixture coverage r
 than a separate live generation call. Other provider shader generation and broader
 multi-provider milestones remain unverified. Readiness still reports catalog/version
 drift separately from this successful inference result.
+
+
+### Shader visibility correction
+
+A user screenshot exposed that the first renderer's 24–84 grayscale range was
+barely visible on a charcoal terminal background, despite passing animation/state
+checks. The renderer now lifts midtones and caps highlights at 165, preserving
+zero transparency, monotonic edge fading, and foreground masks. A regression test
+checks midtone visibility against a #1e1e1e theme. `make check` and `make build`
+pass. The isolated demo also received its initial Git commit, so an accidental
+worker-start request no longer fails merely because HEAD is unborn. Viewing the
+shader does not require starting a worker.
+A fresh real PTY recording on the charcoal theme produced 31 distinct frames in
+15.5 seconds, with 248 changed background cells and all 854 checked foreground
+cells unchanged. The same resize and clean-exit checks passed.

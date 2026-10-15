@@ -54,7 +54,8 @@ float4 main(float2 uv) : SV_Target {
 
 Return `float4(red, green, blue, alpha)`; output is clamped to [0,1]. Non-finite
 luminance becomes transparent. RGB is converted to luminance; terminal foreground
-colors remain untouched. The renderer limits background contrast and protects the
+colors remain untouched. The renderer lifts midtones for visibility on charcoal terminal themes, caps
+highlights below ordinary foreground text, and protects the
 entire occupied span of each foreground row, including spaces within cards and
 labels, with one cell of clearance. Popups are composed last as opaque panels.
 Headers, status, composer, chat, detail views and tiny terminals have no shader.
