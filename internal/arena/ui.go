@@ -3,6 +3,7 @@ package arena
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,9 @@ type LiveModel struct {
 	Events             []Event
 	State              RunState
 	Trees              []Workspace
+	DiffStats          map[string]diffStat
+	DiffBusy           bool
+	DiffAt             time.Time
 	Decisions          []Decision
 	Detail             bool
 	Expanded           bool
@@ -220,6 +224,11 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.LastProbeEvent = max(m.LastProbeEvent, event.Sequence)
 		}
 		cmds := []tea.Cmd{tickUI(m.Run.ID)}
+		// Worktrees only change while the run works; a finished run is measured once.
+		if now := shaderClock(); m.Project != nil && !m.DiffBusy && len(m.Trees) > 0 && now.Sub(m.DiffAt) >= diffInterval && (m.DiffStats == nil || m.State.Status == "running" || len(m.DiffStats) != countWriting(m.Trees)) {
+			m.DiffBusy, m.DiffAt = true, now
+			cmds = append(cmds, m.refreshDiffStats())
+		}
 		if refreshReadiness {
 			cmds = append(cmds, m.probeReadiness())
 		}
@@ -227,6 +236,11 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, stall)
 		}
 		return m, tea.Batch(cmds...)
+	case diffStatsResult:
+		m.DiffBusy = false
+		if v.RunID == m.Run.ID {
+			m.DiffStats = v.Stats
+		}
 	case stallDiagnosis:
 		m.StallBusy = false
 		if v.RunID == m.Run.ID {
@@ -329,7 +343,7 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Run, m.Readiness = v.Run, v.Readiness
 		m.StallKey, m.StallCount, m.StallBusy, m.Stall = "", 0, false, nil
 		m.State = RunState{Status: "created", Agents: map[string]string{}}
-		m.Events, m.Trees, m.Decisions, m.Changes = nil, nil, nil, nil
+		m.Events, m.Trees, m.Decisions, m.Changes, m.DiffStats = nil, nil, nil, nil, nil
 		m.ChangePatch, m.SelectedChange = "", ""
 		m.LastProbeEvent, m.Offset, m.Selected = 0, 0, 0
 		if v.Err != nil {
@@ -665,7 +679,8 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 			frame = -1
 		}
 		if width >= 100 && !m.Expanded {
-			body = append(body, wideGraph(m.Run.Workflow, m.State, m.Events, width, color, m.spinner(false), frame)...)
+			body = append(body, "")
+			body = append(body, graphView(m.Run.Workflow, m.State, m.Events, m.agentDiffs(), width, color, m.spinner(false), frame)...)
 		} else {
 			body = append(body, renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))...)
 		}
@@ -700,16 +715,6 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	for _, d := range m.Decisions {
 		body = append(body, "DECISION "+d.ID+" "+d.Prompt+" choices="+strings.Join(d.Choices, "/"))
 		body = append(body, "  > decision "+d.ID+" ANSWER")
-	}
-	if !m.ChatMode {
-		label := "arena: " + m.Run.Workflow.Id + " · " + m.State.Status
-		if m.Run.ID == "" {
-			label += " · type a task or /run TASK"
-		}
-		if m.Executing {
-			label = m.spinner(color) + " " + label
-		}
-		body = append([]string{label}, body...)
 	}
 	if m.Starting {
 		body = append([]string{m.spinner(color) + " Starting task · checking readiness, policies and Git isolation"}, body...)
@@ -756,9 +761,11 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 			lines = append(lines, agentColor(a.Id, "["+a.Id+"] "+runtime+" | "+status, color))
 			continue
 		}
-		cardWidth := min(width, 70)
-		b := borders()
-		lines = append(lines, muted(b.top(cardWidth, ""), color), b.row(agentColor(a.Id, label, color), cardWidth), b.row(runtime, cardWidth), b.row(status, cardWidth), muted(b.bottom(cardWidth), color))
+		kind := "agent"
+		if a.Id == w.HeadAgent {
+			kind, label = "head", "HEAD · "+label
+		}
+		lines = append(lines, kindCard(kind, a.Id, label, []string{runtime, status}, min(width, 70), color)...)
 	}
 	for _, t := range w.Teams {
 		roundState := "waiting"
@@ -811,7 +818,21 @@ func agentColor(id, s string, on bool) string {
 	if !on || id == "" {
 		return s
 	}
-	return fmt.Sprintf("\x1b[3%sm%s\x1b[0m", string('1'+rune(id[0]%6)), s)
+	return "\x1b[" + agentSGR(id) + "m" + s + "\x1b[0m"
+}
+func countWriting(trees []Workspace) int {
+	n := 0
+	for _, tree := range trees {
+		if tree.Write {
+			n++
+		}
+	}
+	return n
+}
+func agentSGR(id string) string {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return fmt.Sprintf("38;5;%d", agentPalette[h.Sum32()%uint32(len(agentPalette))])
 }
 func Watch(ctx context.Context, p *Project, r Run, readiness []Readiness) error {
 	if readiness == nil {

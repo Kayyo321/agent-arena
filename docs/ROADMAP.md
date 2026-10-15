@@ -78,7 +78,7 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 
 **Status: implemented; local terminal and packaging exit checks pass.** Bare `arena` opens a sole workflow or a chooser, then the idle graph with explicit task start. Embedded chat, slash commands, live agent mini-windows and scoped context views are implemented. Rounded terminal borders, a visible multiline composer, cursor/word/line editing, Shift+Return, clipboard image paste, run-scoped attachments and session-local message history are implemented. Native image delivery is currently Codex-only; see validation evidence for platform and provider limits. The adaptive UI, acknowledged packet lifecycle, Git ownership colors, run controls, attached process cleanup and standalone release builder are implemented. PTY interaction/resize and standalone cross-build/archive checks pass; see [validation evidence](VALIDATION.md) for platform limits.
 
-- Render the full A2rena layout: compact purple-gradient dotted wordmark upper right, colored Git tree upper left, agent graph cards and authority/peer arrows, packet markers, required-provider status row, and full-width `> memento mori` prompt.
+- Render the full A2rena layout: status band led by the compact purple-gradient dotted wordmark with run vitals and the Git tree, agent graph cards and authority/peer arrows, packet markers, required-provider status row, and full-width `> memento mori` prompt.
 - Fit the graph to the terminal, with compact/list navigation for constrained screens and labels for every state independent of color.
 - Add keyboard navigation, event detail, and accessible non-TUI output for logs and automation.
 - Add usage/concurrency controls, process cleanup, crash recovery, and diagnostics.

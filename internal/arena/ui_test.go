@@ -77,3 +77,30 @@ func TestRouterBranchesSplitFromStemWithOwnLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestGraphNodeKindsHaveDistinctFrames(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	w, _ := loopWorkflow(DefaultSettings(Runtime{Provider: "codex", Model: "m"}), 2)
+	state := RunState{Agents: map[string]string{"builder": "running"}}
+	plain := strings.Join(wideGraph(w, state, nil, 140, false, ""), "\n")
+	for kind, frame := range map[string]string{"head": "┏━ ◆ HEAD", "worker": "╭─ builder", "team": "╭┄ ◈ TEAM", "router": "╱─ ◇ ROUTER"} {
+		if !strings.Contains(plain, frame) {
+			t.Fatalf("%s frame %q missing:\n%s", kind, frame, plain)
+		}
+	}
+	colored := strings.Join(wideGraph(w, state, nil, 140, true, ""), "\n")
+	if ansi.Strip(colored) != plain {
+		t.Fatal("color changed graph geometry")
+	}
+	// A working card lights its frame; a waiting one stays dim.
+	if !strings.Contains(colored, "\x1b[1;38;5;252m╭") || !strings.Contains(colored, "\x1b[38;5;240m╭") {
+		t.Fatal("card frames do not reflect running and waiting states")
+	}
+	t.Setenv("LC_ALL", "C")
+	for _, line := range wideGraph(w, state, nil, 140, false, "") {
+		if strings.ContainsFunc(line, func(r rune) bool { return r >= 0x2500 && r <= 0x25ff }) {
+			t.Fatalf("non-Unicode locale drew Unicode frames: %q", line)
+		}
+	}
+}

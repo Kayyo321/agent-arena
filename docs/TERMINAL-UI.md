@@ -21,48 +21,66 @@ explicit workflow ID when several are available.
 
 ## Screen layout
 
-The live CLI is a full-terminal view. A small `A2rena` wordmark sits at the upper
-right, with the Git worktree tree at the upper left. The wordmark uses dotted
-Braille lettering with a lavender-to-violet gradient and no backdrop or shadow.
-It is at most 27 columns by three rows, leaving the main viewport for the graph. The status
-row and command prompt span the bottom.
+The live CLI is a full-terminal view. A three-row status band spans the top and
+is closed by a hairline that starts in the brand color under the title. The small
+`A2rena` wordmark leads the band from a two-column left margin; the run's vital
+signs sit beside it in labelled columns, and the Git tree closes the band flush
+right on wide terminals. The wordmark uses dotted Braille lettering with a
+lavender-to-violet gradient and no backdrop or shadow. It is at most 27 columns by
+three rows, leaving the main viewport for the graph. The prompt spans the bottom.
 
 ```text
-╭─ git trees ─────────────────╮                                  A2rena
-│ base 1a2b3c4d               │                            (purple dots)
-│ ├─ builder arena/task       │
-╰────────────────────────────╯
+  A2rena    ledger-loop          ACTIVE          NODES         CHANGES             GIT  ca79e2f · 13 worktrees
+  (dots)    ⠋ running  4m12s     ● tester        ✓ 4/6 done    +342 −13            ├ builder  +186 −0
+            ━━━ ━━━ ━━━ ━━━      ◌ 1 queued      0 failed      33 files            └ tester   +101 −13  +1 more
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-             ╭──────────────────────────────╮
-             │ HEAD · codex                 │
-             │ gpt-6.1-sol · high            │
-             │ running                      │
-             ╰──────────────────────────────╯
-                            │
-                            ↓
-             ╭──────────────────────────────╮
-             │ BUILDER · claude-code        │
-             │ sonnet-5.5 · medium           │
-             │ waiting                      │
-             ╰──────────────────────────────╯
-
-code-review · codex: good, claude-code: good · running · decisions: 0
-─ /help · ↑↓ history · PgUp/PgDn scroll ────────────────────────────────
-> memento mori
+                     ┏━ ◆ HEAD · lead ━━━━━━━━ codex ┓
+                     ┃ gpt-6.1-sol · high            ┃
+                     ┃ ✓ succeeded                   ┃
+                     ┗━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━┛
+                                    ▼ delegates
+                     ╭─ builder ───────────── codex ╮
+                     │ sonnet-5.5 · medium          │
+                     │ ⠋ running             pass 2 │
+                     │ +186 −0 · 16 files           │
+                     ╰──────────────────────────────╯
 ```
 
-The dotted letters spell `A2rena`: `A2` is larger and `rena` is lowercase, smaller
-and aligned to its baseline. The compact plain-text form is `A2rena`. Narrow
-or short terminals use the compact title, aligned to the right. Non-Unicode
-locales and dumb terminals also use text. `NO_COLOR` removes color while preserving
-the same dotted lettering. The title appears in both the chooser and
-graph; `display.asciiTitle` retains its existing show/compact/hide controls.
-The Git tree, agent cards and detail windows share thin, rounded Unicode borders.
-ASCII borders remain the fallback for non-Unicode locales and dumb terminals.
-Agent ownership colors highlight card labels; the frame and footer stay quiet.
+The band reports, from audited state: the workflow ID, run status with the
+loading animation while running, elapsed time since the run started, and one
+progress segment per agent colored by its state; the agents running now, then
+pending decisions (`⚑ N waiting on you`), queued agents or packets in flight;
+completed and failed node counts; and line changes (`+added −deleted`) and files
+summed across every writing worktree. Each worktree is measured against its own
+base, so loop passes that build on earlier changes are not counted twice; a
+removed worktree falls back to its recorded change patch. Worktrees are scanned
+off the UI loop at most every two seconds. The Git column shows the run base,
+the worktree count and the agents with the most churn.
+
+Columns join by priority while they fit: identity, changes, activity, nodes, Git.
+Without the Git column the worktree count joins the change size, and without the
+changes column the change size sits beside the workflow ID, so it is never
+dropped. Narrow or short terminals use a single row led by the compact title.
+Non-Unicode locales and dumb terminals use text. `NO_COLOR` removes color while
+preserving the same layout. The workflow chooser and `arena setup` lead with the
+same wordmark at the left margin; `display.asciiTitle` retains its existing
+show/compact/hide controls.
+
+Graph nodes are told apart by shape before color. The head agent has a heavy
+violet frame with a `◆ HEAD` badge; worker agents have rounded frames; teams have
+dashed amber frames with a `◈ TEAM` badge and a roster of member states; and
+decision routers have chamfered teal frames with a `◇ ROUTER` badge, their
+input, routes and the branch taken. The name and provider sit in the top border,
+so each card keeps three rows for runtime, status and detail: an agent's line
+changes across its loop passes once worktree statistics exist, and its role
+profile before that. Frames are dim until a node starts, bright while it works,
+and red when it fails; delegation edges are grey, router branches teal and
+capped loops amber. ASCII borders remain the fallback for non-Unicode locales
+and dumb terminals, with a distinct frame per kind.
 The bottom prompt's idle text is `> memento mori`; typing replaces it. A thin
 full-width rule above the composer shows only `/help`. Run status and required
-provider readiness stay in the graph and `/status`, with pending questions in `/decisions`. The purple title keeps its existing placement and lettering.
+provider readiness stay in the graph and `/status`, with pending questions in `/decisions`.
 
 ## Prompt commands and agent windows
 

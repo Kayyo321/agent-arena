@@ -90,8 +90,10 @@ of prerequisite proposals. Changes enter an audited review queue. Integration ch
 for conflicts and later user edits. Rollback makes a revert or a separate recovery
 worktree. It never silently resets or discards later work.
 
-The live interface shows the small purple dotted A2rena wordmark at the top right,
-the Git tree at the top left, graph, packet activity,
+The live interface opens with a status band: the small purple dotted A2rena wordmark
+at the left, the run's status, active agents, progress and line changes across
+worktrees, and the Git tree at the right. Below it are the graph (with distinct head,
+worker, team and router cards), packet activity,
 teams and on-call rail, required providers, decisions and the `> memento mori` prompt.
 `/help` lists slash commands. `/view AGENT` opens a live mini-window and `/context AGENT`
 shows its role, task and workflow context. `/chat` talks to the control agent.

@@ -55,7 +55,7 @@ Other useful settings include:
 
 The TUI should show the effective policy before a run, coworker change, or persistent-context mutation. Effective limits use the stricter project and workflow value; workflow-level settings can be stricter but cannot raise a project cap or override a project-level refusal. `settings.sharedContext` in a workflow may lower entry/size caps or tighten write/archive policies; storage remains project-wide. The same rule applies to integration and audit retention. See [Shared context](SHARED-CONTEXT.md) and [Terminal interface](TERMINAL-UI.md).
 
-When creating settings, the CLI initializes shared context as Git-tracked, accepts bounded agent additions/revisions, asks before agent archive requests, and marks entries stale after 180 days without verification. It initializes display to automatic color and animation, a visible Git tree, and the small dotted title at the upper right. Existing settings that omit these optional blocks use the same defaults until the user edits them.
+When creating settings, the CLI initializes shared context as Git-tracked, accepts bounded agent additions/revisions, asks before agent archive requests, and marks entries stale after 180 days without verification. It initializes display to automatic color and animation, a visible Git tree, and the small dotted title leading the status band. Existing settings that omit these optional blocks use the same defaults until the user edits them.
 
 ## Workflow file
 

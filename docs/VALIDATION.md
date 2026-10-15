@@ -19,7 +19,7 @@ Go 1.27.2-built `govulncheck` found **zero reachable vulnerabilities** after upg
 networking/auth transitives. It reported one advisory in a required module with no
 imported affected package; this is not a claim that every dependency is advisory-free.
 
-The compact dotted purple title is checked for top-right placement, gradient colors,
+The compact dotted purple title is checked for left-margin placement in the status band, gradient colors,
 absence of filled blocks/background/shadows, matching color/monochrome geometry,
 monochrome rendering, size limits, compact/hide preferences and non-Unicode fallback.
 A real PTY test of the new setup entry completed bare `arena` from an empty non-Git
