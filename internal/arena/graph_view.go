@@ -161,14 +161,6 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 			x += cells
 		}
 	}
-	vline := func(x, y1, y2 int) {
-		if y1 > y2 {
-			y1, y2 = y2, y1
-		}
-		for y := y1; y <= y2; y++ {
-			put(x, y, borders().vertical)
-		}
-	}
 	hline := func(y, x1, x2 int, peer bool) {
 		if x1 > x2 {
 			x1, x2 = x2, x1
@@ -181,6 +173,48 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 			put(x, y, line)
 		}
 	}
+	// Edge lines are collected as per-cell connection masks and drawn once,
+	// so a branch leaving a shared stem renders as a junction (├) instead of
+	// a corner that hides the stem.
+	type cell struct{ x, y int }
+	const (
+		up = 1 << iota
+		down
+		left
+		right
+	)
+	masks := map[cell]int{}
+	connect := func(a, b cell) {
+		for a != b {
+			next := a
+			switch {
+			case next.x < b.x:
+				next.x++
+				masks[a] |= right
+				masks[next] |= left
+			case next.x > b.x:
+				next.x--
+				masks[a] |= left
+				masks[next] |= right
+			case next.y < b.y:
+				next.y++
+				masks[a] |= down
+				masks[next] |= up
+			default:
+				next.y--
+				masks[a] |= up
+				masks[next] |= down
+			}
+			a = next
+		}
+	}
+	type label struct {
+		x, y int
+		text string
+		dots bool
+		x2   int
+	}
+	labels := []label{}
 	type point struct{ x, y int }
 	paths := map[string][]point{}
 	recordPath := func(from, to string, corners ...point) {
@@ -251,47 +285,17 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		}
 		// Lanes stay above the arrowhead row so turns and labels never collide.
 		lane := y1 + (i % 2)
+		stub := up
 		if y2 < y1 {
 			y1 = from.y - 1
 			y2 = to.y + 5
 			lane = max(0, y1-1)
+			stub = down
 		}
-		vline(x1, y1, lane)
-		hline(lane, x1, x2, edge.peer)
-		vline(x2, lane, y2)
-		if x1 != x2 {
-			first, last := "+", "+"
-			if unicodeLettering() {
-				if lane >= y1 {
-					if x2 > x1 {
-						first = "╰"
-					} else {
-						first = "╯"
-					}
-				} else {
-					if x2 > x1 {
-						first = "╭"
-					} else {
-						first = "╮"
-					}
-				}
-				if y2 >= lane {
-					if x2 > x1 {
-						last = "╮"
-					} else {
-						last = "╭"
-					}
-				} else {
-					if x2 > x1 {
-						last = "╯"
-					} else {
-						last = "╰"
-					}
-				}
-			}
-			put(x1, lane, first)
-			put(x2, lane, last)
-		}
+		masks[cell{x1, y1}] |= stub
+		connect(cell{x1, y1}, cell{x1, lane})
+		connect(cell{x1, lane}, cell{x2, lane})
+		connect(cell{x2, lane}, cell{x2, y2})
 		// Heads and tails are drawn after the cards so they join the borders.
 		if to.y < from.y {
 			joints = append(joints, joint{x1, from.y, "┴", "+"}, joint{x2, y2, "▲", "^"})
@@ -300,10 +304,35 @@ func wideGraph(w Workflow, state RunState, events []Event, width int, color bool
 		}
 		recordPath(edge.from, edge.to, point{x1, y1}, point{x1, lane}, point{x2, lane}, point{x2, y2})
 		if x1 != x2 {
-			put(min(x1, x2)+1, lane, short(edge.label, max(0, abs(x2-x1)-2)))
+			labels = append(labels, label{x: min(x1, x2) + 1, y: lane, text: short(edge.label, max(0, abs(x2-x1)-2)), dots: edge.peer, x2: max(x1, x2) - 1})
 		} else {
-			put(x1+2, lane, short(edge.label, max(0, cardWidth/2-3)))
+			// A straight edge is labelled beside its own arrowhead, away from
+			// the lanes other branches use.
+			labels = append(labels, label{x: x2 + 2, y: y2, text: short(edge.label, max(0, cardWidth/2-3))})
 		}
+	}
+	glyphs := map[int]string{up | down: "│", left | right: "─", down | right: "╭", down | left: "╮", up | right: "╰", up | left: "╯", up | down | right: "├", up | down | left: "┤", left | right | down: "┬", left | right | up: "┴", up | down | left | right: "┼", up: "│", down: "│", left: "─", right: "─"}
+	for c, mask := range masks {
+		glyph := glyphs[mask]
+		if !unicodeLettering() {
+			switch mask {
+			case up | down, up, down:
+				glyph = "|"
+			case left | right, left, right:
+				glyph = "-"
+			default:
+				glyph = "+"
+			}
+		}
+		put(c.x, c.y, glyph)
+	}
+	for _, l := range labels {
+		if l.dots {
+			for x := l.x; x <= l.x2; x++ {
+				put(x, l.y, ".")
+			}
+		}
+		put(l.x, l.y, l.text)
 	}
 	// Only unacknowledged packets move. The route comes from the graph projection;
 	// packet bodies never enter the viewport.

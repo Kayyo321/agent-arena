@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	c "github.com/Kayyo321/agent-arena/internal/contract"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -52,6 +53,27 @@ func TestPacketAnimationStopsAtRecordedDeliveryOrFailure(t *testing.T) {
 		first, second = strings.Join(packetActivity(finished, 0), "\n"), strings.Join(packetActivity(finished, 1), "\n")
 		if first != second || !strings.Contains(first, outcome) {
 			t.Fatalf("%s packet keeps animating", outcome)
+		}
+	}
+}
+
+func TestRouterBranchesSplitFromStemWithOwnLabels(t *testing.T) {
+	w := NewWorkflow("branches", "Branches")
+	w.HeadAgent = "lead"
+	w.Agents = []Agent{{Id: "lead", Level: Int(0), Runtime: Runtime{Provider: "codex", Model: "m"}}}
+	for _, id := range []string{"left", "middle", "right"} {
+		w.Agents = append(w.Agents, Agent{Id: id, Level: Int(2), Runtime: Runtime{Provider: "codex", Model: "m"}})
+	}
+	w.DecisionRouters = []Router{{Id: "gate", InputKind: "result", PayloadPointer: "/v", Routes: []c.WorkflowDecisionRoute{{Id: "a", Equals: "A", To: "left"}, {Id: "b", Equals: "B", To: "middle"}, {Id: "c", Equals: "C", To: "right"}}, Fallback: c.WorkflowDecisionRouterFallback{Action: "stop"}}}
+	w.Relationships = []Relationship{{Type: "delegates", From: "lead", To: "gate"}}
+	lines := wideGraph(w, RunState{Agents: map[string]string{}}, nil, 140, false, "")
+	text := strings.Join(lines, "\n")
+	if !strings.ContainsAny(text, "├┤┼") {
+		t.Fatalf("branches leaving the stem hide it:\n%s", text)
+	}
+	for _, line := range lines {
+		if strings.Contains(line, `="B"`) && !strings.Contains(line, "▼") {
+			t.Fatalf("straight branch label is not beside its arrowhead: %q\n%s", line, text)
 		}
 	}
 }
