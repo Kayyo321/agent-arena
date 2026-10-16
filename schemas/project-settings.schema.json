@@ -52,7 +52,8 @@
         "maxAgentRunMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
         "maxRetriesPerAgent": { "type": "integer", "minimum": 0, "maximum": 10 },
         "maxRunTokens": { "type": "integer", "minimum": 1, "maximum": 1000000000000 },
-        "maxRunMinutes": { "type": "integer", "minimum": 1, "maximum": 10080 }
+        "maxRunMinutes": { "type": "integer", "minimum": 1, "maximum": 10080 },
+        "maxFanOutChildrenPerRun": { "type": "integer", "minimum": 1, "maximum": 64 }
       }
     },
     "context": {
