@@ -12,7 +12,8 @@ with Codex and Antigravity (each under its own sign-in) in the production-readin
 sweep. Claude Code, Gemini and local adapters have contract or probe coverage only;
 that coverage does not establish live readiness.
 See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
-and [validation evidence](docs/VALIDATION.md).
+and [validation evidence](docs/VALIDATION.md). To keep runs going over SSH, see
+[running on a devbox](docs/DEVBOX.md).
 
 ## Build and install
 
