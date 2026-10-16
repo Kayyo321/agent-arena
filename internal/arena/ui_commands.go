@@ -20,6 +20,7 @@ var slashHelp = []string{
 	"/help                       Commands and keyboard controls",
 	"/agents                     Agents, roles and selected runtimes",
 	"/score                      Arena grade (S+ to F) and what costs points",
+	"/usage                      Tokens providers reported, per run and agent",
 	"/view NAME                  Live agent activity mini-window",
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
@@ -52,7 +53,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/walkthrough", "/consult", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/usage", "/view", "/context", "/chat", "/walkthrough", "/consult", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -145,6 +146,16 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			default:
 				m.Error = "No arena or draft to score yet"
 			}
+		case "usage":
+			if m.Run.ID == "" {
+				m.Error = "No run is loaded: nothing to total yet"
+				break
+			}
+			ids := []string{}
+			for _, a := range m.Run.Workflow.Agents {
+				ids = append(ids, a.Id)
+			}
+			m.Panel, m.PanelText = "Usage · "+m.Run.ID, SumUsage(m.Events).Report(ids)
 		case "agents":
 			m.Panel, m.PanelText = "Agents", []string{"arena-orchestrator | permanent project control | " + m.Run.Settings.DefaultModel.Provider + " / " + m.Run.Settings.DefaultModel.Model}
 			for _, a := range m.Run.Workflow.Agents {

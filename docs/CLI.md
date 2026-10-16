@@ -168,6 +168,7 @@ Slash commands are available in setup and the graph:
 | Command | Action |
 | --- | --- |
 | `/help`, `/agents` | List commands or agent names and selected runtimes |
+| `/usage` | Input and output tokens providers reported for the run and per agent; `unreported` when a provider reports none, and never a cost |
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
@@ -208,7 +209,11 @@ journaled in project history as `consult.started`, `consult.repair`,
 `history --json` provide non-TUI inspection. `NO_COLOR` disables owner colors.
 
 `history RUN --json` prints one object: `runId`, `status`, `terminal`,
-`pendingDecisions` and the `events` array. `status` is the run state replayed from
+`pendingDecisions`, `usage` and the `events` array. `usage` is `{reported, inputTokens,
+outputTokens, agents}`: the token counts providers reported, summed per agent and for
+the run (`reported` is false, with zero counts, when none did; a provider's own usage
+map stays opaque in the `usage.reported` events). Running totals a provider repeats
+within one invocation count once. `status` is the run state replayed from
 the events: `created`, `running`, `paused`, `interrupted`, or one of the terminal
 states `succeeded`, `failed` and `cancelled`, which the `workflow.succeeded`,
 `workflow.failed` and `workflow.cancelled` events record. `terminal` is true for
