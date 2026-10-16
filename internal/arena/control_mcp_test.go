@@ -110,7 +110,7 @@ func stubStart(srv *controlServer, r Run, invoker Invoker) {
 	}
 }
 
-func TestControlToolsListIsExactlyTheV1Set(t *testing.T) {
+func TestControlToolsListIsTheV1SetPlusTheTwoRequestTools(t *testing.T) {
 	p := committedProject(t)
 	c := startControl(t, newControlServer(p))
 	response := c.request("tools/list", nil)
@@ -130,7 +130,7 @@ func TestControlToolsListIsExactlyTheV1Set(t *testing.T) {
 			}
 		}
 	}
-	want := []string{"arena_status", "arena_history", "arena_changes", "arena_score", "arena_workflow_show", "arena_run_start"}
+	want := []string{"arena_status", "arena_history", "arena_changes", "arena_score", "arena_workflow_show", "arena_run_start", "arena_integrate", "arena_rollback"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools %v, want %v", names, want)
 	}
