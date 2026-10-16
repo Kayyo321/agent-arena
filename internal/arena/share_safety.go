@@ -94,13 +94,15 @@ func scanShareString(s string, local []string) string {
 			return "a path on this machine"
 		}
 	}
-	if Redact(s) != s {
-		return "a credential"
-	}
+	// Named patterns first, so the error says what kind of value it found;
+	// anything else the journal would redact is still refused.
 	for _, p := range shareSensitive {
 		if p.re.MatchString(s) {
 			return p.label
 		}
+	}
+	if Redact(s) != s {
+		return "a credential"
 	}
 	for _, ip := range shareIPv4.FindAllString(s, -1) {
 		if !strings.HasPrefix(ip, "127.") && ip != "0.0.0.0" {

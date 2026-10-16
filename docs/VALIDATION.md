@@ -27,6 +27,17 @@ time in A2rena order, every frame keeps each row's width and the gaps between
 letters, each turn starts facing front, and the text fallback, `NO_COLOR` and
 `display.animation: off` keep the static wordmark.
 
+Fixes after the first Fable sweep review: the plain Antigravity write fence is
+tested from inside the fence with a planted home, state directory and outside
+directory; a reader reaches only its state overlay and private `/tmp`, a writer
+also its worktree, and nothing leaks to the host. With the same fence layout, the
+installed `agy` 1.4.0 reported its version and listed models through its own
+keyring sign-in (no inference turn was run). `Redact` covers the share-code token
+shapes (AWS, Slack, JWT, GitHub fine-grained, Stripe live, Google OAuth); command
+fences empty `/run/user` and refuse to start without `XDG_RUNTIME_DIR`; walkthrough
+ideas and `/consult` revisions that turn on Antigravity blanket approval are refused
+in code.
+
 Final-TODO fixtures (fixture invoker; no inference): `/consult` runs read-only on
 the control runtime with the saved arena, score and run evidence, journals
 `consult.*`, changes nothing and starts no run; a proposed revision is repaired

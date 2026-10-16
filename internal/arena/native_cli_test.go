@@ -3,6 +3,7 @@ package arena
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,37 +111,60 @@ func TestAntigravityWorkerIsFencedToItsWorktree(t *testing.T) {
 	if err := os.MkdirAll(tree, 0755); err != nil {
 		t.Fatal(err)
 	}
-	probe := t.TempDir()
-	record := fakeCLIReading(t, "agy", "head -n 1", `
-touch "`+root+`/escaped" 2>/dev/null && echo escaped >> `+probe+`/log
-touch inside 2>/dev/null && echo inside >> `+probe+`/log
-cat <<'EOF'
-{"event":"init","init":{"model":"fixture"}}
-{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{}}}}
-{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{}}}}
-{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Done"}}
-{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"."}}
-{"event":"result","result":{"status":"SUCCESS","response":"{}","structured_output":{"summary":"fixture"},"usage":{"total_tokens":5}}}
-EOF
-`)
+	// A planted home with agy's state, and a directory outside the project.
+	home, outside := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	state := antigravityStateDir(home)
+	// The fake CLI runs inside the fence and can write nothing it is not
+	// allowed to, so it reports what it reached in its structured result;
+	// a writer also records its argv and first turn in the worktree.
+	bin := t.TempDir()
+	script := `#!/bin/sh
+reach=""
+touch "` + root + `/escaped" 2>/dev/null && reach="$reach root"
+touch "` + outside + `/escaped" 2>/dev/null && reach="$reach outside"
+touch "` + home + `/.bashrc" 2>/dev/null && reach="$reach home"
+touch "` + state + `/log" 2>/dev/null && reach="$reach state"
+touch /tmp/private 2>/dev/null && reach="$reach tmp"
+if touch inside 2>/dev/null; then
+	reach="$reach inside"
+	for a in "$@"; do printf '%s\n' "$a"; done > .agy-args
+	head -n 1 > .agy-stdin
+fi
+echo '{"event":"init","init":{"model":"fixture"}}'
+echo '{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{}}}}'
+echo '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{}}}}'
+echo '{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Done"}}'
+echo '{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"."}}'
+echo '{"event":"result","result":{"status":"SUCCESS","response":"{}","structured_output":{"summary":"fixture:'"$reach"'"},"usage":{"total_tokens":5}}}'
+`
+	if err := os.WriteFile(filepath.Join(bin, "agy"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	run := func(write bool) string {
-		_ = os.Remove(filepath.Join(probe, "log"))
 		outputs := []string{}
 		in := Invocation{Runtime: Runtime{Provider: "antigravity", Model: "fixture"}, ProjectRoot: root, Dir: tree, Prompt: "Return fixture", Write: write, Schema: objectSchema(map[string]any{"summary": map[string]any{"type": "string"}}), Output: func(text string) error { outputs = append(outputs, text); return nil }}
 		out, err := (Providers{}).Invoke(context.Background(), in)
-		if err != nil || out["summary"] != "fixture" || len(outputs) != 1 || outputs[0] != "Done." {
+		if err != nil || !strings.HasPrefix(str(out["summary"]), "fixture:") || len(outputs) != 1 || outputs[0] != "Done." {
 			t.Fatalf("result: %v %v %v", out, err, outputs)
 		}
-		log, _ := os.ReadFile(filepath.Join(probe, "log"))
-		return string(log)
+		return strings.TrimPrefix(str(out["summary"]), "fixture:")
 	}
-	if log := run(false); log != "" {
-		t.Fatalf("read-only worker wrote: %q", log)
+	// agy keeps its own state (through a throwaway overlay where supported)
+	// and a private /tmp, and nothing else outside a writer's worktree.
+	if reach := run(false); reach != " state tmp" {
+		t.Fatalf("read-only worker reached %q", reach)
 	}
-	if log := run(true); log != "inside\n" {
-		t.Fatalf("writer may write only its worktree: %q", log)
+	if reach := run(true); reach != " state tmp inside" {
+		t.Fatalf("writer may write only its worktree: %q", reach)
 	}
-	args := strings.Split(recorded(t, record, "args"), "\n")
+	for _, escaped := range []string{filepath.Join(root, "escaped"), filepath.Join(outside, "escaped"), filepath.Join(home, ".bashrc"), "/tmp/private"} {
+		if _, err := os.Stat(escaped); err == nil {
+			t.Fatalf("fence leaked a write to %s", escaped)
+		}
+	}
+	args := strings.Split(recorded(t, tree, ".agy-args"), "\n")
 	for _, want := range []string{"--input-format", "stream-json", "--json-schema", "--disable-slash-commands"} {
 		if !Has(args, want) {
 			t.Fatalf("missing %s in %q", want, args)
@@ -149,8 +173,16 @@ EOF
 	if Has(args, "--dangerously-skip-permissions") || Has(args, "--effort") {
 		t.Fatalf("unexpected args %q", args)
 	}
-	if stdin := recorded(t, record, "stdin"); !strings.Contains(stdin, `"event":"user"`) || !strings.Contains(stdin, "Return fixture") {
+	if stdin := recorded(t, tree, ".agy-stdin"); !strings.Contains(stdin, `"event":"user"`) || !strings.Contains(stdin, "Return fixture") {
 		t.Fatalf("stdin: %s", stdin)
+	}
+}
+
+func TestWriteFenceRefusesAWorktreeHoldingHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := writeFence(exec.Command("true"), nil, []string{home}, ""); err == nil || !strings.Contains(err.Error(), "contains the home directory") {
+		t.Fatalf("home as a writable root: %v", err)
 	}
 }
 
@@ -184,14 +216,21 @@ func TestAntigravityFollowsUpOnceAfterDeniedCommand(t *testing.T) {
 	if !writeFenceAvailable() {
 		t.Skip("no write fence on this host")
 	}
-	probe := t.TempDir()
-	fakeCLIReading(t, "agy", "head -n 1", `
+	// The fence lets the fake write only its worktree, so it records there.
+	probe, bin := t.TempDir(), t.TempDir()
+	script := `#!/bin/sh
+head -n 1 > /dev/null
 echo '{"event":"result","result":{"status":"SUCCESS","response":"","denied_actions":[{"action":"command","display_name":"RunCommand"}]}}'
-read -r next; printf '%s\n' "$next" > `+probe+`/followup
+read -r next; printf '%s\n' "$next" > followup
 echo '{"event":"result","result":{"status":"SUCCESS","response":"{}","structured_output":{"summary":"fixture"}}}'
-`)
+`
+	if err := os.WriteFile(filepath.Join(bin, "agy"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
 	denied := 0
-	in := Invocation{Runtime: Runtime{Provider: "antigravity", Model: "fixture"}, Dir: t.TempDir(), Prompt: "x", Diagnostic: func(kind string, _ map[string]any) error {
+	in := Invocation{Runtime: Runtime{Provider: "antigravity", Model: "fixture"}, Dir: probe, Write: true, Prompt: "x", Diagnostic: func(kind string, _ map[string]any) error {
 		if kind == "provider.permission-denied" {
 			denied++
 		}

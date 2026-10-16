@@ -86,6 +86,9 @@ func decodeRevision(s Settings, text string, saved Workflow, expected string) (*
 	if err := ValidateWorkflow(draft.Workflow, draft.Profiles, s); err != nil {
 		return nil, err
 	}
+	if agents := newBlanketApproval(draft.Workflow, saved); len(agents) > 0 {
+		return nil, fmt.Errorf("the revision turns on Antigravity commandApproval %q for %s; only the user chooses it, with arena workflow edit", antigravityBlanketApproval, strings.Join(agents, ", "))
+	}
 	draft.Expected, draft.Source = expected, "consult"
 	return &draft, nil
 }

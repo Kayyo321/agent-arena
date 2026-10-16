@@ -113,7 +113,7 @@ Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, 
 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
 - Claude Code uses bare programmatic mode with API-key or supported cloud authentication, or, when you select `claude-code-sign-in`, runs in the background under its own sign-in like Codex.
-- Antigravity (`agy`) runs in the background under its own sign-in, inside a write fence that keeps it in its worktree. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
+- Antigravity (`agy`) runs in the background under its own sign-in, inside a write fence: the filesystem is read-only except a writer's own worktree, a private `/tmp` and a throwaway copy of agy's own state. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
 - Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
 - Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
 

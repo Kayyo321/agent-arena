@@ -127,3 +127,29 @@ func TestRoughCostCountsTurnsEffortAndLoops(t *testing.T) {
 		t.Fatalf("loop arena: %q", got)
 	}
 }
+
+func TestOrchestratorCannotTurnOnBlanketApproval(t *testing.T) {
+	p := testProject(t)
+	s, err := p.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ideas := `[{"title":"a","builderRequestJson":` + string(JSON(ideaDraft("a", false, s.DefaultModel))) + `},{"title":"b","builderRequestJson":` + string(JSON(ideaDraft("b", false, blanketRuntime))) + `}]`
+	if _, err := decodeIdeas(p, s, ideas); err == nil || !strings.Contains(err.Error(), "only the user chooses it") {
+		t.Fatalf("idea with blanket approval accepted: %v", err)
+	}
+	var plain, blanket WorkflowDraft
+	if err := DecodeJSON([]byte(ideaDraft("solo", false, Runtime{Provider: "antigravity", Model: "fixture"})), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := DecodeJSON([]byte(ideaDraft("solo", false, blanketRuntime)), &blanket); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeRevision(s, string(JSON(blanket)), plain.Workflow, "v1"); err == nil || !strings.Contains(err.Error(), "arena workflow edit") {
+		t.Fatalf("revision turned on blanket approval: %v", err)
+	}
+	// A revision may keep the user's existing choice.
+	if _, err := decodeRevision(s, string(JSON(blanket)), blanket.Workflow, "v1"); err != nil {
+		t.Fatalf("revision that keeps the user's choice: %v", err)
+	}
+}

@@ -361,7 +361,7 @@ func TestExportRefusesSensitiveFields(t *testing.T) {
 		{"control chars", "\x1b]52;c;aGk=\x07", "name", "terminal control", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			w.Name = "Arena \x1b]52;c;aGk=\x07"
 		}},
-		{"shader comment", "ghp_abcdefghijklmnopqrstuvwxyz0123", "shader.source", "credential", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+		{"shader comment", "ghp_abcdefghijklmnopqrstuvwxyz0123", "shader.source", "GitHub token", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			s.Source = "// key ghp_abcdefghijklmnopqrstuvwxyz0123\n" + s.Source
 		}},
 		{"unknown option", "127.0.0.1:8080", "runtime.options.proxy", "does not document", func(w *Workflow, p map[string]Profile, s *ShareShader) {
@@ -370,7 +370,7 @@ func TestExportRefusesSensitiveFields(t *testing.T) {
 		{"codex config", "danger-full-access", "options.config.sandbox_mode", "not documented", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			w.Agents[0].Runtime.Options = map[string]any{"config": map[string]any{"sandbox_mode": "danger-full-access"}}
 		}},
-		{"secret map key", "sk-abcdefghijklmnopqrstu", "<key>", "credential", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+		{"secret map key", "sk-abcdefghijklmnopqrstu", "<key>", "API key", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			w.Agents[0].Runtime = Runtime{Provider: "local", Model: "m", Options: map[string]any{"backend": "ollama", "generation": map[string]any{"sk-abcdefghijklmnopqrstu": 1}}}
 		}},
 	}

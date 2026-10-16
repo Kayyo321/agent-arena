@@ -46,6 +46,9 @@ func decodeIdeas(p *Project, s Settings, text string) ([]walkthroughIdea, error)
 		if err != nil {
 			return nil, fmt.Errorf("idea %d: %w", i+1, err)
 		}
+		if agents := newBlanketApproval(draft.Workflow, Workflow{}); len(agents) > 0 {
+			return nil, fmt.Errorf("idea %d sets Antigravity commandApproval %q on %s; only the user chooses it", i+1, antigravityBlanketApproval, strings.Join(agents, ", "))
+		}
 		if seen[draft.Workflow.Id] {
 			return nil, fmt.Errorf("idea %d reuses workflow ID %s", i+1, draft.Workflow.Id)
 		}
@@ -57,6 +60,23 @@ func decodeIdeas(p *Project, s Settings, text string) ([]walkthroughIdea, error)
 		ideas = append(ideas, walkthroughIdea{Redact(title), Redact(strings.TrimSpace(idea.Pitch)), *draft, ScoreArena(draft.Workflow, draft.Profiles)})
 	}
 	return ideas, nil
+}
+
+// newBlanketApproval lists the agents in w that opt into Antigravity's
+// sandboxed blanket approval without already having it in saved. Only the
+// user turns it on; an orchestrator draft that adds it is refused.
+func newBlanketApproval(w, saved Workflow) []string {
+	had := map[string]bool{}
+	for _, a := range saved.Agents {
+		had[a.Id] = antigravityBlanket(a.Runtime)
+	}
+	out := []string{}
+	for _, a := range w.Agents {
+		if antigravityBlanket(a.Runtime) && !had[a.Id] {
+			out = append(out, a.Id)
+		}
+	}
+	return out
 }
 
 // Lines describes an idea for the chat: its roles, suggested providers,
