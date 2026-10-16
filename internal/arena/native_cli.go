@@ -327,7 +327,7 @@ const antigravityToolNote = "Terminal commands and reads outside your current wo
 
 // antigravityFencedNote replaces antigravityToolNote under sandboxed blanket
 // approval, so the agent does not waste turns on paths the fence hides.
-const antigravityFencedNote = "Terminal commands run inside a sandbox: the root filesystem and home directory are read-only, credential directories are hidden, /tmp is private, and only the assigned workspace is writable (when your role may write). Work only inside the assigned workspace."
+const antigravityFencedNote = "Terminal commands run inside a nested sandbox with no network and no access to credentials or the home directory; only the assigned workspace is writable (when your role may write) and /tmp is private. Commands cannot fetch anything, so rely only on the assigned workspace, and work only inside it."
 
 const antigravityFollowUps = 2
 

@@ -151,17 +151,26 @@ is Linux only (bubblewrap 0.11 or newer). On macOS Arena refuses the mode: agy
 keeps its sign-in in the Keychain, and `sandbox-exec` cannot let it reach that
 item while keeping commands away from every other Keychain item.
 
-The command fence allows and blocks the following for agy and every command it runs:
+The fence has two layers, because agy needs the network and its sign-in to run
+inference while the commands it is told to run need neither. agy runs in an
+**outer fence**; each command it launches is re-sandboxed, without the network,
+in a **nested fence**. agy resolves the shell for its `run_command` tool through
+`PATH` (verified: agy 1.3.6 runs `bash -c <command>`), so the fence leads `PATH`
+with a directory of `bash`/`sh` wrappers that re-exec the real shell inside the
+nested fence. A command that calls `bash` by an absolute path is already inside
+the nested fence by then, so it cannot escape; the only assumption is that agy's
+first hop uses `PATH` (it does, and its own prepended `bin` holds no shell).
 
-| | Command fence |
-| --- | --- |
-| Root filesystem | read-only (`--ro-bind / /`) |
-| Writable | the assigned worktree, for writers only; a private `/tmp`; agy's state directory (`~/.gemini/antigravity-cli`) through a throwaway overlay, so nothing written there survives the run |
-| Hidden (empty tmpfs, or `/dev/null` for files) | the reviewed table `hiddenCredentialPaths` in `internal/arena/antigravity_sandbox.go`: other providers' sign-ins (`~/.codex`, `~/.claude`, `~/.claude.json`, Gemini CLI credentials, `~/.config/gcloud`, `~/.aws`, `~/.azure`, `~/.config/gh` …), keys and agents (`~/.ssh`, `~/.gnupg`, keyrings, password stores), registry and cluster tokens (`~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.kube`, `~/.npmrc`, `~/.pypirc` …), browser and mail profiles, and shell history; the sensitive `/etc` files the mediated sandbox also hides; `$XDG_RUNTIME_DIR` (agent sockets, display auth cookies, the real session bus); the project's `.arena/.state` except the agent's own worktree (other agents' worktrees, journals, attachments) |
-| Session bus | a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused |
-| Environment | locale, terminal, `PATH`, home and toolchain locations, and `AGY_*`/`ANTIGRAVITY_*`; credentials, agent sockets and display variables are dropped |
-| Processes | new PID and IPC namespaces, a new session, killed with Arena (`--unshare-pid`, `--unshare-ipc`, `--new-session`, `--die-with-parent`) |
-| Network | **open**: agy needs it for inference |
+| | Outer fence (agy) | Nested fence (each command) |
+| --- | --- | --- |
+| Root filesystem | read-only (`--ro-bind / /`) | read-only, inherited from the outer fence |
+| Home directory | emptied: a tmpfs over `$HOME`, every other user's home, `/root`, `/mnt`, `/media`, `/srv`, with only an allowlist bound back read-only — agy's `~/.gemini` config, the `PATH` and toolchain directories under home (e.g. `~/.local/bin`, `GOPATH`), and `ARENA_ANTIGRAVITY_EXTRA_READS` | inherited empty home |
+| Writable | the assigned worktree (writers only); a private `/tmp`; agy's state (`~/.gemini/antigravity-cli`) through a throwaway overlay, so nothing written there survives | **only** the assigned worktree (writers only) and a private `/tmp`; agy's state is hidden |
+| Network | **open**: agy needs it for inference | **none** (`--unshare-net`): a fresh, empty network namespace, which also cuts off abstract Unix sockets (X11, the bus) |
+| Session bus / keyring | a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused | hidden: the relay socket (`$XDG_RUNTIME_DIR`) is tmpfs'd and the netns has no abstract bus socket, so a command cannot reach the keyring at all |
+| Also hidden | the reviewed credential table `hiddenCredentialPaths` in `internal/arena/antigravity_sandbox.go` (`~/.codex`, `~/.claude`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.docker`, `~/.kube`, browser profiles, shell history …) as defense in depth under the tmpfs home; sensitive `/etc` files; the project's `.arena/.state` except the agent's own worktree | all of the outer fence's, plus agy's state and the relay |
+| Environment | locale, terminal, `PATH`, home and toolchain locations, `AGY_*`/`ANTIGRAVITY_*`; credentials, agent sockets and display variables are dropped | inherited, minus the (now unreachable) bus address |
+| Processes | new PID and IPC namespaces, a new session, killed with Arena | its own new PID, IPC, UTS and network namespaces |
 
 agy stores its sign-in in the desktop keyring through the D-Bus Secret Service.
 The relay learns which keyring service agy uses from agy's own search while it
@@ -169,18 +178,23 @@ starts, before Arena sends the first turn, and then accepts searches and reads
 for that service only. Arena never reads, copies or logs a keyring item; it parses
 messages only for the service attribute and object paths.
 
-Residual risks, stated plainly: the fence cannot unshare the network, so a
-prompt-injected command can send anything it can read to anywhere. What stays
-readable is the rest of the home directory and the filesystem outside the hidden
-table (source trees, documents, the project), agy's own sign-in (reachable through
-the relay, as agy itself needs it; a command can also overwrite or delete that one
-item, which the relay allows so agy can save refreshed tokens), and abstract Unix sockets, which live in the
-shared network namespace (X11 refused connections without the hidden auth cookie
-when this was tested). The hidden table is a denylist: a credential stored
-somewhere it does not list stays readable. Arena does not rely on whatever agy's
-own `--sandbox` restricts; the command fence is the boundary. Use the mode for
-agents whose inputs you trust, or accept that anything readable may leave the
-machine.
+Residual risks, stated plainly:
+
+- **agy itself keeps the network and the sign-in.** This is irreducible — agy
+  cannot do inference otherwise. A prompt-injected agy can still, through its own
+  file tools (not a command), read whatever the outer fence leaves readable and
+  describe it in a network turn. The outer fence shrinks that to agy's `~/.gemini`,
+  the project, the toolchains and the worktree; the rest of the home directory
+  and other credentials are gone.
+- **Commands are contained but the fence is Linux-only.** On macOS the mode is
+  refused, not weakened.
+- **The home allowlist is the boundary, with the credential table as a second
+  layer.** A secret placed inside a bound-back path (for example under
+  `~/.gemini`, or an `ARENA_ANTIGRAVITY_EXTRA_READS` directory) is readable by
+  agy; the credential table blanks the known ones even there.
+
+Arena does not rely on whatever agy's own `--sandbox` restricts; the two fences
+are the boundary. Use the mode for agents whose inputs you trust.
 
 Example local runtime fragment:
 

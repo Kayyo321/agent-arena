@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -222,7 +223,7 @@ EOF
 	if log := recorded(t, tree, ".agy-log"); log != "inside\ntmp\npidns\n" {
 		t.Fatalf("fence reach: %q", log)
 	}
-	if stdin := recorded(t, tree, ".agy-stdin"); !strings.Contains(stdin, "Terminal commands run inside a sandbox") {
+	if stdin := recorded(t, tree, ".agy-stdin"); !strings.Contains(stdin, "Terminal commands run inside a nested sandbox") {
 		t.Fatalf("worker was not told about the fence: %s", stdin)
 	}
 	if _, err := os.Stat(filepath.Join(root, "escaped")); err == nil {
@@ -326,4 +327,178 @@ func TestCoworkerRequestsCannotSelectBlanketApproval(t *testing.T) {
 	if _, err := p.RequestCoworker(context.Background(), q, true, nil); err == nil || !strings.Contains(err.Error(), "only the user sets commandApproval") {
 		t.Fatalf("agent-chosen blanket approval: %v", err)
 	}
+}
+
+func TestNestedCommandArgsIsolatesTheNetworkAndBus(t *testing.T) {
+	f := commandFence{Home: "/home/u", RuntimeDir: "/run/user/7", State: "/home/u/.gemini/antigravity-cli", Dir: "/w/tree"}
+	ro := f.nestedCommandArgs()
+	for _, flag := range []string{"--unshare-net", "--unshare-pid", "--unshare-ipc", "--new-session", "--die-with-parent"} {
+		if !Has(ro, flag) {
+			t.Errorf("nested fence missing %s", flag)
+		}
+	}
+	if argRun(ro, "--ro-bind", "/", "/") < 0 {
+		t.Error("nested fence must inherit the read-only root")
+	}
+	if argRun(ro, "--tmpfs", "/run/user/7") < 0 {
+		t.Error("nested fence must hide the keyring relay socket")
+	}
+	if argRun(ro, "--tmpfs", "/home/u/.gemini/antigravity-cli") < 0 {
+		t.Error("nested fence must hide agy's sign-in-bearing state")
+	}
+	if argRun(ro, "--ro-bind", "/w/tree", "/w/tree") < 0 || argRun(ro, "--chdir", "/w/tree") < 0 {
+		t.Error("a reader's worktree is read-only in the nested fence")
+	}
+	if argRun(ro, "--bind", "/w/tree", "/w/tree") >= 0 {
+		t.Error("a reader must not get a writable worktree")
+	}
+	// A writer's worktree is the one writable path.
+	f.Write = true
+	rw := f.nestedCommandArgs()
+	if argRun(rw, "--bind", "/w/tree", "/w/tree") < 0 {
+		t.Error("a writer's worktree must be writable in the nested fence")
+	}
+}
+
+func TestOuterFenceEmptiesHomeAndBindsBackAllowlist(t *testing.T) {
+	home := t.TempDir()
+	gemini := filepath.Join(home, ".gemini")
+	if err := os.MkdirAll(gemini, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := commandFence{Home: home, BindBack: []string{gemini}, State: antigravityStateDir(home), Dir: t.TempDir(), Executable: "/usr/bin/agy", CmdWrapDir: t.TempDir(), RuntimeDir: "/run/user/9", BusSocket: "/tmp/relay/bus"}
+	argv := f.bwrapArgs("/usr/bin/bwrap")
+	homeAt := argRun(argv, "--tmpfs", home)
+	if homeAt < 0 {
+		t.Fatal("the home directory must be emptied with a tmpfs")
+	}
+	if at := argRun(argv, "--ro-bind", gemini, gemini); at < 0 || at < homeAt {
+		t.Error("agy's config must be bound back read-only, after the home tmpfs")
+	}
+	if argRun(argv, "--ro-bind", f.CmdWrapDir, cmdWrapMount) < 0 {
+		t.Error("the command wrapper directory must be mounted read-only")
+	}
+	// Other users' homes are emptied too.
+	if homes := otherHomes(home); Has(homes, home) {
+		t.Error("the fence must not empty its own home")
+	}
+}
+
+func TestHomeBindBacksStayUnderHome(t *testing.T) {
+	home := t.TempDir()
+	inside := filepath.Join(home, ".gemini")
+	outside := t.TempDir()
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", inside+string(os.PathListSeparator)+outside+string(os.PathListSeparator)+"/usr/bin")
+	t.Setenv("ARENA_ANTIGRAVITY_EXTRA_READS", outside)
+	got := homeBindBacks(home)
+	if !Has(got, inside) {
+		t.Errorf("a PATH dir under home should be bound back: %v", got)
+	}
+	for _, p := range got {
+		if !within(p, home) || p == home {
+			t.Errorf("bind-back %q is not strictly under home", p)
+		}
+	}
+	if Has(got, outside) {
+		t.Error("paths outside home must not be bound back (they are visible via the read-only root)")
+	}
+}
+
+func TestWriteCommandWrappersReExecNestedFence(t *testing.T) {
+	f := commandFence{Dir: "/w/tree", RealBash: "/usr/bin/bash", RealSh: "/bin/dash", RuntimeDir: "/run/user/3"}
+	dir, err := writeCommandWrappers(f, "/usr/bin/bwrap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	for name, real := range map[string]string{"bash": "/usr/bin/bash", "sh": "/bin/dash"} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := string(b)
+		if !strings.Contains(script, "--unshare-net") || !strings.Contains(script, "'"+real+"'") || !strings.HasSuffix(strings.TrimSpace(script), `"$@"`) {
+			t.Errorf("%s wrapper does not re-exec %s in the nested fence:\n%s", name, real, script)
+		}
+		if info, _ := os.Stat(filepath.Join(dir, name)); info == nil || info.Mode()&0o111 == 0 {
+			t.Errorf("%s wrapper is not executable", name)
+		}
+	}
+}
+
+func TestShellJoinAndPrependPath(t *testing.T) {
+	if got := shellJoin([]string{"a", "b c", "it's"}); got != `'a' 'b c' 'it'\''s'` {
+		t.Fatalf("shellJoin: %s", got)
+	}
+	sep := string(os.PathListSeparator)
+	if got := prependPath([]string{"HOME=/h", "PATH=/usr/bin" + sep + "/bin"}, "/w"); got[1] != "PATH=/w"+sep+"/usr/bin"+sep+"/bin" {
+		t.Fatalf("prependPath existing: %v", got)
+	}
+	if got := prependPath([]string{"HOME=/h"}, "/w"); got[len(got)-1] != "PATH=/w" {
+		t.Fatalf("prependPath missing: %v", got)
+	}
+}
+
+// TestCommandWrapperNestedFenceIsolatesCommandsLive runs the real two-layer
+// fence (no agy): a command invoked as `bash` lands in a network-less namespace
+// that can write only the worktree, while agy's layer keeps the host network.
+func TestCommandWrapperNestedFenceIsolatesCommandsLive(t *testing.T) {
+	if err := commandFenceAvailable(); err != nil {
+		t.Skip(err)
+	}
+	home := t.TempDir()
+	secret := filepath.Join(home, "secret")
+	if err := os.WriteFile(secret, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tree := t.TempDir()
+	bwrap, _ := exec.LookPath("bwrap")
+	realBash, _ := exec.LookPath("bash")
+	f := commandFence{Home: home, Dir: tree, Write: true, Executable: realBash, RealBash: realBash, RuntimeDir: resolveForTest(os.Getenv("XDG_RUNTIME_DIR"))}
+	f.RealSh = f.RealBash
+	wrapDir, err := writeCommandWrappers(f, bwrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wrapDir)
+	f.CmdWrapDir = wrapDir
+	hostNet, _ := os.Readlink("/proc/self/ns/net")
+	probe := `{
+		readlink /proc/self/ns/net
+		(echo w > ` + tree + `/w.txt && echo worktree=ok) || echo worktree=fail
+		(echo h > ` + home + `/h.txt 2>/dev/null && echo home=WROTE) || echo home=readonly
+		(test -r ` + secret + ` && echo secret=READABLE) || echo secret=hidden
+	} > ` + tree + `/r.txt 2>&1`
+	// Outer fence runs bash, which runs the probe, which invokes `bash` (PATH) -> wrapper -> nested fence.
+	argv := f.bwrapArgs(bwrap)
+	argv = append(argv, "-c", "bash -c "+shellJoin([]string{probe}))
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env = prependPath([]string{"PATH=/usr/bin:/bin:" + wrapDir}, cmdWrapMount)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("fence run: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(filepath.Join(tree, "r.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := string(got)
+	nestedNet := strings.SplitN(report, "\n", 2)[0]
+	if nestedNet == hostNet {
+		t.Errorf("command shares the host network namespace %q", hostNet)
+	}
+	for _, want := range []string{"worktree=ok", "home=readonly", "secret=hidden"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("want %q in:\n%s", want, report)
+		}
+	}
+}
+
+func resolveForTest(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }
