@@ -131,7 +131,7 @@ type arenaGraph struct {
 	edges    map[string][]string
 	parents  map[string][]string
 	path     []string // standalone path agents in workflow order
-	writers  []string // standalone path agents with write
+	writers  []string // path agents with write, and teams with a writing member
 	gates    []string // review agents and review teams
 }
 
@@ -199,8 +199,31 @@ func analyzeArena(w Workflow, profiles map[string]Profile) arenaGraph {
 				break
 			}
 		}
+		// A team is one graph node: when a member writes, the team's result
+		// carries that change and needs review like any writer's.
+		for _, id := range t.Members {
+			if has(profiles[id], "write") {
+				g.writers = append(g.writers, t.Id)
+				break
+			}
+		}
 	}
 	return g
+}
+
+// writerRuntimes are the provider/model pairs that produce a node's changes.
+func (g arenaGraph) writerRuntimes(id string) map[string]bool {
+	keys := map[string]bool{}
+	if t, ok := g.teams[id]; ok {
+		for _, m := range t.Members {
+			if has(g.profiles[m], "write") {
+				keys[runtimeKey(g.agents[m].Runtime)] = true
+			}
+		}
+		return keys
+	}
+	keys[runtimeKey(g.agents[id].Runtime)] = true
+	return keys
 }
 
 // reviewers are the agents that judge on behalf of a gate.
@@ -252,8 +275,9 @@ func (g arenaGraph) gatesOf(id string) []string {
 // independent reports whether one of the gate's reviewers runs on a different
 // provider or model than id.
 func (g arenaGraph) independent(id, gate string) bool {
+	produced := g.writerRuntimes(id)
 	for _, r := range g.reviewers(gate) {
-		if runtimeKey(g.agents[r].Runtime) != runtimeKey(g.agents[id].Runtime) {
+		if !produced[runtimeKey(g.agents[r].Runtime)] {
 			return true
 		}
 	}
@@ -399,7 +423,7 @@ func ScoreArena(w Workflow, profiles map[string]Profile) Scorecard {
 			independent = independent || g.independent(id, gate)
 		}
 		if !independent {
-			add("T4", "", 4, 0, []string{id}, "every reviewer of %s runs on its provider and model (%s)", id, runtimeKey(g.agents[id].Runtime))
+			add("T4", "", 4, 0, []string{id}, "every reviewer of %s runs on its provider and model (%s)", id, strings.Join(sortedKeys(g.writerRuntimes(id)), ", "))
 		}
 	}
 	if w.Settings.Integration.Policy == "auto-if-clean" {
@@ -706,7 +730,7 @@ var scoreCheckTitle = map[string]string{"T1": "unreviewed writer", "T3": "review
 // verified reports at least one gate that reviews another agent's work from a
 // different provider or model.
 func (g arenaGraph) verified() bool {
-	for _, id := range g.path {
+	for _, id := range append(append([]string{}, g.path...), g.writers...) {
 		if Has(g.gates, id) {
 			continue
 		}

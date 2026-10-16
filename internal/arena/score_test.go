@@ -239,3 +239,34 @@ func TestScoreSheetDocumentsEveryCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestWritingTeamNeedsReviewLikeAnyWriter(t *testing.T) {
+	w := NewWorkflow("pair", "Pair builders")
+	w.Description = "A read-only lead hands the change to a two-writer team with nobody reviewing it."
+	w.HeadAgent = "lead"
+	w.Settings.MaxConcurrentAgents = 2
+	w.Settings.Integration.Policy = "auto-if-clean"
+	scoreAgent(&w, "lead", 0, "codex", "gpt-test")
+	scoreAgent(&w, "builder-a", 1, "codex", "gpt-test")
+	scoreAgent(&w, "builder-b", 1, "claude-code", "sonnet")
+	scoreAgent(&w, "helper", -1, "claude-code", "sonnet")
+	w.Teams = []Team{{Id: "builders", Name: "Builders", Members: []string{"builder-a", "builder-b"}, Facilitator: "builder-a", Consensus: c.WorkflowTeamConsensus{Mode: "unanimous-deliberation", MaxRounds: 2}, OutputContract: c.WorkflowTeamOutputContract{Format: "arena.team-verdict.v1", Verdicts: []string{"Approved", "ChangesRequested"}}}}
+	w.Relationships = []Relationship{{Type: "delegates", From: "lead", To: "builders"}}
+	w.OnCall = []c.WorkflowOnCallRule{{AgentId: "helper", MaxInvocationsPerRun: 1, Triggers: []Trigger{{Type: "event", Event: "validation.failed"}}}}
+	profiles := map[string]Profile{
+		"lead":      scoreProfile("lead", "coordinator", "read", "research"),
+		"builder-a": scoreProfile("builder-a", "implementation", "read", "write"),
+		"builder-b": scoreProfile("builder-b", "implementation", "read", "write"),
+		"helper":    scoreProfile("helper", "escalation", "read"),
+	}
+	s := scored(t, w, profiles)
+	ids := findingIDs(s)
+	if !Has(ids, "T1") || !Has(ids, "V1") || Has(ids, "P9") || gradeRank(s.Grade) < gradeRank("C") {
+		t.Fatalf("writing team: %s %d %v", s.Grade, s.Points, ids)
+	}
+	for _, f := range s.Findings {
+		if f.ID == "T5" && f.Severity != "major" {
+			t.Fatal("auto-if-clean over an unreviewed writing team is not major")
+		}
+	}
+}

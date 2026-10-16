@@ -219,6 +219,10 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				m.Error = "No validated draft to save; finish the setup interview first"
 				break
 			}
+			if m.runActive() {
+				m.Error = "Finish or cancel the current run before saving another arena"
+				break
+			}
 			if m.Draft.Source != "share-import" && m.Run.Settings.ApprovalPolicies.AgentWorkflowEdit == "auto-refuse" {
 				m.Error = "project workflow-edit policy refuses agent proposals"
 				break

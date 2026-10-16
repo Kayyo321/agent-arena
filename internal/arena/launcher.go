@@ -359,8 +359,10 @@ func (m launcherModel) View() tea.View {
 	}
 	if m.Import != nil {
 		score := ScoreArena(m.Import.Workflow, m.Import.Profiles)
-		preview := append(strings.Split(strings.TrimRight(GraphSummary(m.Import.Workflow), "\n"), "\n"), score.Summary())
-		lines = append(brandedHeader([]string{"Import a pasted arena", "Project: " + m.Project.Root}, width, height, "show", terminalColor("auto")), append(preview, m.Import.Notes...)...)
+		// Trust notes and the grade come first so a large graph cannot push
+		// them off a short terminal.
+		preview := append(append([]string{score.Summary()}, m.Import.Notes...), strings.Split(strings.TrimRight(GraphSummary(m.Import.Workflow), "\n"), "\n")...)
+		lines = append(brandedHeader([]string{"Import a pasted arena", "Project: " + m.Project.Root}, width, height, "show", terminalColor("auto")), preview...)
 		footer = "Enter import " + m.Import.Workflow.Id + " · Esc cancel"
 	}
 	switch {

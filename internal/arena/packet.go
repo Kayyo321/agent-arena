@@ -162,7 +162,9 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 		return p.Deliver(r, packet)
 	case "context-proposal":
 		var q ContextProposal
-		q = convert[ContextProposal](payload)
+		if err := DecodeJSON(JSON(payload), &q); err != nil {
+			return nil, fmt.Errorf("invalid context-proposal payload: %w", err)
+		}
 		if q.WorkflowID != r.Workflow.Id {
 			return nil, fmt.Errorf("context is scoped to the active workflow")
 		}
@@ -189,7 +191,11 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 			return nil, e
 		}
 		var q CoworkerRequest
-		q = convert[CoworkerRequest](payload)
+		if err := DecodeJSON(JSON(payload), &q); err != nil {
+			return nil, fmt.Errorf("invalid coworker-request payload: %w", err)
+		}
+		// Persistence metadata belongs to Arena, never to the requesting agent.
+		q.ID, q.State, q.CreatedAt = "", "", ""
 		q.From = from
 		q.RunID = r.ID
 		q.AgentID = str(payload["agentId"])

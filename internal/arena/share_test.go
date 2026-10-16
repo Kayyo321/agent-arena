@@ -306,11 +306,163 @@ func TestLauncherShowsGradesAndImportsPastedArena(t *testing.T) {
 	if m.Import == nil || m.Import.Workflow.Id != "ideal-2" || !strings.Contains(m.View().Content, "Enter import ideal-2") {
 		t.Fatalf("no import preview: %q", m.Error)
 	}
+	view := m.View().Content
+	if notes, graph := strings.Index(view, "Writes code"), strings.Index(view, "Arena Ideal arena"); notes < 0 || graph < 0 || notes > graph {
+		t.Fatal("trust notes must come before the graph so a large graph cannot hide them")
+	}
 	next, cmd = m.Update(launchKey(tea.KeyEnter))
 	m = next.(launcherModel)
 	next, _ = m.Update(cmd())
 	m = next.(launcherModel)
 	if m.Live == nil || m.Live.Run.Workflow.Id != "ideal-2" {
 		t.Fatalf("imported arena not opened: %q", m.Error)
+	}
+}
+
+// TestExportRefusesSensitiveFields pins the /copy guarantee: a field that may
+// identify the author's machine or hold a credential refuses the export, names
+// the field, and never echoes the value.
+func TestExportRefusesSensitiveFields(t *testing.T) {
+	type edit func(*Workflow, map[string]Profile, *ShareShader)
+	instructions := func(text string) edit {
+		return func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			q := p["implementer"]
+			q.Instructions += " " + text
+			p["implementer"] = q
+		}
+	}
+	cases := []struct {
+		name, secret, path, label string
+		edit                      edit
+	}{
+		{"aws", "AKIAIOSFODNN7EXAMPLE", "profiles.implementer.instructions", "AWS access key", nil},
+		{"slack", "xoxb-1234567890-abcdefghij", "profiles.implementer.instructions", "Slack token", nil},
+		{"jwt", "eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2Q", "profiles.implementer.instructions", "JSON web token", nil},
+		{"private key", "-----BEGIN OPENSSH PRIVATE KEY-----", "profiles.implementer.instructions", "private key", nil},
+		{"assignment", "token = Zx8rT2pQ9vLk", "profiles.implementer.instructions", "credential", nil},
+		{"entropy", "Q2xhdWRlSXNBQ29vbE1vZGVsQW5kSXRJc05pY2U9X3o", "profiles.implementer.instructions", "random-looking token", nil},
+		{"ip", "10.0.0.12", "profiles.implementer.instructions", "IP address", nil},
+		{"host", "build01.corp", "profiles.implementer.instructions", "internal host name", nil},
+		{"email", "alice@example.com", "profiles.implementer.description", "email address", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			q := p["implementer"]
+			q.Description = "Ask alice@example.com"
+			p["implementer"] = q
+		}},
+		{"url userinfo", "alice:hunter22", "description", "user name or password", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Description = "Mirror of https://alice:hunter22@git.example.com/repo"
+		}},
+		{"home path", "/home/alice", "profiles.implementer.constraints[0]", "home directory", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			q := p["implementer"]
+			q.Constraints = []string{"Only touch /home/alice/projects/app"}
+			p["implementer"] = q
+		}},
+		{"windows home", `C:\Users\alice`, "profiles.implementer.instructions", "home directory", instructions(`Build in C:\Users\alice\code`)},
+		{"project path", "/srv/projects/acme", "profiles.implementer.instructions", "path on this machine", nil},
+		{"control chars", "\x1b]52;c;aGk=\x07", "name", "terminal control", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Name = "Arena \x1b]52;c;aGk=\x07"
+		}},
+		{"shader comment", "ghp_abcdefghijklmnopqrstuvwxyz0123", "shader.source", "credential", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			s.Source = "// key ghp_abcdefghijklmnopqrstuvwxyz0123\n" + s.Source
+		}},
+		{"unknown option", "127.0.0.1:8080", "runtime.options.proxy", "does not document", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Agents[0].Runtime.Options = map[string]any{"proxy": "http://127.0.0.1:8080"}
+		}},
+		{"codex config", "danger-full-access", "options.config.sandbox_mode", "not documented", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Agents[0].Runtime.Options = map[string]any{"config": map[string]any{"sandbox_mode": "danger-full-access"}}
+		}},
+		{"secret map key", "sk-abcdefghijklmnopqrstu", "<key>", "credential", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Agents[0].Runtime = Runtime{Provider: "local", Model: "m", Options: map[string]any{"backend": "ollama", "generation": map[string]any{"sk-abcdefghijklmnopqrstu": 1}}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w, profiles := idealArena()
+			s := &ShareShader{shader.DefaultSource, "."}
+			if tc.edit == nil {
+				instructions("Note: " + tc.secret)(&w, profiles, s)
+			} else {
+				tc.edit(&w, profiles, s)
+			}
+			_, err := EncodeShare(ShareBundle{Format: shareFormat, Kind: "arena", Workflow: &w, Profiles: profiles, Shader: s}, "/srv/projects/acme")
+			if err == nil {
+				t.Fatal("exported a sensitive field")
+			}
+			if !strings.Contains(err.Error(), tc.path) || !strings.Contains(err.Error(), tc.label) || strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("error %q should name %q as %q without the value", err, tc.path, tc.label)
+			}
+		})
+	}
+	// Clean arenas and the shipped default shader still share.
+	w, profiles := idealArena()
+	w.Agents[0].Runtime.Options = map[string]any{"config": map[string]any{"service_tier": "flex"}}
+	if _, err := EncodeShare(ShareBundle{Format: shareFormat, Kind: "arena", Workflow: &w, Profiles: profiles, Shader: &ShareShader{shader.DefaultSource, "."}}, "/srv/projects/acme"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&Project{"../../examples/project"}).ExportArena("code-review"); err != nil {
+		t.Fatalf("example arena: %v", err)
+	}
+}
+
+func TestExportRefusesThisProjectsPath(t *testing.T) {
+	p, _ := savedIdeal(t)
+	w, profiles, version, err := p.LoadVersion("ideal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := profiles["implementer"]
+	q.Instructions += " Scripts live in " + p.Root + "/scripts."
+	profiles["implementer"] = q
+	if _, err := p.Save(w, profiles, version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.ExportArena("ideal"); err == nil || !strings.Contains(err.Error(), "path on this machine") {
+		t.Fatalf("exported the project path: %v", err)
+	}
+}
+
+func TestShareSizeAndControlCharacterLimits(t *testing.T) {
+	w, profiles := idealArena()
+	q := profiles["implementer"]
+	q.Instructions = strings.Repeat("Keep the change small and tested. ", 40000) // ~1.3 MiB, compresses well
+	profiles["implementer"] = q
+	if _, err := EncodeShare(ShareBundle{Format: shareFormat, Kind: "arena", Workflow: &w, Profiles: profiles}); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("exported a code its decoder refuses: %v", err)
+	}
+	code := packShare(t, "s", JSON(ShareBundle{Format: shareFormat, Kind: "shader", From: "x\x1b]52;c;aGk=\x07", Shader: &ShareShader{shader.DefaultSource, "."}}))
+	_, err := DecodeShare(code)
+	if err == nil || !strings.Contains(err.Error(), "terminal control") || strings.ContainsRune(err.Error(), 0x1b) {
+		t.Fatalf("control characters: %q", err)
+	}
+	if got := terminalSafe("ok\x1b]52;c;aGk=\x07 \x1b[31mred\x9b"); strings.ContainsAny(got, "\x1b\x07\u009b") {
+		t.Fatalf("terminalSafe kept controls: %q", got)
+	}
+}
+
+func TestImportWaitsForActiveRun(t *testing.T) {
+	readyProbe(t)
+	p, _ := savedIdeal(t)
+	code, _ := p.ExportArena("ideal")
+	r, _ := loadWorkflowView(p, "ideal")
+	m := LiveModel{Project: p, Run: r, Executing: true, Width: 120, Height: 40, State: RunState{Status: "running", Agents: map[string]string{}}}
+	next, cmd := m.Update(tea.PasteMsg{Content: code})
+	if m2 := next.(LiveModel); cmd != nil || m2.Draft != nil || !strings.Contains(m2.Error, "Finish or cancel") {
+		t.Fatalf("pasted over an active run: %q", m2.Error)
+	}
+	m.Draft = &WorkflowDraft{Workflow: r.Workflow, Profiles: r.Profiles}
+	if next, _ = m.submit("/save"); !strings.Contains(next.(LiveModel).Error, "Finish or cancel") {
+		t.Fatalf("saved over an active run: %q", next.(LiveModel).Error)
+	}
+}
+
+func TestHighEntropyTellsKeysFromIdentifiers(t *testing.T) {
+	for _, s := range []string{"TestExportRefusesThisProjectsPath1234567", "MyServiceClientFactory2024Implementation", "ValidateWorkflowAgainstProjectSettings2"} {
+		if highEntropy(s) {
+			t.Errorf("identifier %q flagged as a key", s)
+		}
+	}
+	for _, s := range []string{"Q2xhdWRlSXNBQ29vbE1vZGVsQW5kSXRJc05pY2U9X3o", "x7Kp2QvR9mZt4WbL8nYc3HdJ6sFg1VaE5uTq0Ni", "AbC9dEf2GhI7jKl4MnO1pQr8StU5vWx3YzA6bCd"} {
+		if !highEntropy(s) {
+			t.Errorf("key %q not flagged", s)
+		}
 	}
 }

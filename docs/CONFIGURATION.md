@@ -180,7 +180,28 @@ arena1.<kind>.<check>.<payload>
   edited code is rejected before decoding. Whitespace inside a code is ignored,
   so line-wrapped codes and codes inside a chat message still paste.
 
-Codes are capped at 512 KiB and 1 MiB once inflated. The workflow and each
+Export fails closed. Every string and key in the bundle is checked, and the
+export is refused, naming the field but not its value, when it finds:
+- credentials or keys: anything Arena's secret redaction recognizes, private
+  keys, AWS/Slack/GitHub/Google/Stripe-style tokens, JWTs,
+  `password=`/`token:`-style assignments and long random-looking tokens;
+- details that identify a machine or person: URLs carrying a user name or
+  password, home-directory paths, this project's path, email addresses,
+  non-loopback IP addresses and internal host names;
+- terminal control characters.
+
+Runtime options must be ones the adapter documents, with plain values:
+- Codex `config.model_reasoning_effort`/`service_tier`;
+- Gemini `authMethod` and generation settings;
+- local `backend`, a loopback `endpoint` and generation settings;
+- no options for Claude Code.
+
+Values are never redacted inside a code: the receiver gets exactly what the
+author saw, or no code. Import runs the same checks, so a code carrying any of
+these is refused rather than saved.
+
+Codes are capped at 512 KiB and 1 MiB once inflated; export refuses an arena
+whose JSON exceeds 1 MiB so every code it produces can be imported. The workflow and each
 profile are validated against their schemas, runtimes are refused if their
 options look secret, the profile set must match the agents exactly, and the
 shader must compile. On import the graph is validated against this project's

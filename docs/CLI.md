@@ -92,7 +92,11 @@ arena share import 'arena1.s.…' --into development
 ```
 
 A share code is a single line holding the workflow, its profiles and its
-background shader (or only the shader). Export refuses secret-like values.
+background shader (or only the shader). Export fails closed: it refuses the
+whole code and names the field when any value looks like a credential, key or
+token, a home-directory or project path, an email address, an IP address or
+internal host name, or contains terminal control characters, and when a runtime
+option is not one the adapter documents. Nothing is redacted silently.
 Import validates the code, picks a free ID (`--as ID`, or the author's ID with a
 `-2`, `-3` … suffix), prints the graph, score, who writes or runs commands,
 the integration policy, and readiness for each of the author's runtimes, then

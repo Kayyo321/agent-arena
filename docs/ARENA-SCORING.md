@@ -14,7 +14,7 @@ The grade appears in the setup conversation when a draft validates, in the CLI b
 
 ## Terms
 
-- **Writer:** a path agent whose profile has `write`.
+- **Writer:** a path agent whose profile has `write`, or a team with a member that has `write` (the team node carries that member's change).
 - **Review gate:** a path agent with role `review`, or a team with at least one member whose role is `review` or who has the `review` capability. A gate's reviewers are the agent itself, or the team's members.
 - **Forward edges:** `delegates` relationships, non-loop router routes and `route` fallbacks. These are the edges along which Arena hands a node's result packet to the next node. Loop routes are back edges.
 - **Reviewed:** a review gate is reachable from the writer along forward edges, so the gate receives the writer's change. A reviewer that is the writer's sibling does not receive the change and does not count.
@@ -50,7 +50,7 @@ The five categories add up to 100 points. Each finding deducts points from its c
 | P1 | Two redundant agents outside the same team | −6 per pair | moderate |
 | P2 | A relay: a non-head path agent with one parent and one agent child, that neither writes nor verifies, and whose capabilities the child already has | −5 each | moderate |
 | P3 | Deepest level above 3 (more than four tiers) | −3 per extra level | moderate |
-| P4 | `maxConcurrentAgents` above the number of path agents, or below the widest fan-out | −2 | minor |
+| P4 | `maxConcurrentAgents` above the number of path agents, or above 1 but below the widest fan-out (a single slot is R3) | −2 | minor |
 | P5 | A team with more than 3 members, or more than 3 deliberation rounds | −2 each | minor |
 | P6 | A router with no loop route whose branches all lead to one place (one route and a `stop` fallback, or every route to the same node) | −3 each | moderate |
 | P7 | An on-call agent redundant with a path agent, or an on-call cap above 3 | −2 each | minor |

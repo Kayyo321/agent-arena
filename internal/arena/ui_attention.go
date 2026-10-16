@@ -288,7 +288,10 @@ func (m LiveModel) runShell(command string) tea.Cmd {
 		cmd.Dir = p.Root
 		cmd.Stdin = nil
 		var out bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &limitedWriter{&out, 256 << 10}, &limitedWriter{&out, 256 << 10}
+		// One writer for both streams: os/exec then copies them from a single
+		// goroutine instead of racing two copiers on one buffer.
+		output := &limitedWriter{&out, 256 << 10}
+		cmd.Stdout, cmd.Stderr = output, output
 		err := cmd.Run()
 		result.Output = out.String()
 		if exit, ok := err.(*exec.ExitError); ok {

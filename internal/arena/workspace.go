@@ -64,14 +64,39 @@ func gitEnv(dir string, env []string, args ...string) (string, error) {
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	var output cappedBuffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	// Stdout carries machine-readable results (path lists, binary patches), so
+	// it is kept exactly and fails loudly past maxGitOutput instead of being
+	// cut short. Stderr is diagnostics only and stays capped.
+	stdout := exactBuffer{limit: maxGitOutput}
+	var stderr cappedBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), Redact(output.String()))
+	if stdout.overflow {
+		return "", fmt.Errorf("git %s: output exceeds %d MiB; Arena does not record truncated Git results", strings.Join(args, " "), maxGitOutput>>20)
 	}
-	return strings.TrimSuffix(output.String(), "\n"), nil
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), Redact(strings.TrimSpace(stderr.String()+"\n"+string(stdout.data[:min(len(stdout.data), 1<<20)]))))
+	}
+	return strings.TrimSuffix(string(stdout.data), "\n"), nil
+}
+
+const maxGitOutput = 256 << 20
+
+// exactBuffer keeps every byte up to limit and records an overflow beyond it.
+type exactBuffer struct {
+	data     []byte
+	limit    int
+	overflow bool
+}
+
+func (b *exactBuffer) Write(p []byte) (int, error) {
+	if len(b.data)+len(p) > b.limit {
+		b.overflow = true
+		return 0, fmt.Errorf("git output exceeds %d bytes", b.limit)
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
 }
 func (p *Project) Checkpoint(dir, reason string) (Checkpoint, error) {
 	l, e := p.WaitLock("git")

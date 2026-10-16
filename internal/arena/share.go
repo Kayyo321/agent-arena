@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,14 +61,19 @@ func shareCheck(payload string) string {
 	return hex.EncodeToString(sum[:])[:8]
 }
 
-// EncodeShare packs a bundle into a share code, refusing secret-like values.
-func EncodeShare(b ShareBundle) (string, error) {
+// EncodeShare packs a bundle into a share code. It fails closed: any field
+// that looks sensitive (see share_safety.go), or contains one of the local
+// strings such as this project's path, refuses the export and names the field.
+func EncodeShare(b ShareBundle, local ...string) (string, error) {
 	data, err := json.Marshal(b)
 	if err != nil {
 		return "", err
 	}
-	if Redact(string(data)) != string(data) {
-		return "", fmt.Errorf("arena contains secret-like values; remove them before sharing")
+	if len(data) > maxShareJSON {
+		return "", fmt.Errorf("arena is too large to share (%d KiB of JSON; the limit is %d KiB)", len(data)>>10, maxShareJSON>>10)
+	}
+	if err := checkShareable(b, local); err != nil {
+		return "", fmt.Errorf("cannot share: %w; remove it and copy again", err)
 	}
 	if err := c.ValidateShareBundle(data); err != nil {
 		return "", err
@@ -171,7 +177,13 @@ func shareAlphabet(ch byte) bool {
 // DecodeShare unpacks and checks a share code without touching the project:
 // the bundle shape, profiles, runtimes and shader are validated here, and the
 // graph is validated against project settings on import.
-func DecodeShare(text string) (ShareBundle, error) {
+func DecodeShare(text string) (_ ShareBundle, err error) {
+	// Error text can quote attacker-chosen keys; keep it inert on a terminal.
+	defer func() {
+		if err != nil {
+			err = errors.New(terminalSafe(err.Error()))
+		}
+	}()
 	code, kind, ok := FindShareCode(text)
 	if !ok {
 		return ShareBundle{}, fmt.Errorf("no Arena share code found (codes start with arena1.)")
@@ -222,6 +234,9 @@ func DecodeShare(text string) (ShareBundle, error) {
 		}
 	}
 	if kind == "shader" {
+		if err := checkShareable(b, nil); err != nil {
+			return ShareBundle{}, fmt.Errorf("share code refused: %w", err)
+		}
 		return b, nil
 	}
 	if err := c.ValidateWorkflow(raw.Workflow); err != nil {
@@ -258,6 +273,9 @@ func DecodeShare(text string) (ShareBundle, error) {
 	if cfg := w.Settings.BackgroundShader; cfg != nil && cfg.Enabled && b.Shader == nil {
 		return ShareBundle{}, fmt.Errorf("share code enables a background shader but does not include it")
 	}
+	if err := checkShareable(b, nil); err != nil {
+		return ShareBundle{}, fmt.Errorf("share code refused: %w", err)
+	}
 	return b, nil
 }
 
@@ -277,7 +295,7 @@ func (p *Project) ExportArena(id string) (string, error) {
 	} else if source, err := p.shaderSource(w); err == nil {
 		b.Shader = &ShareShader{source, cfg.Glyphs}
 	}
-	return EncodeShare(b)
+	return EncodeShare(b, shareLocalStrings(p)...)
 }
 
 // ExportShader packs only an arena's background shader.
@@ -290,7 +308,7 @@ func (p *Project) ExportShader(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return EncodeShare(ShareBundle{Format: shareFormat, Kind: "shader", From: w.Name, Shader: &ShareShader{source, shaderSettings(w).Glyphs}})
+	return EncodeShare(ShareBundle{Format: shareFormat, Kind: "shader", From: w.Name, Shader: &ShareShader{source, shaderSettings(w).Glyphs}}, shareLocalStrings(p)...)
 }
 
 // rekeyWorkflow renames an arena, rewriting the paths that embed its ID.
@@ -480,7 +498,7 @@ func (cli *CLI) share(ctx context.Context, p *Project, args []string, o Options)
 			}
 			o["input"], o["glyphs"] = []string{file.Name()}, []string{b.Shader.Glyphs}
 			if b.From != "" {
-				fmt.Fprintln(cli.Out, "Shader from", b.From)
+				fmt.Fprintln(cli.Out, "Shader from", terminalSafe(b.From))
 			}
 			return cli.shader(ctx, p, []string{"set", o.Get("into")}, o)
 		}
@@ -491,10 +509,11 @@ func (cli *CLI) share(ctx context.Context, p *Project, args []string, o Options)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cli.Out, GraphSummary(draft.Workflow))
-		fmt.Fprintln(cli.Out, strings.Join(ScoreArena(draft.Workflow, draft.Profiles).Report(), "\n"))
+		// Everything below comes from someone else's code: print it inert.
+		fmt.Fprintln(cli.Out, terminalSafe(GraphSummary(draft.Workflow)))
+		fmt.Fprintln(cli.Out, terminalSafe(strings.Join(ScoreArena(draft.Workflow, draft.Profiles).Report(), "\n")))
 		fmt.Fprintln(cli.Out)
-		fmt.Fprintln(cli.Out, strings.Join(draft.Notes, "\n"))
+		fmt.Fprintln(cli.Out, terminalSafe(strings.Join(draft.Notes, "\n")))
 		if o.Bool("dry-run") {
 			return nil
 		}
