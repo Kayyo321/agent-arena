@@ -315,6 +315,21 @@ same JSON as `status --json`, `history RUN --json`, `changes`, `score --json` an
 and budget checks, and the run is supervised by the server process only while the
 MCP session stays open.
 
+`arena_integrate` and `arena_rollback` do not integrate or roll back: they
+check the request as `arena integrate` / `arena rollback` would and open a
+pending decision for you, returning its ID. Review it with
+`arena decision list RUN`, then answer it yourself:
+
+```sh
+arena decision answer RUN DECISION approve   # or: reject
+```
+
+Approving executes the integration or rollback once, in that command, and
+prints the outcome. It is refused, and journaled as `decision.refused`, if `HEAD`
+moved since the request, the change is no longer eligible, or the decision was
+already answered; ask the agent to request it again. See
+[Integrate and rollback requests](INTEROPERABILITY.md#integrate-and-rollback-requests).
+
 ### Running a run in tmux
 
 For SSH devboxes see [DEVBOX](DEVBOX.md).

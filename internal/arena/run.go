@@ -295,9 +295,15 @@ type Decision struct {
 	Route string `json:"route,omitempty"`
 }
 
-func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string, choices []string, data map[string]any) (answer string, err error) {
+// newDecision stores an open decision; the caller journals decision.requested.
+func (p *Project) newDecision(r Run, agent, kind, prompt string, choices []string, data map[string]any) (Decision, error) {
 	d := Decision{ID: ID("decision-"), RunID: r.ID, AgentID: agent, Kind: kind, Prompt: prompt, Choices: choices, Context: data, CreatedAt: Now()}
-	if e := Atomic(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), SafeJSON(d), 0600); e != nil {
+	return d, Atomic(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), SafeJSON(d), 0600)
+}
+
+func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string, choices []string, data map[string]any) (answer string, err error) {
+	d, e := p.newDecision(r, agent, kind, prompt, choices, data)
+	if e != nil {
 		return "", e
 	}
 	if r.Retention != "full-local" {
@@ -345,46 +351,71 @@ func (p *Project) awaitDecision(ctx context.Context, run, id string) (string, er
 	}
 }
 func (p *Project) Answer(run, id, answer string) error {
+	_, e := p.AnswerDecision(run, id, answer)
+	return e
+}
+
+// AnswerDecision answers a decision. An approved integrate or rollback request
+// from the control server runs here, once, and its outcome is returned.
+func (p *Project) AnswerDecision(run, id, answer string) (outcome map[string]any, err error) {
 	if e := validID(run); e != nil {
-		return e
+		return nil, e
 	}
 	if e := validID(id); e != nil {
-		return e
+		return nil, e
 	}
 	l, e := p.Lock("decisions-" + run)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	defer l.Close()
 	path := filepath.Join(p.RunDir(run), "decisions", id+".json")
 	var d Decision
 	if e := ReadJSON(path, &d); e != nil {
-		return e
+		return nil, e
 	}
 	if d.Answer != "" || d.ClosedAt != "" {
-		return fmt.Errorf("decision already answered")
+		return nil, fmt.Errorf("decision already answered")
 	}
 	if len(d.Choices) > 0 && !Has(d.Choices, answer) {
-		return fmt.Errorf("answer must be one of %v", d.Choices)
+		return nil, fmt.Errorf("answer must be one of %v", d.Choices)
 	}
 	r, e := p.ReadRun(run)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	d.Answer = answer
 	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer}); e != nil {
-		return e
+		return nil, e
 	}
 	if d.Route != "" {
 		if e := p.settleRoute(r, d, answer); e != nil {
-			return e
+			return nil, e
 		}
 		// No waiter compacts a route decision: its grant carries the answer.
 		if r.Retention != "full-local" {
 			compactDecision(&d)
 		}
 	}
-	return Atomic(path, SafeJSON(d), 0600)
+	if e := Atomic(path, SafeJSON(d), 0600); e != nil {
+		return nil, e
+	}
+	if !isChangeRequest(d) {
+		return nil, nil
+	}
+	// The answer is stored first, so a crash or a failure below can never run
+	// the action a second time: a new request needs a new decision.
+	if answer == "approve" {
+		outcome, err = p.executeChangeRequest(r, d)
+	}
+	// No waiter compacts a change request either.
+	if r.Retention != "full-local" {
+		compactDecision(&d)
+		if e := Atomic(path, SafeJSON(d), 0600); e != nil && err == nil {
+			err = e
+		}
+	}
+	return outcome, err
 }
 func (p *Project) Decisions(id string) ([]Decision, error) {
 	if e := validID(id); e != nil {
