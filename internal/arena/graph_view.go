@@ -66,7 +66,7 @@ func diffSpans(d diffStat) []mdSpan {
 // Children are never drawn as cards of their own.
 func fanOutCard(f FanOut, events []Event, spin string) *graphCard {
 	status, look := "waiting", "waiting"
-	approved, done, failed, dropped := 0, 0, 0, 0
+	approved, done, failed, dropped, conflicting := 0, 0, 0, 0, 0
 	for _, v := range events {
 		if v.AgentID != f.Id {
 			continue
@@ -74,7 +74,7 @@ func fanOutCard(f FanOut, events []Event, spin string) *graphCard {
 		switch v.Type {
 		case "fanout.started":
 			status, look = "planning", "running"
-			approved, done, failed, dropped = 0, 0, 0, 0
+			approved, done, failed, dropped, conflicting = 0, 0, 0, 0, 0
 		case "decision.requested":
 			status, look = "waiting for you · see prompt", "attention"
 		case "fanout.approved":
@@ -84,6 +84,8 @@ func fanOutCard(f FanOut, events []Event, spin string) *graphCard {
 			done++
 		case "fanout.child.failed":
 			failed++
+		case "fanout.conflict":
+			conflicting = len(stringSlice(v.Data["children"]))
 		case "fanout.completed":
 			status, look = "succeeded", "succeeded"
 		case "fanout.stopped":
@@ -107,6 +109,9 @@ func fanOutCard(f FanOut, events []Event, spin string) *graphCard {
 		}
 		if dropped > 0 {
 			detail += fmt.Sprintf(" · %d dropped", dropped)
+		}
+		if conflicting > 0 {
+			detail += fmt.Sprintf(" · %d conflicting", conflicting)
 		}
 	}
 	glyph, sgr := statusLook(look, spin)

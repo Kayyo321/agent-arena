@@ -434,7 +434,9 @@
                     "status": { "enum": ["succeeded", "failed"] },
                     "messageId": { "type": ["string", "null"] },
                     "changeIds": { "type": "array", "items": { "type": "string" } },
-                    "summary": { "type": "string" }
+                    "summary": { "type": "string" },
+                    "conflict": { "type": "boolean" },
+                    "conflictsWith": { "type": "array", "items": { "type": "string" } }
                   },
                   "additionalProperties": false
                 }
