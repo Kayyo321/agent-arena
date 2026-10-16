@@ -1,6 +1,13 @@
 package arena
 
-import "fmt"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+)
 
 // FanOutChild is one worker instance a fan-out node started: a copy of the
 // worker template under the synthetic ID <fanOutId>.<n>.
@@ -32,6 +39,19 @@ func (e *Engine) agentByID(id string) (Agent, bool) {
 	defer e.mu.Unlock()
 	child, ok := e.children[id]
 	return child.Agent, ok
+}
+
+// childIDs lists the children registered for a fan-out, in ID order.
+func (e *Engine) childIDs(fanOut string) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	ids := []string{}
+	for _, id := range sortedKeys(e.children) {
+		if e.children[id].FanOutID == fanOut {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (e *Engine) profileOf(id string) Profile {
@@ -68,4 +88,317 @@ func (e *Engine) registerChildren(f FanOut, n int) ([]Agent, error) {
 	}
 	e.mu.Unlock()
 	return agents, e.writeConfig(e.Run)
+}
+
+type fanOutItem struct {
+	Title        string `json:"title"`
+	Instructions string `json:"instructions"`
+}
+
+// fanOutProgress is what the journal shows of one pass of a fan-out, so a
+// resumed node never replans, reasks or reruns finished work.
+type fanOutProgress struct {
+	plan     string // planner message ID, from fanout.planned
+	planned  int    // sequence of fanout.planned, to scope its decision
+	approved bool
+	count    int
+	dropped  int
+	// done holds each child's terminal fanout.child.completed/failed event.
+	done map[string]Event
+}
+
+func readFanOutProgress(events []Event, id string, iteration int) fanOutProgress {
+	progress := fanOutProgress{done: map[string]Event{}}
+	for _, v := range events {
+		if !strings.HasPrefix(v.Type, "fanout.") || str(v.Data["fanOutId"]) != id || intValue(v.Data["iteration"]) != iteration {
+			continue
+		}
+		switch v.Type {
+		case "fanout.planned":
+			progress.plan, progress.planned = str(v.Data["planMessageId"]), v.Sequence
+		case "fanout.approved":
+			progress.approved, progress.count, progress.dropped = true, intValue(v.Data["count"]), intValue(v.Data["dropped"])
+		case "fanout.child.completed", "fanout.child.failed":
+			progress.done[str(v.Data["childId"])] = v
+		}
+	}
+	return progress
+}
+
+// startedFanOutChildren counts the distinct children the run has started,
+// across every fan-out and loop pass, for limits.maxFanOutChildrenPerRun.
+func startedFanOutChildren(events []Event) int {
+	seen := map[string]bool{}
+	for _, v := range events {
+		if v.Type == "fanout.child.started" {
+			seen[fmt.Sprintf("%s/%d", str(v.Data["childId"]), intValue(v.Data["iteration"]))] = true
+		}
+	}
+	return len(seen)
+}
+
+func intValue(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	}
+	return 0
+}
+
+func fanOutPlanSchema() map[string]any {
+	item := objectSchema(map[string]any{"title": map[string]any{"type": "string"}, "instructions": map[string]any{"type": "string"}})
+	return objectSchema(map[string]any{"items": arraySchema(item), "rationale": map[string]any{"type": "string"}})
+}
+
+// fanOut runs a fan-out node: the planner splits the task into items, the
+// user (or auto-within-cap) approves them, and one worker child runs per
+// item in its own worktree, never more than maxChildren or the run's
+// remaining maxFanOutChildrenPerRun. The downstream node receives one
+// fanout-result packet carrying every child's outcome and change.
+func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet, error) {
+	iteration := e.iteration(f.Id)
+	events, err := e.Project.Events(e.Run.ID)
+	if err != nil {
+		return nil, err
+	}
+	progress := readFanOutProgress(events, f.Id, iteration)
+	planner, _ := agentByID(e.Run.Workflow, f.Planner)
+	worker, _ := agentByID(e.Run.Workflow, f.Worker)
+	var plan Packet
+	if progress.plan != "" {
+		if plan, err = e.Project.ReadPacket(e.Run.ID, progress.plan); err != nil {
+			return nil, fmt.Errorf("resume requires retained fan-out plan %s; selected retention omitted it", progress.plan)
+		}
+	} else {
+		if _, err := e.event(f.Id, "fanout.started", map[string]any{"fanOutId": f.Id, "iteration": iteration}); err != nil {
+			return nil, err
+		}
+		prompt := fmt.Sprintf("Fan-out %s: split the task into independent work items for worker %s. Return at most %d items; Arena never starts more. Give each item a short title and complete instructions, including the files it owns, so it can be done without the other items. Return an empty list if the task needs no work.", f.Id, f.Worker, f.MaxChildren)
+		contextParents := append(append([]Packet{}, parents...), NewPacket(e.Run.ID, "message", f.Id, "arena", f.Planner, planner.Runtime.Provider, "", map[string]any{"text": prompt}, Runtime{Provider: "arena"}))
+		if plan, err = e.agent(ctx, planner, contextParents, map[string]any{"mode": "fanout-planner", "fanOutId": f.Id}, fanOutPlanSchema()); err != nil {
+			return nil, err
+		}
+	}
+	payload, _ := plan["payload"].(map[string]any)
+	items := convert[[]fanOutItem](anySliceOrEmpty(convert[map[string]any](payload["plan"])["items"]))
+	for i, item := range items {
+		if strings.TrimSpace(item.Title) == "" || strings.TrimSpace(item.Instructions) == "" {
+			return nil, fmt.Errorf("fan-out %s planner returned item %d without a title or instructions", f.Id, i+1)
+		}
+	}
+	if progress.plan == "" {
+		event, err := e.event(f.Id, "fanout.planned", map[string]any{"fanOutId": f.Id, "iteration": iteration, "planMessageId": plan["messageId"], "items": len(items), "maxChildren": f.MaxChildren})
+		if err != nil {
+			return nil, err
+		}
+		progress.plan, progress.planned = str(plan["messageId"]), event.Sequence
+	}
+	if !progress.approved {
+		if progress.count, progress.dropped, err = e.approveFanOut(ctx, f, iteration, items, progress.planned); err != nil {
+			return nil, err
+		}
+	}
+	children, err := e.registerChildren(f, progress.count)
+	if err != nil {
+		return nil, err
+	}
+	type outcome struct {
+		packet Packet
+		err    error
+	}
+	outcomes := make([]outcome, len(children))
+	var wg sync.WaitGroup
+	for i, child := range children {
+		if v, ok := progress.done[child.Id]; ok {
+			if v.Type == "fanout.child.completed" {
+				packet, err := e.Project.ReadPacket(e.Run.ID, str(v.Data["messageId"]))
+				if err != nil {
+					return nil, fmt.Errorf("resume requires retained child result %s; selected retention omitted it", str(v.Data["messageId"]))
+				}
+				outcomes[i] = outcome{packet: packet}
+			} else {
+				outcomes[i] = outcome{err: fmt.Errorf("%s", str(v.Data["error"]))}
+			}
+			continue
+		}
+		wg.Add(1)
+		go func(i int, child Agent) {
+			defer wg.Done()
+			outcomes[i].packet, outcomes[i].err = e.fanOutChild(ctx, f, iteration, i, len(children), child, items[i], planner, parents)
+		}(i, child)
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	results := []any{}
+	changeIDs := []string{}
+	for _, parent := range parents {
+		changeIDs = append(changeIDs, stringSlice(parent["arenaChangeIds"])...)
+	}
+	providers := []string{planner.Runtime.Provider, worker.Runtime.Provider}
+	for _, parent := range parents {
+		source, _ := parent["from"].(map[string]any)
+		if provider := str(source["provider"]); provider != "arena" {
+			providers = append(providers, provider)
+		}
+		providers = append(providers, stringSlice(parent["arenaSourceProviders"])...)
+	}
+	succeeded := 0
+	for i, child := range children {
+		result := map[string]any{"childId": child.Id, "item": items[i], "status": "failed", "messageId": nil, "changeIds": []string{}, "summary": ""}
+		if o := outcomes[i]; o.err != nil {
+			result["summary"] = Redact(o.err.Error())
+		} else {
+			succeeded++
+			body, _ := o.packet["payload"].(map[string]any)
+			ids := stringSlice(o.packet["arenaChangeIds"])
+			result["status"], result["messageId"], result["changeIds"], result["summary"] = "succeeded", o.packet["messageId"], ids, str(body["summary"])
+			changeIDs = append(changeIDs, ids...)
+		}
+		results = append(results, result)
+	}
+	if len(children) > 0 && succeeded == 0 {
+		return nil, fmt.Errorf("every child of fan-out %s failed", f.Id)
+	}
+	summary := fmt.Sprintf("Fan-out %s: %d of %d children succeeded.", f.Id, succeeded, len(children))
+	if len(items) == 0 {
+		summary = fmt.Sprintf("Fan-out %s: the planner found no work items.", f.Id)
+	}
+	if progress.dropped > 0 {
+		summary += fmt.Sprintf(" %d planned items were dropped at the cap.", progress.dropped)
+	}
+	caller, callerProvider := "arena", "arena"
+	if len(parents) > 0 {
+		actor, _ := parents[0]["from"].(map[string]any)
+		if str(actor["agentId"]) != "" {
+			caller, callerProvider = str(actor["agentId"]), str(actor["provider"])
+		}
+	}
+	dropped := items[len(children):]
+	packet := NewPacket(e.Run.ID, "fanout-result", f.Id, "arena", caller, callerProvider, "", map[string]any{"format": "arena.fanout-result.v1", "fanOutId": f.Id, "summary": summary, "planned": len(items), "results": results, "dropped": dropped}, Runtime{Provider: "arena"})
+	packet["arenaChangeIds"] = uniqueStrings(changeIDs)
+	packet["arenaSourceProviders"] = uniqueStrings(providers)
+	if _, err := e.Project.Deliver(e.Run, packet); err != nil {
+		return nil, err
+	}
+	if _, err := e.event(f.Id, "fanout.completed", map[string]any{"fanOutId": f.Id, "iteration": iteration, "messageId": packet["messageId"], "succeeded": succeeded, "failed": len(children) - succeeded, "dropped": len(dropped)}); err != nil {
+		return nil, err
+	}
+	return packet, nil
+}
+
+// approveFanOut settles how many planned items run: within the cap an
+// auto-within-cap node approves itself; otherwise the user decides, and a
+// plan over the cap can only be truncated to it or stopped, never run whole.
+func (e *Engine) approveFanOut(ctx context.Context, f FanOut, iteration int, items []fanOutItem, planned int) (count, dropped int, err error) {
+	events, err := e.Project.Events(e.Run.ID)
+	if err != nil {
+		return 0, 0, err
+	}
+	limit := min(f.MaxChildren, max(0, fanOutLimit(e.Run.Settings)-startedFanOutChildren(events)))
+	mode, decision := "empty", ""
+	count = len(items)
+	if len(items) > 0 {
+		over := len(items) > limit
+		mode = "auto"
+		if over || f.Approval != "auto-within-cap" {
+			lines := []string{}
+			for i, item := range items {
+				lines = append(lines, fmt.Sprintf("%d. %s", i+1, item.Title))
+			}
+			prompt := fmt.Sprintf("Fan-out %s planned %d work items for %s:\n%s\nApprove starts one %s child per item in its own worktree; stop fails the node.", f.Id, len(items), f.Worker, strings.Join(lines, "\n"), f.Worker)
+			choices := []string{"approve", "stop"}
+			if over {
+				prompt = fmt.Sprintf("Fan-out %s planned %d work items, but only %d may start (maxChildren %d, project maxFanOutChildrenPerRun %d):\n%s\nTruncate runs the first %d and records the rest as dropped; stop fails the node.", f.Id, len(items), limit, f.MaxChildren, fanOutLimit(e.Run.Settings), strings.Join(lines, "\n"), limit)
+				choices = []string{"truncate", "stop"}
+			}
+			var answer string
+			answer, decision, err = e.fanOutDecision(ctx, f, planned, prompt, choices, map[string]any{"fanOutId": f.Id, "iteration": iteration, "items": items, "cap": limit})
+			if err != nil {
+				return 0, 0, err
+			}
+			if answer != "approve" && answer != "truncate" {
+				if _, err := e.event(f.Id, "fanout.stopped", map[string]any{"fanOutId": f.Id, "iteration": iteration, "decisionId": decision}); err != nil {
+					return 0, 0, err
+				}
+				return 0, 0, fmt.Errorf("fan-out %s plan stopped by the user", f.Id)
+			}
+			mode = "user"
+		}
+		count = min(len(items), limit)
+	}
+	dropped = len(items) - count
+	_, err = e.event(f.Id, "fanout.approved", map[string]any{"fanOutId": f.Id, "iteration": iteration, "mode": mode, "count": count, "dropped": dropped, "decisionId": decision})
+	return count, dropped, err
+}
+
+// fanOutDecision asks for approval, or picks up the question an
+// interrupted supervisor left behind for this plan, so resuming never asks
+// twice: an answered question is used as is and an open one is awaited.
+func (e *Engine) fanOutDecision(ctx context.Context, f FanOut, planned int, prompt string, choices []string, data map[string]any) (string, string, error) {
+	events, err := e.Project.Events(e.Run.ID)
+	if err != nil {
+		return "", "", err
+	}
+	previous := ""
+	for _, v := range events {
+		decision, _ := v.Data["decision"].(map[string]any)
+		if v.Type == "decision.requested" && v.AgentID == f.Id && v.Sequence > planned && str(decision["kind"]) == "fanout" {
+			previous = str(decision["id"])
+		}
+	}
+	if previous != "" {
+		var d Decision
+		if err := ReadJSON(filepath.Join(e.Project.RunDir(e.Run.ID), "decisions", previous+".json"), &d); err != nil {
+			return "", "", err
+		}
+		if d.Answer != "" {
+			return d.Answer, d.ID, nil
+		}
+		if d.ClosedAt == "" {
+			answer, err := e.Project.awaitOpenDecision(ctx, e.Run, d.ID)
+			return answer, d.ID, err
+		}
+	}
+	answer, err := e.Project.Decide(ctx, e.Run, f.Id, "fanout", prompt, choices, data)
+	return answer, "", err
+}
+
+// fanOutChild runs one child on its item and journals the outcome. A failed
+// child does not stop its siblings; an interrupted one is rerun on resume.
+func (e *Engine) fanOutChild(ctx context.Context, f FanOut, iteration, index, of int, child Agent, item fanOutItem, planner Agent, parents []Packet) (Packet, error) {
+	if _, err := e.event(f.Id, "fanout.child.started", map[string]any{"fanOutId": f.Id, "iteration": iteration, "childId": child.Id, "index": index + 1}); err != nil {
+		return nil, err
+	}
+	text := fmt.Sprintf("Fan-out %s, item %d of %d: %s\n%s\nDo only this item. Other children of %s handle the other items in their own worktrees.", f.Id, index+1, of, item.Title, item.Instructions, f.Id)
+	note := NewPacket(e.Run.ID, "message", f.Id, "arena", child.Id, child.Runtime.Provider, "", map[string]any{"text": text, "item": item}, Runtime{Provider: "arena"})
+	// The item text comes from the planner's provider; sharing it is gated.
+	note["arenaSourceProviders"] = []string{planner.Runtime.Provider}
+	contextParents := append(append([]Packet{}, parents...), note)
+	packet, err := e.agent(ctx, child, contextParents, map[string]any{"mode": "fanout-child", "fanOutId": f.Id, "index": index + 1, "of": of}, nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		_, eventErr := e.event(f.Id, "fanout.child.failed", map[string]any{"fanOutId": f.Id, "iteration": iteration, "childId": child.Id, "error": Redact(err.Error())})
+		if eventErr != nil {
+			return nil, eventErr
+		}
+		return nil, err
+	}
+	_, err = e.event(f.Id, "fanout.child.completed", map[string]any{"fanOutId": f.Id, "iteration": iteration, "childId": child.Id, "messageId": packet["messageId"], "changeIds": stringSlice(packet["arenaChangeIds"])})
+	return packet, err
+}
+
+func anySliceOrEmpty(v any) []any {
+	if s := anySlice(v); s != nil {
+		return s
+	}
+	return []any{}
 }

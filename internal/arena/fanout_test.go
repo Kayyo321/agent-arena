@@ -3,11 +3,14 @@ package arena
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 )
@@ -284,5 +287,417 @@ func TestFanOutChildCannotRequestCoworkers(t *testing.T) {
 	_, err = p.RequestCoworker(context.Background(), CoworkerRequest{WorkflowID: w.Id, From: "split.1", AgentID: "extra", Role: "research", Objective: "o", Reason: "r", Capabilities: []string{"read"}, WorkspaceMode: "read-only", Runtime: s.DefaultModel}, true, nil)
 	if err == nil || !strings.Contains(err.Error(), "fan-out children cannot request coworkers") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// fanOutFixture plays every agent of a fan-out run. Children write
+// <childId>.txt into their worktree; the reviewer records which of those it
+// can see in its own.
+type fanOutFixture struct {
+	mu       sync.Mutex
+	items    []fanOutItem
+	ran      map[string]int
+	dirs     []string
+	saw      []string
+	prompts  map[string]string
+	planWrit bool
+	fail     func(id string) bool
+	// block, when set, may hold a child until the test interrupts the run.
+	block   func(ctx context.Context, id string) bool
+	verdict func(pass int) string
+}
+
+func newFanOutFixture(n int) *fanOutFixture {
+	f := &fanOutFixture{ran: map[string]int{}, prompts: map[string]string{}}
+	for i := 1; i <= n; i++ {
+		f.items = append(f.items, fanOutItem{Title: fmt.Sprintf("item %d", i), Instructions: fmt.Sprintf("Fix part %d.", i)})
+	}
+	return f
+}
+
+func (f *fanOutFixture) invoke(ctx context.Context, in Invocation) (map[string]any, error) {
+	props := in.Schema["properties"].(map[string]any)
+	f.mu.Lock()
+	f.ran[in.AgentID]++
+	f.prompts[in.AgentID] = in.Prompt
+	f.mu.Unlock()
+	pass := 1
+	if _, n, ok := strings.Cut(filepath.Base(in.Dir), "-iter"); ok {
+		fmt.Sscan(n, &pass)
+	}
+	switch {
+	case props["items"] != nil:
+		f.mu.Lock()
+		f.planWrit = f.planWrit || in.Write
+		f.mu.Unlock()
+		return map[string]any{"items": convert[[]any](f.items), "rationale": "fixture"}, nil
+	case strings.Contains(in.AgentID, "."):
+		f.mu.Lock()
+		f.dirs = append(f.dirs, filepath.Base(in.Dir))
+		f.mu.Unlock()
+		if f.block != nil && f.block(ctx, in.AgentID) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		if f.fail != nil && f.fail(in.AgentID) {
+			return nil, fmt.Errorf("fixture failure for %s", in.AgentID)
+		}
+		if err := os.WriteFile(filepath.Join(in.Dir, in.AgentID+".txt"), []byte("child output\n"), 0644); err != nil {
+			return nil, err
+		}
+	case in.AgentID == "reviewer":
+		matches, _ := filepath.Glob(filepath.Join(in.Dir, "split*.txt"))
+		f.mu.Lock()
+		for _, m := range matches {
+			f.saw = append(f.saw, filepath.Base(m))
+		}
+		f.mu.Unlock()
+		if props["outcome"] != nil {
+			return map[string]any{"format": "arena.review-verdict.v1", "outcome": f.verdict(pass), "summary": "fixture", "rationale": "fixture", "findings": []any{}, "openQuestions": []any{}, "nextAction": "route", "packets": []any{}}, nil
+		}
+	}
+	return ordinaryResult(), nil
+}
+
+// startFanOut executes r in the background and reports its result.
+func startFanOut(ctx context.Context, p *Project, r Run, f *fanOutFixture, resume bool) chan error {
+	done := make(chan error, 1)
+	go func() { done <- NewEngine(p, r, testInvoker(f.invoke)).Execute(ctx, resume, false) }()
+	return done
+}
+
+func fanOutResult(t *testing.T, p *Project, r Run, events []Event, node string) map[string]any {
+	t.Helper()
+	for i := len(events) - 1; i >= 0; i-- {
+		if v := events[i]; v.Type == "node.completed" && str(v.Data["nodeId"]) == node {
+			packet, err := p.ReadPacket(r.ID, str(v.Data["messageId"]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if packet["kind"] != "fanout-result" {
+				t.Fatalf("fan-out returned %v", packet["kind"])
+			}
+			return packet["payload"].(map[string]any)
+		}
+	}
+	t.Fatalf("%s never completed", node)
+	return nil
+}
+
+func finished(t *testing.T, p *Project, r Run, done chan error) []Event {
+	t.Helper()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	events, err := p.Events(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, err := Reduce(events); err != nil || state.Status != "succeeded" {
+		t.Fatalf("run ended %s: %v", state.Status, err)
+	}
+	return events
+}
+
+func TestFanOutApprovalRequiredGatesChildrenAndPinsTheirChanges(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(3)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	done := startFanOut(ctx, p, r, f, false)
+	d := awaitDecision(t, p, r.ID)
+	if d.Kind != "fanout" || d.AgentID != "split" || strings.Join(d.Choices, ",") != "approve,stop" || !strings.Contains(d.Prompt, "3. item 3") {
+		t.Fatalf("approval decision %+v", d)
+	}
+	f.mu.Lock()
+	ran := f.ran["split.1"] + f.ran["split.2"] + f.ran["split.3"]
+	f.mu.Unlock()
+	if ran != 0 {
+		t.Fatal("a child started before the plan was approved")
+	}
+	if err := p.Answer(r.ID, d.ID, "approve"); err != nil {
+		t.Fatal(err)
+	}
+	events := finished(t, p, r, done)
+	for _, id := range []string{"split.1", "split.2", "split.3"} {
+		if f.ran[id] != 1 || !strings.Contains(f.prompts[id], "Do only this item") {
+			t.Fatalf("%s ran %d times", id, f.ran[id])
+		}
+	}
+	if f.ran["planner"] != 1 || f.planWrit || f.ran["fixer"] != 0 {
+		t.Fatalf("planner must run once read-only and the template never: %v write=%v", f.ran, f.planWrit)
+	}
+	sort.Strings(f.dirs)
+	if strings.Join(f.dirs, ",") != "split.1,split.2,split.3" {
+		t.Fatalf("children need their own worktrees: %v", f.dirs)
+	}
+	sort.Strings(f.saw)
+	if strings.Join(f.saw, ",") != "split.1.txt,split.2.txt,split.3.txt" {
+		t.Fatalf("reviewer must start from every child's change: %v", f.saw)
+	}
+	result := fanOutResult(t, p, r, events, "split")
+	if len(anySlice(result["results"])) != 3 || len(anySlice(result["dropped"])) != 0 || intValue(result["planned"]) != 3 {
+		t.Fatalf("fan-out result %v", result)
+	}
+	for _, v := range anySlice(result["results"]) {
+		if m := v.(map[string]any); m["status"] != "succeeded" || len(anySlice(m["changeIds"])) != 1 {
+			t.Fatalf("child result %v", m)
+		}
+	}
+	state, _ := Reduce(events)
+	if state.Agents["split.2"] != "succeeded" || countEvents(events, "fanout.child.completed", "split") != 3 {
+		t.Fatalf("child state %v", state.Agents)
+	}
+}
+
+func TestFanOutAutoWithinCapStartsWithoutAsking(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(2)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	if n := countEvents(events, "decision.requested", ""); n != 0 {
+		t.Fatalf("auto-within-cap asked %d questions", n)
+	}
+	if f.ran["split.1"] != 1 || f.ran["split.2"] != 1 {
+		t.Fatalf("children %v", f.ran)
+	}
+}
+
+func TestFanOutCapsTheRunTotalAndOnlyTruncatesWithConsent(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	s.Limits.MaxFanOutChildrenPerRun = Int(4)
+	w, profiles := fanOutWorkflow(s, 3, "auto-within-cap")
+	for _, id := range []string{"planner2", "fixer2"} {
+		w.Agents = append(w.Agents, Agent{Id: id, Level: Int(2), Profile: ".agents/parallel/" + id + ".agent.json", Runtime: s.DefaultModel})
+		profiles[id] = NewProfile(id, "research", "Do the "+id+" work", "Use evidence", []string{"read", "write"})
+	}
+	w.Agents[3].Level = Int(3)
+	w.FanOuts = append(w.FanOuts, FanOut{Id: "again", Name: "Second split", Planner: "planner2", Worker: "fixer2", MaxChildren: 3, Approval: "auto-within-cap"})
+	w.Relationships = []Relationship{{Type: "delegates", From: "lead", To: "split"}, {Type: "delegates", From: "split", To: "again"}, {Type: "delegates", From: "again", To: "reviewer"}}
+	if err := ValidateWorkflow(w, profiles, s); err != nil {
+		t.Fatal(err)
+	}
+	r := splitRun(t, p, w, profiles)
+	r.Settings = s
+	f := newFanOutFixture(3)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	done := startFanOut(ctx, p, r, f, false)
+	// split fits (3 of 4) and starts unasked; again has one slot left.
+	d := awaitDecision(t, p, r.ID)
+	if d.AgentID != "again" || strings.Join(d.Choices, ",") != "truncate,stop" || intValue(d.Context["cap"]) != 1 {
+		t.Fatalf("over-cap decision %+v", d)
+	}
+	if err := p.Answer(r.ID, d.ID, "truncate"); err != nil {
+		t.Fatal(err)
+	}
+	events := finished(t, p, r, done)
+	if f.ran["again.1"] != 1 || f.ran["again.2"] != 0 || startedFanOutChildren(events) != 4 {
+		t.Fatalf("run total exceeded: %v", f.ran)
+	}
+	result := fanOutResult(t, p, r, events, "again")
+	if len(anySlice(result["results"])) != 1 || len(anySlice(result["dropped"])) != 2 || !strings.Contains(str(result["summary"]), "2 planned items were dropped") {
+		t.Fatalf("truncated result %v", result)
+	}
+}
+
+func TestFanOutStopFailsTheNodeWithoutChildren(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 2, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(3)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	done := startFanOut(ctx, p, r, f, false)
+	d := awaitDecision(t, p, r.ID)
+	if strings.Join(d.Choices, ",") != "truncate,stop" {
+		t.Fatalf("a plan over maxChildren must ask even in auto-within-cap: %+v", d)
+	}
+	if err := p.Answer(r.ID, d.ID, "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "stopped by the user") {
+		t.Fatalf("got %v", err)
+	}
+	if f.ran["split.1"] != 0 || f.ran["reviewer"] != 0 {
+		t.Fatalf("work ran after stop: %v", f.ran)
+	}
+}
+
+func TestFanOutEmptyPlanCompletesWithAnEmptyResult(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	result := fanOutResult(t, p, r, events, "split")
+	if intValue(result["planned"]) != 0 || len(anySlice(result["results"])) != 0 || countEvents(events, "decision.requested", "") != 0 || f.ran["reviewer"] != 1 {
+		t.Fatalf("empty plan: %v %v", result, f.ran)
+	}
+}
+
+func TestFanOutChildFailureKeepsSiblingsUnlessAllFail(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	// A failed attempt would otherwise ask whether to retry.
+	r.Settings.Limits.MaxRetriesPerAgent = 0
+	f := newFanOutFixture(3)
+	f.fail = func(id string) bool { return id == "split.2" }
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	result := fanOutResult(t, p, r, events, "split")
+	statuses := []string{}
+	for _, v := range anySlice(result["results"]) {
+		statuses = append(statuses, str(v.(map[string]any)["status"]))
+	}
+	if strings.Join(statuses, ",") != "succeeded,failed,succeeded" || countEvents(events, "fanout.child.failed", "split") != 1 || f.ran["reviewer"] != 1 {
+		t.Fatalf("one failed child must not stop its siblings: %v", statuses)
+	}
+
+	p = committedProject(t)
+	r = splitRun(t, p, w, profiles)
+	r.Settings.Limits.MaxRetriesPerAgent = 0
+	f = newFanOutFixture(2)
+	f.fail = func(string) bool { return true }
+	if err := <-startFanOut(ctx, p, r, f, false); err == nil || !strings.Contains(err.Error(), "every child of fan-out split failed") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestFanOutResumeKeepsFinishedChildrenAndTheApproval(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	r := splitRun(t, p, w, profiles)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	first := newFanOutFixture(2)
+	// split.2 waits until split.1 is journaled as completed, then the
+	// supervisor stops mid-fan-out.
+	first.block = func(_ context.Context, id string) bool {
+		if id != "split.2" {
+			return false
+		}
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if events, err := p.Events(r.ID); err == nil && countEvents(events, "fanout.child.completed", "split") == 1 {
+				break
+			}
+		}
+		cancel()
+		return true
+	}
+	done := startFanOut(ctx, p, r, first, false)
+	d := awaitDecision(t, p, r.ID)
+	if err := p.Answer(r.ID, d.ID, "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err == nil {
+		t.Fatal("interrupted run reported success")
+	}
+	resumed := newFanOutFixture(2)
+	ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, resumed, true))
+	if resumed.ran["planner"] != 0 || resumed.ran["split.1"] != 0 || resumed.ran["split.2"] != 1 || resumed.ran["lead"] != 0 {
+		t.Fatalf("resume reran finished work: %v", resumed.ran)
+	}
+	if countEvents(events, "decision.requested", "") != 1 || countEvents(events, "fanout.approved", "split") != 1 {
+		t.Fatal("resume asked for approval again")
+	}
+	result := fanOutResult(t, p, r, events, "split")
+	if len(anySlice(result["results"])) != 2 || !strings.Contains(str(result["summary"]), "2 of 2 children succeeded") {
+		t.Fatalf("resumed result %v", result)
+	}
+}
+
+func TestFanOutResumeDuringApprovalNeverAsksTwice(t *testing.T) {
+	for _, answeredWhileDown := range []bool{false, true} {
+		t.Run(fmt.Sprintf("answeredWhileDown=%v", answeredWhileDown), func(t *testing.T) {
+			p := committedProject(t)
+			s, _ := p.Settings()
+			w, profiles := fanOutWorkflow(s, 4, "required")
+			r := splitRun(t, p, w, profiles)
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			done := startFanOut(ctx, p, r, newFanOutFixture(2), false)
+			stale := awaitDecision(t, p, r.ID)
+			cancel()
+			if err := <-done; err == nil {
+				t.Fatal("interrupted run reported success")
+			}
+			if answeredWhileDown {
+				if err := p.Answer(r.ID, stale.ID, "approve"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resumed := newFanOutFixture(2)
+			ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			done = startFanOut(ctx, p, r, resumed, true)
+			if !answeredWhileDown {
+				d := awaitDecision(t, p, r.ID)
+				if d.ID != stale.ID {
+					t.Fatalf("resume asked a new question %s instead of reusing %s", d.ID, stale.ID)
+				}
+				if err := p.Answer(r.ID, d.ID, "approve"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			events := finished(t, p, r, done)
+			if countEvents(events, "decision.requested", "") != 1 || resumed.ran["planner"] != 0 || resumed.ran["split.1"] != 1 {
+				t.Fatalf("resume asked again or replanned: %v", resumed.ran)
+			}
+			if state, _ := Reduce(events); state.Pending != 0 {
+				t.Fatalf("a stale question is still pending: %d", state.Pending)
+			}
+		})
+	}
+}
+
+func TestFanOutInsideALoopReplansEachPass(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	profiles["reviewer"] = NewProfile("reviewer", "review", "Review", "Review", []string{"read"})
+	w.Agents = append(w.Agents, Agent{Id: "done", Level: Int(3), Profile: ".agents/parallel/done.agent.json", Runtime: s.DefaultModel})
+	profiles["done"] = NewProfile("done", "research", "Finish", "Finish", []string{"read"})
+	loop := true
+	w.DecisionRouters = []Router{{Id: "gate", Name: "Gate", InputKind: "review-result", PayloadPointer: "/outcome", Routes: []c.WorkflowDecisionRoute{{Id: "approved", Equals: "Approved", To: "done"}, {Id: "again", Equals: "ChangesRequested", To: "split", Loop: &loop, MaxIterations: Int(1)}}, Fallback: c.WorkflowDecisionRouterFallback{Action: "stop"}}}
+	w.Relationships = append(w.Relationships, Relationship{Type: "delegates", From: "reviewer", To: "gate"})
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(2)
+	f.verdict = func(pass int) string {
+		if pass == 1 {
+			return "ChangesRequested"
+		}
+		return "Approved"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	sort.Strings(f.dirs)
+	if f.ran["planner"] != 2 || strings.Join(f.dirs, ",") != "split.1,split.1-iter2,split.2,split.2-iter2" || f.ran["done"] != 1 {
+		t.Fatalf("loop pass must replan and rerun children in new worktrees: %v %v", f.ran, f.dirs)
+	}
+	if countEvents(events, "fanout.completed", "split") != 2 || startedFanOutChildren(events) != 4 {
+		t.Fatal("each pass must be journaled separately")
+	}
+	state, _ := Reduce(events)
+	if state.Iterations["split.1"] != 2 {
+		t.Fatalf("children must show the second pass: %v", state.Iterations)
 	}
 }

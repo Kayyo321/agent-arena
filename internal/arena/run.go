@@ -307,11 +307,28 @@ func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string,
 	if _, e := p.Append(r.ID, r.Workflow.Id, agent, "decision.requested", map[string]any{"decision": d}); e != nil {
 		return "", e
 	}
+	return p.awaitDecision(ctx, r.ID, d.ID)
+}
+
+// awaitOpenDecision waits on a decision an interrupted supervisor left
+// open, so a resumed run answers that question instead of asking again.
+func (p *Project) awaitOpenDecision(ctx context.Context, r Run, id string) (answer string, err error) {
+	if r.Retention != "full-local" {
+		defer func() {
+			if closeErr := p.closeDecision(r.ID, id); closeErr != nil && err == nil {
+				answer, err = "", closeErr
+			}
+		}()
+	}
+	return p.awaitDecision(ctx, r.ID, id)
+}
+
+func (p *Project) awaitDecision(ctx context.Context, run, id string) (string, error) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var current Decision
-		if e := ReadJSON(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), &current); e != nil {
+		if e := ReadJSON(filepath.Join(p.RunDir(run), "decisions", id+".json"), &current); e != nil {
 			return "", e
 		}
 		if current.Answer != "" {

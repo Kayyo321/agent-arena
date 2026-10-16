@@ -20,7 +20,7 @@ func NewPacket(run, kind, from, fromProvider, to, toProvider, correlation string
 	if runtime.Options == nil {
 		runtime.Options = map[string]any{}
 	}
-	return Packet{"protocolVersion": "1.2", "messageId": ID("message-"), "runId": run, "kind": kind, "from": map[string]any{"agentId": from, "provider": fromProvider}, "to": map[string]any{"agentId": to, "provider": toProvider}, "createdAt": Now(), "correlationId": correlation, "attemptId": ID("attempt-"), "replyTo": nil, "payload": payload, "providerContext": map[string]any{"model": runtime.Model, "reasoningEffort": runtime.ReasoningEffort, "options": runtime.Options}}
+	return Packet{"protocolVersion": "1.3", "messageId": ID("message-"), "runId": run, "kind": kind, "from": map[string]any{"agentId": from, "provider": fromProvider}, "to": map[string]any{"agentId": to, "provider": toProvider}, "createdAt": Now(), "correlationId": correlation, "attemptId": ID("attempt-"), "replyTo": nil, "payload": payload, "providerContext": map[string]any{"model": runtime.Model, "reasoningEffort": runtime.ReasoningEffort, "options": runtime.Options}}
 }
 func ValidatePacket(packet Packet, w Workflow) error {
 	if e := c.ValidateEnvelope(JSON(packet)); e != nil {
