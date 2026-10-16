@@ -74,6 +74,8 @@ stateDiagram-v2
 - A question includes the missing decision and blocks only its own work item unless the scheduler has a dependency on it.
 - A worker result returns to its delegator. Peer messages use declared communication links.
 - Peers run concurrently. Over MCP, `arena_send` with kind `message` reaches a peer and `arena_inbox` with `newOnly` and `waitSeconds` (at most 120) blocks until an unseen message arrives, so an agent can wait for agreement before returning. A result returned first ends that agent's side of the conversation.
+- A `message` payload needs a non-empty `text`; structured fields may sit beside it. Arena checks the packet before any sharing prompt, so the user never approves a packet that is then rejected, and the agent gets an error it can fix.
+- When a peer message needs the user's cross-provider sharing approval, `arena_send` does not hold the tool call open: after a short wait it returns `{"status": "awaiting-approval", "messageId", "decisionId"}` and Arena keeps the validated packet. Answering the decision delivers it (or journals `packet.rejected` on `no`), even if the sender has already finished. Resending identical content while it waits does not queue a second copy.
 - Extra packets in a worker's result that cannot be delivered (an unlinked peer, invalid JSON, a refused proposal) are journaled as `packet.rejected` and skipped; the result itself still returns to the delegator and the run continues.
 - A retry gets a new attempt ID and retains the same correlation ID.
 - Delivery is at least once across process recovery; consumers deduplicate by `messageId`.
@@ -267,6 +269,8 @@ Do not pass hidden chain-of-thought. Pass concise findings and evidence instead.
 ## Cross-provider data boundary
 
 When Arena forwards a task, selected context and file contents may be sent to the recipient provider for inference. The live view must show the destination provider before launch, and the workflow builder should let the user constrain which files or context may cross that boundary. Team membership permits sharing structured positions and evidence among those members, but does not expand the source task's file scope. Do not silently forward full conversation history or unrelated files. A configured communication edge permits routing; it does not imply that every file in the repository should be attached.
+
+Under the `ask-user` sharing policy, the user approves a *route*: content from one provider reaching one recipient agent on another provider, for the rest of the run. A peer message, an agent's retries of it and the later handoff to the same recipient share one decision; while it is pending, further shares on the route wait on it instead of raising another prompt. The reverse direction and other recipients are separate routes. A declined route stays declined for the run.
 
 ## Provider and model mapping
 

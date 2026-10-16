@@ -180,7 +180,7 @@ func invokeClaudeNative(ctx context.Context, in Invocation) (map[string]any, err
 }
 
 func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, error) {
-	if in.Commands {
+	if in.Commands { // adapterLimits records this for scoring and validation.
 		return nil, fmt.Errorf("Antigravity headless mode refuses command permissions without blanket approval; remove run_commands from this agent or use another provider")
 	}
 	prompt, err := nativePrompt(in)

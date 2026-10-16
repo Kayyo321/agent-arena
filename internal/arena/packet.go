@@ -155,10 +155,39 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 		if !ok {
 			return nil, fmt.Errorf("unknown target agent")
 		}
-		if err := p.ShareContext(ctx, r, from, a.Runtime.Provider, target.Runtime.Provider, "peer message", map[string]any{"payload": payload, "target": to}); err != nil {
-			return nil, err
+		// Check the packet before any sharing prompt: the user should never
+		// approve a packet Arena would then reject.
+		if text, ok := payload["text"].(string); !ok || text == "" {
+			return nil, fmt.Errorf(`kind "message" needs payload.text, a non-empty string; keep structured fields alongside it, e.g. {"text":"<summary>","acceptanceCriteria":[...]}`)
 		}
 		packet := NewPacket(r.ID, kind, from, a.Runtime.Provider, to, target.Runtime.Provider, "", payload, a.Runtime)
+		if err := ValidatePacket(packet, r.Workflow); err != nil {
+			return nil, fmt.Errorf("invalid message packet: %w", err)
+		}
+		id := ""
+		answer, decision, err := p.shareGate(r, from, a.Runtime.Provider, to, target.Runtime.Provider, "peer message", map[string]any{"payload": payload, "target": to}, func(decision string) (err error) {
+			id, err = p.deferPacket(r.ID, decision, packet)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		if answer == "" {
+			// Queued: Answer delivers it, even after this call returns.
+			answer, err = p.awaitRoute(ctx, r.ID, shareRoute(a.Runtime.Provider, to, target.Runtime.Provider), shareAckWait)
+			if err != nil {
+				return nil, err
+			}
+			if answer == "" {
+				return map[string]any{"status": "awaiting-approval", "messageId": id, "decisionId": decision, "note": "The user must approve sharing " + a.Runtime.Provider + " context with " + to + " (" + target.Runtime.Provider + "). Arena delivers this message automatically once approved; do not resend it. Continue your task, or wait for replies with arena_inbox."}, nil
+			}
+			if answer == "yes" {
+				return id, nil
+			}
+		}
+		if answer != "yes" {
+			return nil, errShareDeclined
+		}
 		return p.Deliver(r, packet)
 	case "context-proposal":
 		var q ContextProposal

@@ -172,6 +172,40 @@ func Reduce(events []Event) (RunState, error) {
 	}
 	return s, nil
 }
+
+// RunHistory is `arena history RUN --json`: the run's reduced status beside
+// its events, so scripts need not know which event types end a run.
+type RunHistory struct {
+	RunID  string `json:"runId"`
+	Status string `json:"status"`
+	// Terminal is true once the run has ended: succeeded, failed or cancelled.
+	Terminal bool `json:"terminal"`
+	// PendingDecisions counts open questions that wait on the user.
+	PendingDecisions int `json:"pendingDecisions"`
+	// StateError explains an "invalid" status: the events do not replay.
+	StateError string  `json:"stateError,omitempty"`
+	Events     []Event `json:"events"`
+}
+
+// terminalStatuses are the run statuses set by workflow.succeeded,
+// workflow.failed and workflow.cancelled.
+var terminalStatuses = []string{"succeeded", "failed", "cancelled"}
+
+func (p *Project) History(id string, events []Event) (RunHistory, error) {
+	pending, err := p.Decisions(id)
+	if err != nil {
+		return RunHistory{}, err
+	}
+	h := RunHistory{RunID: id, PendingDecisions: len(pending), Events: events}
+	// History stays readable when the events do not replay; that is when it
+	// matters most.
+	if state, err := Reduce(events); err != nil {
+		h.Status, h.StateError = "invalid", err.Error()
+	} else {
+		h.Status, h.Terminal = state.Status, Has(terminalStatuses, state.Status)
+	}
+	return h, nil
+}
 func (p *Project) State(id string) (RunState, error) {
 	events, e := p.Events(id)
 	if e != nil {
@@ -247,6 +281,9 @@ type Decision struct {
 	Context     map[string]any `json:"context"`
 	Answer      string         `json:"answer,omitempty"`
 	CreatedAt   string         `json:"createdAt"`
+	// Route names the cross-provider sharing route one answer covers for the
+	// rest of the run; see shareRoute.
+	Route string `json:"route,omitempty"`
 }
 
 func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string, choices []string, data map[string]any) (answer string, err error) {
@@ -312,6 +349,15 @@ func (p *Project) Answer(run, id, answer string) error {
 	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer}); e != nil {
 		return e
 	}
+	if d.Route != "" {
+		if e := p.settleRoute(r, d, answer); e != nil {
+			return e
+		}
+		// No waiter compacts a route decision: its grant carries the answer.
+		if r.Retention != "full-local" {
+			compactDecision(&d)
+		}
+	}
 	return Atomic(path, SafeJSON(d), 0600)
 }
 func (p *Project) Decisions(id string) ([]Decision, error) {
@@ -346,10 +392,15 @@ func (p *Project) closeDecision(run, id string) error {
 	if err := ReadJSON(path, &d); err != nil {
 		return err
 	}
+	compactDecision(&d)
+	return Atomic(path, SafeJSON(d), 0600)
+}
+
+// compactDecision keeps a closed decision's hash but drops its content.
+func compactDecision(d *Decision) {
 	d.ContentHash = Hash(SafeJSON(d))
 	d.Prompt, d.Answer, d.Context, d.Choices = "", "", nil, nil
 	d.ClosedAt = Now()
-	return Atomic(path, SafeJSON(d), 0600)
 }
 func RunAlive(p *Project, id string) bool {
 	var owner LockOwner

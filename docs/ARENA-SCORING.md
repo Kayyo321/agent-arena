@@ -1,6 +1,8 @@
 # Arena scoring
 
-Arena grades every arena against this score sheet (rubric v1). The score is computed by Arena, not by a model, from the workflow and its agent profiles only. Project settings, provider readiness and the background shader do not change it, so the person who shares an arena and the person who pastes it see the same grade.
+Arena grades every arena against this score sheet (rubric v2). The score is computed by Arena, not by a model, from the workflow and its agent profiles only. Project settings, provider readiness and the background shader do not change it, so the person who shares an arena and the person who pastes it see the same grade.
+
+Capabilities count only where the agent's provider adapter can exercise them. These adapter limits are fixed per provider in Arena, not probed, so they keep the score a pure function of the arena. Today one applies: Antigravity's headless mode cannot execute commands, so `run_commands` on an Antigravity agent earns nothing (it does not satisfy V5, for example) and costs C6. `arena workflow validate` and `arena workflow create` print a warning for each such grant, because that agent fails when it starts.
 
 The grade appears in the setup conversation when a draft validates, in the CLI before `arena workflow create` confirms, in the launcher, at the top of the live view, and in full with `/score` or `arena score ID`.
 
@@ -82,6 +84,7 @@ The five categories add up to 100 points. Each finding deducts points from its c
 | C3 | A generic agent ID or name such as `agent1`, `worker-2` or `bot` | −1 each | minor |
 | C4 | The head agent has role `review`, so the run starts with nothing to review | −3 | moderate |
 | C5 | The arena has no `description` | −1 | minor |
+| C6 | A capability the agent's provider adapter cannot exercise, such as `run_commands` on Antigravity | −2 each | minor |
 
 ### R — Resilience & cost (10)
 

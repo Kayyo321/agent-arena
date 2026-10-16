@@ -42,7 +42,7 @@ This policy does not change how Arena handles a setup request made directly by t
 Other useful settings include:
 
 - `approvalPolicies.agent-workflow-edit`: `auto-refuse`, `ask-user`, or `auto-accept` for graph edits proposed by agents.
-- `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers.
+- `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers. `ask-user` asks once per route (one source provider to one recipient agent) per run; see [Cross-provider data boundary](INTEROPERABILITY.md#cross-provider-data-boundary).
 - `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode.
 - `approvalPolicies.change-integration`: `human-review` or `auto-if-clean` for eligible patches.
 - `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.

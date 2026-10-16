@@ -10,7 +10,7 @@ import (
 // RubricVersion identifies the score sheet in docs/ARENA-SCORING.md. A score
 // is a pure function of the workflow and its profiles, so the sender and the
 // receiver of a share code see the same grade.
-const RubricVersion = 1
+const RubricVersion = 2
 
 // Finding is one deduction with a stable check ID from the score sheet.
 type Finding struct {
@@ -82,6 +82,7 @@ var scoreChecks = map[string]string{
 	"C3": "Name agents after what they do.",
 	"C4": "Make the head a coordinator or worker; reviewers belong downstream of the work.",
 	"C5": "Describe the arena's purpose in its description.",
+	"C6": "Remove the capability, or run the agent on a provider whose adapter can exercise it.",
 	"R1": "Spread agents across at least two providers so one outage does not stop the arena.",
 	"R2": "Add an event trigger to the on-call rule so escalation happens without the user.",
 	"R3": "Raise maxConcurrentAgents so parallel branches can run in parallel.",
@@ -136,6 +137,38 @@ type arenaGraph struct {
 }
 
 func has(p Profile, capability string) bool { return Has(p.Capabilities, capability) }
+
+// adapterLimits are capabilities a provider adapter cannot exercise, with the
+// reason. They are fixed per adapter, unlike readiness, so scores stay a pure
+// function of the arena. Antigravity's headless mode has no per-command
+// approval, so invokeAntigravity refuses run_commands.
+var adapterLimits = map[string]map[string]string{
+	"antigravity": {"run_commands": "headless runs cannot execute commands"},
+}
+
+// unusableCapabilities lists the profile capabilities a's adapter cannot
+// exercise.
+func unusableCapabilities(a Agent, p Profile) []string {
+	out := []string{}
+	for _, capability := range p.Capabilities {
+		if _, limited := adapterLimits[a.Runtime.Provider][capability]; limited {
+			out = append(out, capability)
+		}
+	}
+	return out
+}
+
+// WorkflowWarnings reports configuration that validates but cannot work as
+// written, such as a capability the agent's adapter cannot exercise.
+func WorkflowWarnings(w Workflow, profiles map[string]Profile) []string {
+	warnings := []string{}
+	for _, a := range w.Agents {
+		for _, capability := range unusableCapabilities(a, profiles[a.Id]) {
+			warnings = append(warnings, fmt.Sprintf("warning: %s has %s, but %s %s; the agent fails when it starts. Remove %s or choose another provider.", a.Id, capability, a.Runtime.Provider, adapterLimits[a.Runtime.Provider][capability], capability))
+		}
+	}
+	return warnings
+}
 
 // forwardEdges are the scheduling edges: delegations plus non-loop router
 // routes and route fallbacks. Loop routes are back edges and stay out.
@@ -371,6 +404,29 @@ func redundant(a, b Profile) bool {
 
 // ScoreArena grades an arena against the score sheet in docs/ARENA-SCORING.md.
 func ScoreArena(w Workflow, profiles map[string]Profile) Scorecard {
+	// Score capabilities as the adapters can exercise them: a grant the
+	// adapter refuses earns no credit, and C6 deducts for it.
+	unusable := map[string][]string{}
+	effective := map[string]Profile{}
+	for id, p := range profiles {
+		effective[id] = p
+	}
+	for _, a := range w.Agents {
+		p, ok := profiles[a.Id]
+		limited := unusableCapabilities(a, p)
+		if !ok || len(limited) == 0 {
+			continue
+		}
+		unusable[a.Id] = limited
+		p.Capabilities = []string{}
+		for _, capability := range profiles[a.Id].Capabilities {
+			if !Has(limited, capability) {
+				p.Capabilities = append(p.Capabilities, capability)
+			}
+		}
+		effective[a.Id] = p
+	}
+	profiles = effective
 	g := analyzeArena(w, profiles)
 	findings := []Finding{}
 	spent := map[string]int{}
@@ -617,6 +673,9 @@ func ScoreArena(w Workflow, profiles map[string]Profile) Scorecard {
 		}
 		if genericID.MatchString(a.Id) || genericID.MatchString(strings.ToLower(p.Name)) {
 			add("C3", "", 1, 0, []string{a.Id}, "%s has a generic name", a.Id)
+		}
+		for _, capability := range unusable[a.Id] {
+			add("C6", "", 2, 0, []string{a.Id}, "%s has %s, but %s %s", a.Id, capability, a.Runtime.Provider, adapterLimits[a.Runtime.Provider][capability])
 		}
 	}
 	if profiles[w.HeadAgent].Role == "review" {

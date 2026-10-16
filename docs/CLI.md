@@ -81,6 +81,11 @@ Every preview ends with the arena's grade (S+ to F) and its costliest deductions
 findings with fixes, any ceiling that capped the grade, and what the next tier
 needs. The score sheet is [docs/ARENA-SCORING.md](ARENA-SCORING.md).
 
+`workflow validate` and `workflow create` also print a `warning:` line for each
+capability an agent's provider adapter cannot exercise, such as `run_commands` on
+Antigravity, whose headless mode cannot execute commands. Such an agent fails when it
+starts, and the score gives the grant no credit.
+
 ### Sharing arenas and shaders
 
 ```sh
@@ -178,6 +183,16 @@ drafts; editing existing workflows continues to use `arena workflow edit`.
 
 `run --plain` prints events without terminal control sequences. `watch --plain` and
 `history --json` provide non-TUI inspection. `NO_COLOR` disables owner colors.
+
+`history RUN --json` prints one object: `runId`, `status`, `terminal`,
+`pendingDecisions` and the `events` array. `status` is the run state replayed from
+the events: `created`, `running`, `paused`, `interrupted`, or one of the terminal
+states `succeeded`, `failed` and `cancelled`, which the `workflow.succeeded`,
+`workflow.failed` and `workflow.cancelled` events record. `terminal` is true for
+those three; a script can poll until it is. A failed run whose provider request was
+interrupted can still be resumed with `arena resume RUN --retry-interrupted`. A
+`running` run with `pendingDecisions` above zero is waiting on the user. If the events
+do not replay, `status` is `invalid` and `stateError` says why.
 Bare `arena` with a configured workflow and redirected input/output prints a static graph.
 `arena --plain` explicitly requests inspection, including setup guidance for an empty directory.
 If multiple workflows exist, that mode requires `--workflow ID` and lists the choices

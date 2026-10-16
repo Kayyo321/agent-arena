@@ -270,3 +270,34 @@ func TestWritingTeamNeedsReviewLikeAnyWriter(t *testing.T) {
 		}
 	}
 }
+
+// Antigravity's headless adapter refuses run_commands, so granting it to an
+// Antigravity reviewer must not satisfy V5 or lift the grade.
+func TestScoreIgnoresCapabilitiesTheAdapterCannotExercise(t *testing.T) {
+	antigravityReviewer := func(caps ...string) (Workflow, map[string]Profile) {
+		w, profiles := idealArena()
+		w.Agents[2].Runtime = Runtime{Provider: "antigravity", Model: "gemini-test", ReasoningEffort: "high"}
+		profiles["reviewer"] = scoreProfile("reviewer", "review", caps...)
+		return w, profiles
+	}
+	w, profiles := antigravityReviewer("read", "review")
+	without := scored(t, w, profiles)
+	if !Has(findingIDs(without), "V5") || len(WorkflowWarnings(w, profiles)) != 0 {
+		t.Fatalf("reviewer without run_commands: %v %v", findingIDs(without), WorkflowWarnings(w, profiles))
+	}
+	w, profiles = antigravityReviewer("read", "review", "run_commands")
+	with := scored(t, w, profiles)
+	ids := findingIDs(with)
+	if !Has(ids, "V5") || !Has(ids, "C6") || with.Points >= without.Points || gradeRank(with.Grade) < gradeRank(without.Grade) {
+		t.Fatalf("unusable run_commands raised the score: %s %d %v (was %s %d)\n%s", with.Grade, with.Points, ids, without.Grade, without.Points, strings.Join(with.Report(), "\n"))
+	}
+	warnings := WorkflowWarnings(w, profiles)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "reviewer has run_commands") || !strings.Contains(warnings[0], "antigravity") {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	// Moving the same reviewer to an adapter that runs commands earns V5.
+	w.Agents[2].Runtime = Runtime{Provider: "gemini", Model: "gemini-test", Options: map[string]any{"authMethod": "vertex-ai"}}
+	if ids := findingIDs(scored(t, w, profiles)); Has(ids, "V5") || Has(ids, "C6") {
+		t.Fatalf("capable adapter: %v", ids)
+	}
+}

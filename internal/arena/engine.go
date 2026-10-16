@@ -513,7 +513,7 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 	contextParts := []string{}
 	for _, entry := range ContextSearch(shared, e.Run.Objective) {
 		if entry.CreatedBy.Provider != nil {
-			if err := e.Project.ShareContext(ctx, e.Run, a.Id, *entry.CreatedBy.Provider, a.Runtime.Provider, "shared context entry", map[string]any{"entryId": entry.Id, "createdBy": entry.CreatedBy}); err != nil {
+			if err := e.Project.ShareContext(ctx, e.Run, a.Id, *entry.CreatedBy.Provider, a.Id, a.Runtime.Provider, "shared context entry", map[string]any{"entryId": entry.Id, "createdBy": entry.CreatedBy}); err != nil {
 				return nil, err
 			}
 		}
@@ -536,7 +536,7 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		providers := append([]string{str(actor["provider"])}, stringSlice(parent["arenaSourceProviders"])...)
 		for _, provider := range uniqueStrings(providers) {
 			if !teamApproved {
-				if err := e.Project.ShareContext(ctx, e.Run, a.Id, provider, a.Runtime.Provider, "handoff", map[string]any{"messageId": parent["messageId"], "from": parent["from"]}); err != nil {
+				if err := e.Project.ShareContext(ctx, e.Run, a.Id, provider, a.Id, a.Runtime.Provider, "handoff", map[string]any{"messageId": parent["messageId"], "from": parent["from"]}); err != nil {
 					return nil, err
 				}
 			}

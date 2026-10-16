@@ -168,7 +168,11 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return e
 		}
 		if o.Bool("json") {
-			cli.print(events)
+			history, e := p.History(id, events)
+			if e != nil {
+				return e
+			}
+			cli.print(history)
 		} else {
 			for _, event := range events {
 				fmt.Fprintf(cli.Out, "%d %s %s %s\n", event.Sequence, event.At, event.AgentID, event.Type)

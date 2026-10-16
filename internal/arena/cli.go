@@ -463,6 +463,9 @@ func (cli *CLI) workflow(ctx context.Context, p *Project, args []string, o Optio
 			return e
 		}
 		fmt.Fprintln(cli.Out, GraphSummary(w))
+		for _, warning := range WorkflowWarnings(w, profiles) {
+			fmt.Fprintln(cli.Out, warning)
+		}
 		fmt.Fprintln(cli.Out, ScoreArena(w, profiles).Summary())
 		if o.Bool("dry-run") {
 			return nil
@@ -477,12 +480,15 @@ func (cli *CLI) workflow(ctx context.Context, p *Project, args []string, o Optio
 		fmt.Fprintln(cli.Out, "Saved", id, "transaction", tx)
 		return p.Audit(id, "workflow.saved", map[string]any{"transaction": tx})
 	case "validate", "show":
-		w, _, e := p.Load(id)
+		w, profiles, e := p.Load(id)
 		if e != nil {
 			return e
 		}
 		if args[0] == "validate" {
 			fmt.Fprintln(cli.Out, id, "valid")
+			for _, warning := range WorkflowWarnings(w, profiles) {
+				fmt.Fprintln(cli.Out, warning)
+			}
 		} else if o.Bool("json") {
 			cli.print(w)
 		} else {
