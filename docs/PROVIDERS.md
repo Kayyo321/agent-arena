@@ -10,7 +10,7 @@ opaque in Arena envelopes; adapters translate only supported controls.
 | Codex | Installed CLI, local app-server stdio, provider-owned sign-in | CLI 0.162.0-alpha.17.2 inspected; real `gpt-6.1-sol` / `high` read-only workflow and live Arena MCP context search passed |
 | Claude Code | `--bare -p`, streamed JSON, API-key or supported cloud auth | CLI 2.1.224 and flags inspected; no approved API/cloud credentials available for live inference |
 | Claude Code (sign-in) | `claude -p` with its own tools, stream-json, Claude Code-owned sign-in | CLI 2.1.301: one-turn read-only probe confirmed tool restriction and `structured_output`; Arena workflows not yet run live |
-| Antigravity | `agy` headless stream-json input/output, Antigravity-owned sign-in, Arena write fence | CLI 1.3.6: one-turn probes confirmed stream format and `structured_output`; Arena workflows not yet run live |
+| Antigravity | `agy` headless stream-json input/output, Antigravity-owned sign-in, Arena write fence | CLI 1.4.0: one-turn probes confirmed stream format and `structured_output`; live multi-provider team workflow passed on 2026-10-16 with `gemini-3.8-flash-medium` as the second route ([evidence](VALIDATION.md#production-readiness-sweep-2026-10-16)) |
 | Gemini | Official Google GenAI Go SDK, AI Studio API-key or Vertex AI ADC | SDK v1.75.0 compiled; live inference requires configured approved credentials |
 | Local | Same-machine Ollama or OpenAI-compatible HTTP server | Contract fixtures; a real backend/model still needs user selection and verification |
 
@@ -161,5 +161,7 @@ go test ./internal/arena -run TestLiveCodex -v -count=1
 ```
 
 These are real inference tests. Other adapter/HTTP contract fixtures are labelled in
-tests and do not establish live readiness. The M3 multi-provider exit check remains
-pending until a second approved route and model are supplied and exercised.
+tests and do not establish live readiness. The M3 multi-provider live exit passed on
+2026-10-16 with Codex `gpt-6.1-sol` / `high` and Antigravity `gemini-3.8-flash-medium`;
+see [validation evidence](VALIDATION.md#production-readiness-sweep-2026-10-16). Claude
+Code, Gemini and local routes still have only contract or probe coverage.
