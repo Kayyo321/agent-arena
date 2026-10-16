@@ -5,8 +5,49 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+// tmuxMinMajor is the first tmux release whose new-session, new-window and
+// split-window take shell-command as multiple arguments "executed directly
+// (without sh -c)". tmux CHANGES, "CHANGES FROM 1.9a TO 2.0, 06 March 2015":
+// "The 'new-session', 'new-window', 'split-window', and 'respawn-pane' commands
+// now understand multiple arguments and handle quoting problems correctly";
+// the 2.0 manual (tmux.1) states the without-sh-c behaviour. Arena never
+// builds a shell string, so it refuses older tmux instead of falling back.
+const tmuxMinMajor = 2
+
+var tmuxVersionPattern = regexp.MustCompile(`^tmux (\d+)\.(\d+)`)
+
+// tmuxVersionSupported reads `tmux -V` output. Releases such as "tmux 3.3a"
+// parse; development builds ("tmux next-3.5", "tmux master") and anything else
+// are unparseable and therefore unsupported, since their behaviour cannot be
+// told from the version string.
+func tmuxVersionSupported(output string) (supported, parsed bool) {
+	m := tmuxVersionPattern.FindStringSubmatch(strings.TrimSpace(output))
+	if m == nil {
+		return false, false
+	}
+	major, _ := strconv.Atoi(m[1])
+	return major >= tmuxMinMajor, true
+}
+
+func checkTmuxVersion(ctx context.Context, bin string) error {
+	out, err := exec.CommandContext(ctx, bin, "-V").Output()
+	version := strings.TrimSpace(Redact(string(out)))
+	if err != nil {
+		return fmt.Errorf("could not read the tmux version (tmux -V failed); arena tmux needs tmux %d.0 or newer", tmuxMinMajor)
+	}
+	if ok, parsed := tmuxVersionSupported(version); !ok {
+		if !parsed {
+			return fmt.Errorf("cannot parse the tmux version %q; arena tmux needs a released tmux %d.0 or newer (development builds are not accepted)", version, tmuxMinMajor)
+		}
+		return fmt.Errorf("%s is too old; arena tmux needs tmux %d.0 or newer, which runs multi-argument commands without a shell", version, tmuxMinMajor)
+	}
+	return nil
+}
 
 // tmuxCommands lays a run out in the user's own tmux. Window 0, pane 0 is the
 // supervisor, the process that executes the run; ending it interrupts the run,
@@ -54,6 +95,9 @@ func (cli *CLI) tmux(ctx context.Context, p *Project, args []string, o Options) 
 	bin, err := exec.LookPath("tmux")
 	if err != nil {
 		return fmt.Errorf("tmux is not installed or not on PATH; `arena tmux` is optional and Arena never installs it. Install tmux with your package manager, or use `arena run` directly")
+	}
+	if err := checkTmuxVersion(ctx, bin); err != nil {
+		return err
 	}
 	exe, err := os.Executable()
 	if err != nil {

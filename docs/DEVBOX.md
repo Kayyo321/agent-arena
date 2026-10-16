@@ -18,6 +18,17 @@ reattach later to see where it got to.
 - Supervision is attached: the process running the run owns it. Keep that process inside
   tmux, not in your SSH session, so a dropped connection does not interrupt the run.
 
+## tmux version
+
+`arena tmux` needs tmux 2.0 or newer. From 2.0 (CHANGES, "CHANGES FROM 1.9a TO 2.0,
+06 March 2015") `new-session`, `new-window` and `split-window` accept a command as
+multiple arguments and, per the 2.0 manual, execute it directly "without sh -c". Arena
+relies on that so no task or agent text is ever parsed by a shell, and it never falls
+back to shell strings. It reads `tmux -V` before creating anything and refuses older
+versions. Development builds (`tmux next-3.5`, `tmux master`) and unparseable output are
+also refused, because the string does not say which behaviour they have; use a
+released tmux. `arena doctor` shows the version and warns (tmux stays optional).
+
 ## Steps
 
 1. SSH to the devbox, clone the repository, build or install `arena`, and sign in to

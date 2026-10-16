@@ -17,9 +17,13 @@ var hostile = []string{"$(touch pwned)", "; rm -rf x", "it's \"quoted\"", "line 
 // fakeTmux installs a tmux that appends each invocation's argv to a file, one
 // argument per line, invocations separated by a line holding "--END--".
 func fakeTmux(t *testing.T) (calls func() [][]string) {
+	return fakeTmuxVersion(t, "tmux 3.4")
+}
+
+func fakeTmuxVersion(t *testing.T, version string) (calls func() [][]string) {
 	t.Helper()
 	bin, rec := t.TempDir(), filepath.Join(t.TempDir(), "calls")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> " + rec + "\nprintf -- '--END--\\n' >> " + rec + "\n"
+	script := "#!/bin/sh\nif [ \"$1\" = -V ]; then printf '%s\\n' '" + version + "'; exit 0; fi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> " + rec + "\nprintf -- '--END--\\n' >> " + rec + "\n"
 	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -207,5 +211,40 @@ func TestTmuxSmokeWithRealTmux(t *testing.T) {
 	}
 	if out, err := exec.Command(bin, "list-windows", "-t", session, "-F", "#{window_index}").Output(); err != nil || strings.TrimSpace(string(out)) != "0\n1" {
 		t.Fatalf("windows %q: %v", out, err)
+	}
+}
+
+func TestTmuxVersionGate(t *testing.T) {
+	for version, want := range map[string]struct{ ok, parsed bool }{
+		"tmux 1.9a": {false, true}, "tmux 1.8": {false, true}, "tmux 2.0": {true, true}, "tmux 3.3a": {true, true}, "tmux 3.5": {true, true},
+		"tmux next-3.5": {false, false}, "tmux master": {false, false}, "": {false, false}, "screen 4.9": {false, false},
+	} {
+		if ok, parsed := tmuxVersionSupported(version); ok != want.ok || parsed != want.parsed {
+			t.Errorf("%q = %v,%v want %v,%v", version, ok, parsed, want.ok, want.parsed)
+		}
+	}
+}
+
+func TestTmuxRefusesUnsupportedVersionBeforeCreatingAnything(t *testing.T) {
+	for _, version := range []string{"tmux 1.9a", "tmux next-3.5", "tmux master"} {
+		p := committedProject(t)
+		r := testRun(t, p)
+		calls := fakeTmuxVersion(t, version)
+		err := NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), []string{"tmux", "resume", r.ID, "--project", p.Root})
+		if err == nil || !strings.Contains(err.Error(), "2.0 or newer") {
+			t.Fatalf("%s: %v", version, err)
+		}
+		if got := calls(); len(got) != 0 {
+			t.Fatalf("%s: tmux was driven after refusal: %q", version, got)
+		}
+	}
+	// A refused `tmux run` must not reserve a run either.
+	p := committedProject(t)
+	fakeTmuxVersion(t, "tmux 1.8")
+	if err := NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), []string{"tmux", "run", "wf", "task", "--project", p.Root}); err == nil || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("run: %v", err)
+	}
+	if runs, _ := filepath.Glob(p.Path(".state", "run-*")); len(runs) != 0 {
+		t.Fatalf("a run was created: %v", runs)
 	}
 }
