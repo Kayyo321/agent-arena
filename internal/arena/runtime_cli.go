@@ -45,6 +45,12 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		}
 		return fmt.Errorf("unknown checkpoint command")
 	case "mcp":
+		if o.Bool("control") {
+			if o.Get("run") != "" || o.Get("actor") != "" {
+				return fmt.Errorf("mcp --control serves the whole project; drop --run and --actor")
+			}
+			return ServeControlMCP(ctx, p, cli.In, cli.Out)
+		}
 		r, err := p.ReadRun(o.Get("run"))
 		if err != nil {
 			return err

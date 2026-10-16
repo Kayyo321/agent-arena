@@ -18,10 +18,6 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 	if !ok {
 		return fmt.Errorf("MCP actor is not in this workflow")
 	}
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64<<10), 8<<20)
-	initialized := false
-	calls := 0
 	returned := map[string]bool{}
 	peers := []string{}
 	for _, a := range r.Workflow.Agents {
@@ -33,6 +29,76 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 	if len(peers) > 0 {
 		peerNote = "Your peers: " + strings.Join(peers, ", ") + "."
 	}
+	tools := func() []any {
+		return []any{map[string]any{"name": "arena_send", "description": "Route an Arena packet under the active workflow's permissions and policy. To talk to a peer agent use kind \"message\" with to=<peer id> and payloadJson like {\"text\":\"...\"}; text is required and structured fields may ride alongside it. If the user must first approve sharing with that peer's provider, the result has status \"awaiting-approval\" and Arena delivers the message once approved: do not resend it. " + peerNote + " Use \"context-proposal\" (to=context-manager) for durable workflow context, payload {\"workflowId\":\"" + r.Workflow.Id + "\",\"operation\":\"add\",\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\"],\"confidence\":\"verified|inferred|unverified\",\"evidence\":[{\"kind\":\"file|url|decision|message|other\",\"reference\":\"...\"}],\"entryId\":null}, and \"coworker-request\" only to ask the orchestrator for a NEW agent (payload needs workflowId \"" + r.Workflow.Id + "\", role, objective, reason and runtime).", "inputSchema": objectSchema(map[string]any{"to": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"message", "context-proposal", "coworker-request"}}, "payloadJson": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_inbox", "description": "Read peer messages delivered to this agent in the current run, oldest first. To wait for a peer's reply before continuing, pass newOnly=true and waitSeconds (up to " + fmt.Sprint(maxInboxWait) + "): the call returns as soon as a message you have not seen arrives, or an empty list on timeout.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"waitSeconds": map[string]any{"type": "integer", "minimum": 0, "maximum": maxInboxWait}, "newOnly": map[string]any{"type": "boolean"}}, "additionalProperties": false}}, map[string]any{"name": "arena_context_search", "description": "Search durable context for the active workflow only. Matches entries sharing any meaningful word with the query, best matches first; an empty query lists every entry. Search before proposing an entry so you revise instead of duplicating.", "inputSchema": objectSchema(map[string]any{"query": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_ask_user", "description": "Ask the user a decision through an audited Arena question envelope and wait for their answer.", "inputSchema": objectSchema(map[string]any{"question": map[string]any{"type": "string"}})}}
+	}
+	call := func(name string, args map[string]any) (any, error) {
+		var value any
+		var err error
+		switch name {
+		case "arena_send":
+			payload := map[string]any{}
+			if err = json.Unmarshal([]byte(str(args["payloadJson"])), &payload); err == nil {
+				value, err = p.AgentPacket(ctx, r, actor, map[string]any{"to": args["to"], "kind": args["kind"], "payload": payload})
+			}
+		case "arena_inbox":
+			wait, _ := args["waitSeconds"].(float64)
+			newOnly, _ := args["newOnly"].(bool)
+			var packets []Packet
+			packets, err = p.WaitInbox(ctx, r, actor, time.Duration(min(max(wait, 0), maxInboxWait))*time.Second, returned, newOnly)
+			for _, packet := range packets {
+				returned[str(packet["messageId"])] = true
+			}
+			value = packets
+		case "arena_context_search":
+			var entries []ContextEntry
+			entries, err = p.ContextEntries(r.Workflow.Id, false)
+			if err == nil {
+				entries = ContextSearch(entries, str(args["query"]))
+				if len(entries) > 20 {
+					entries = entries[:20]
+				}
+				for _, entry := range entries {
+					if entry.CreatedBy.Provider != nil {
+						err = p.ShareContext(ctx, r, actor, *entry.CreatedBy.Provider, actor, agent.Runtime.Provider, "shared context entry", map[string]any{"entryId": entry.Id, "createdBy": entry.CreatedBy})
+						if err != nil {
+							break
+						}
+					}
+				}
+				if err != nil {
+					break
+				}
+				value = entries
+				_, err = p.Append(r.ID, r.Workflow.Id, actor, "context.searched", map[string]any{"entryCount": len(entries)})
+			}
+		case "arena_ask_user":
+			question := str(args["question"])
+			packet := NewPacket(r.ID, "question", actor, agent.Runtime.Provider, "user", "arena", "", map[string]any{"question": question, "decisionNeeded": "user answer"}, agent.Runtime)
+			if _, err = p.Deliver(r, packet); err == nil {
+				value, err = p.Decide(ctx, r, actor, "question", question, nil, nil)
+				if err == nil {
+					reply := NewPacket(r.ID, "message", "user", "arena", actor, agent.Runtime.Provider, str(packet["correlationId"]), map[string]any{"text": value}, Runtime{Provider: "arena"})
+					reply["replyTo"] = packet["messageId"]
+					_, err = p.Deliver(r, reply)
+				}
+			}
+		default:
+			err = fmt.Errorf("unknown Arena tool")
+		}
+		return value, err
+	}
+	return serveMCPLoop(ctx, in, out, tools, call)
+}
+
+// serveMCPLoop speaks MCP over line-delimited JSON-RPC: initialize, ping,
+// tools/list from tools, and tools/call through call, capped per session.
+// Both the per-agent worker bridge and the project control server use it.
+func serveMCPLoop(ctx context.Context, in io.Reader, out io.Writer, tools func() []any, call func(name string, args map[string]any) (any, error)) error {
+	scanner := bufio.NewScanner(in)
+	scanner.Buffer(make([]byte, 64<<10), 8<<20)
+	initialized := false
+	calls := 0
 	for scanner.Scan() {
 		var request struct {
 			JSONRPC string          `json:"jsonrpc"`
@@ -64,7 +130,7 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 				err = fmt.Errorf("initialize first")
 				break
 			}
-			result = map[string]any{"tools": []any{map[string]any{"name": "arena_send", "description": "Route an Arena packet under the active workflow's permissions and policy. To talk to a peer agent use kind \"message\" with to=<peer id> and payloadJson like {\"text\":\"...\"}; text is required and structured fields may ride alongside it. If the user must first approve sharing with that peer's provider, the result has status \"awaiting-approval\" and Arena delivers the message once approved: do not resend it. " + peerNote + " Use \"context-proposal\" (to=context-manager) for durable workflow context, payload {\"workflowId\":\"" + r.Workflow.Id + "\",\"operation\":\"add\",\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\"],\"confidence\":\"verified|inferred|unverified\",\"evidence\":[{\"kind\":\"file|url|decision|message|other\",\"reference\":\"...\"}],\"entryId\":null}, and \"coworker-request\" only to ask the orchestrator for a NEW agent (payload needs workflowId \"" + r.Workflow.Id + "\", role, objective, reason and runtime).", "inputSchema": objectSchema(map[string]any{"to": map[string]any{"type": "string"}, "kind": map[string]any{"type": "string", "enum": []string{"message", "context-proposal", "coworker-request"}}, "payloadJson": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_inbox", "description": "Read peer messages delivered to this agent in the current run, oldest first. To wait for a peer's reply before continuing, pass newOnly=true and waitSeconds (up to " + fmt.Sprint(maxInboxWait) + "): the call returns as soon as a message you have not seen arrives, or an empty list on timeout.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"waitSeconds": map[string]any{"type": "integer", "minimum": 0, "maximum": maxInboxWait}, "newOnly": map[string]any{"type": "boolean"}}, "additionalProperties": false}}, map[string]any{"name": "arena_context_search", "description": "Search durable context for the active workflow only. Matches entries sharing any meaningful word with the query, best matches first; an empty query lists every entry. Search before proposing an entry so you revise instead of duplicating.", "inputSchema": objectSchema(map[string]any{"query": map[string]any{"type": "string"}})}, map[string]any{"name": "arena_ask_user", "description": "Ask the user a decision through an audited Arena question envelope and wait for their answer.", "inputSchema": objectSchema(map[string]any{"question": map[string]any{"type": "string"}})}}}
+			result = map[string]any{"tools": tools()}
 		case "tools/call":
 			if !initialized {
 				err = fmt.Errorf("initialize first")
@@ -78,57 +144,7 @@ func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader
 			name := str(request.Params["name"])
 			args, _ := request.Params["arguments"].(map[string]any)
 			var value any
-			switch name {
-			case "arena_send":
-				payload := map[string]any{}
-				if err = json.Unmarshal([]byte(str(args["payloadJson"])), &payload); err == nil {
-					value, err = p.AgentPacket(ctx, r, actor, map[string]any{"to": args["to"], "kind": args["kind"], "payload": payload})
-				}
-			case "arena_inbox":
-				wait, _ := args["waitSeconds"].(float64)
-				newOnly, _ := args["newOnly"].(bool)
-				var packets []Packet
-				packets, err = p.WaitInbox(ctx, r, actor, time.Duration(min(max(wait, 0), maxInboxWait))*time.Second, returned, newOnly)
-				for _, packet := range packets {
-					returned[str(packet["messageId"])] = true
-				}
-				value = packets
-			case "arena_context_search":
-				var entries []ContextEntry
-				entries, err = p.ContextEntries(r.Workflow.Id, false)
-				if err == nil {
-					entries = ContextSearch(entries, str(args["query"]))
-					if len(entries) > 20 {
-						entries = entries[:20]
-					}
-					for _, entry := range entries {
-						if entry.CreatedBy.Provider != nil {
-							err = p.ShareContext(ctx, r, actor, *entry.CreatedBy.Provider, actor, agent.Runtime.Provider, "shared context entry", map[string]any{"entryId": entry.Id, "createdBy": entry.CreatedBy})
-							if err != nil {
-								break
-							}
-						}
-					}
-					if err != nil {
-						break
-					}
-					value = entries
-					_, err = p.Append(r.ID, r.Workflow.Id, actor, "context.searched", map[string]any{"entryCount": len(entries)})
-				}
-			case "arena_ask_user":
-				question := str(args["question"])
-				packet := NewPacket(r.ID, "question", actor, agent.Runtime.Provider, "user", "arena", "", map[string]any{"question": question, "decisionNeeded": "user answer"}, agent.Runtime)
-				if _, err = p.Deliver(r, packet); err == nil {
-					value, err = p.Decide(ctx, r, actor, "question", question, nil, nil)
-					if err == nil {
-						reply := NewPacket(r.ID, "message", "user", "arena", actor, agent.Runtime.Provider, str(packet["correlationId"]), map[string]any{"text": value}, Runtime{Provider: "arena"})
-						reply["replyTo"] = packet["messageId"]
-						_, err = p.Deliver(r, reply)
-					}
-				}
-			default:
-				err = fmt.Errorf("unknown Arena tool")
-			}
+			value, err = call(name, args)
 			text := string(SafeJSON(value))
 			isError := err != nil
 			if err != nil {

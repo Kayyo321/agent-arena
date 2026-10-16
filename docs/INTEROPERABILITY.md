@@ -336,3 +336,75 @@ with an exact manifest `path`; it cannot open arbitrary paths. Unsupported image
 adapters fail explicitly. The common envelope preserves metadata independently
 of these provider-specific translations. Attachments follow the workflow's existing
 handoff and cross-provider sharing policies.
+
+## Project control MCP server
+
+`arena mcp --control` is a stdio MCP server for one project, for another agent or
+an IDE that wants to look at Arena and start work. It speaks the same MCP framing
+as the worker bridge (protocol versions 2025-06-18 and 2025-11-25, line-delimited
+JSON-RPC, tools only) but is a different server: the worker bridge
+(`arena mcp --run RUN --actor AGENT`) serves one agent's `arena_send`,
+`arena_inbox`, `arena_context_search` and `arena_ask_user` inside one run, and is
+not widened by it. A control session serves exactly these tools:
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `arena_status` | `workflowId?` | Workflow IDs, provider readiness (the `status --json` array, for one workflow or all), and the state of the 20 newest runs |
+| `arena_history` | `runId?`, `maxEvents?` | With `runId`, `history RUN --json`: status, `terminal`, `pendingDecisions`, usage totals and events (`maxEvents` keeps the newest N). Without it, the run IDs |
+| `arena_changes` | `runId`, `changeId?` | The change records `changes RUN` prints; with `changeId`, that change plus its redacted patch (cut at 256 KiB, flagged `patchTruncated`) |
+| `arena_score` | `workflowId` | `score WORKFLOW --json` |
+| `arena_workflow_show` | `workflowId` | `workflow show WORKFLOW --json` |
+| `arena_run_start` | `workflowId`, `task` | `{runId, workflowId, state: "started", supervision, readiness}` |
+
+Results are the CLI's JSON text, byte for byte for every tool but `arena_status` (which wraps the `status --json` array with workflow and run state) and the `changeId` form of `arena_changes`.
+IDs must match the usual ID pattern, unknown arguments are rejected, a task is at
+most 8 KiB, a result larger than 1 MiB is refused instead of truncated, and a
+session accepts at most 1000 tool calls and starts at most 3 runs.
+
+### Scope and safety
+
+- The read tools write no workflow, run or journal data. Like the CLI's own
+  readers, they take short-lived read locks, and `arena_status` runs the same
+  provider probes as `arena status`.
+- There is no tool for credentials or provider configuration, for answering
+  decisions, for editing or deleting workflows, or for integrating or rolling back
+  changes. Those stay with the human, in the TUI or the CLI. A later version may
+  let an agent *request* an integration as a pending decision; it will not act.
+- `arena_run_start` takes only a saved workflow ID and a task. It has no provider,
+  model, effort, endpoint or credential parameter, so the runtime is always the
+  one the validated workflow already names, and a client cannot choose one.
+  Arguments outside the schema are an error, not ignored.
+- It uses the code path of `arena run` and the launcher: the workflow must load
+  and validate, the repository must have an initial commit, every required
+  provider must report it can start, a missing command sandbox or an unenforceable
+  shell policy refuses the run, and approval policies, run budgets and limits
+  apply as in any run. A refused start creates no run.
+- Everything returned, including errors, passes through the same redaction as the
+  journal. The control server does not read credential files or print
+  environment variables.
+
+### Run supervision
+
+Arena has no daemon (see the [decision record](adr/0001-implementation-foundation.md)),
+and the control server does not create one. `arena_run_start` prepares the run,
+returns its ID immediately, and then runs the engine in a goroutine of the server
+process, tied to the lifetime of the MCP session:
+
+- While the client stays connected the run proceeds like an attached
+  `arena run`. Its progress is in `arena_history`, `arena watch RUN`, or the TUI.
+- If the client disconnects (stdin closes), the server shuts down, or it receives
+  Ctrl+C or SIGTERM, the server cancels its runs and waits for them to stop. Each
+  run journals `workflow.interrupted`, keeps its worktrees and history, releases its
+  run lock, and can be continued by a person with `arena resume RUN`. Nothing keeps
+  running in the background, and no detached process is spawned.
+- Approvals, budget questions and other decisions are never answered by the control
+  server. They stay pending for a human (the TUI or `arena decision answer`); a
+  run that waits on one is still interrupted if the session ends first. An agent
+  that starts runs should check `pendingDecisions` in `arena_history`.
+- Another process, such as a TUI or `arena watch`, can observe the run, but only
+  the server that started it supervises it.
+
+Like the worker bridge, the server is local: the client launches it as a child
+process and talks over its stdio, so it adds no network listener. Using it does
+not make a provider "verified"; readiness still comes from `arena status` and the
+validation record in [VALIDATION.md](VALIDATION.md).
