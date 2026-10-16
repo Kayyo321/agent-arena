@@ -150,6 +150,11 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 			delete(nodes, id)
 		}
 	}
+	for _, f := range e.Run.Workflow.FanOuts {
+		nodes[f.Id] = "pending"
+		delete(nodes, f.Planner)
+		delete(nodes, f.Worker)
+	}
 	for _, r := range e.Run.Workflow.DecisionRouters {
 		nodes[r.Id] = "pending"
 	}
@@ -220,6 +225,9 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 				if t.Id == id {
 					agents = append(agents, t.Members...)
 				}
+			}
+			if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+				agents = append(agents, append([]string{f.Planner}, e.childIDs(f.Id)...)...)
 			}
 		}
 		for _, id := range body {
@@ -470,6 +478,10 @@ func (e *Engine) executeNode(ctx context.Context, id string, parents []Packet, t
 			return packet, targets, err
 		}
 	}
+	if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+		packet, err := e.fanOut(ctx, f, parents)
+		return packet, targets, err
+	}
 	a, ok := agentByID(e.Run.Workflow, id)
 	if !ok {
 		return nil, nil, fmt.Errorf("missing agent %s", id)
@@ -492,13 +504,16 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		}
 	}
 	profile := e.profileOf(a.Id)
-	if invocation != nil && invocation["mode"] == "team-composition" {
+	if invocation != nil && (invocation["mode"] == "team-composition" || invocation["mode"] == "fanout-planner") {
 		profile.Capabilities = []string{"read"}
 	}
 	write := Has(profile.Capabilities, "write")
 	node := a.Id
 	if invocation != nil && (invocation["mode"] == "team-member" || invocation["mode"] == "team-composition") {
 		node = str(invocation["teamId"])
+	}
+	if invocation != nil && (invocation["mode"] == "fanout-planner" || invocation["mode"] == "fanout-child") {
+		node = str(invocation["fanOutId"])
 	}
 	iteration := e.iteration(node)
 	taskID := iterationTask(a.Id, iteration)
@@ -729,6 +744,10 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 	if invocation != nil && (invocation["mode"] == "team-member" || invocation["mode"] == "team-composition") { // Position schemas are validated by the coordinator, not the ordinary result contract.
 		packet["kind"] = "message"
 		packet["payload"] = map[string]any{"text": string(JSON(result)), "position": result}
+	}
+	if invocation != nil && invocation["mode"] == "fanout-planner" { // Arena checks the plan against the cap itself.
+		packet["kind"] = "message"
+		packet["payload"] = map[string]any{"text": string(JSON(result)), "plan": result}
 	}
 	id, err := e.Project.Deliver(e.Run, packet)
 	if err != nil {
