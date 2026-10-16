@@ -116,7 +116,8 @@ func TestMediatedCommandsCannotReadHomeOrOtherWorktrees(t *testing.T) {
 			t.Fatalf("sandbox read %s: %q", path, out)
 		}
 	}
-	if out, err := runSandboxed(t, 10*time.Second, assigned, false, "ls", "-a", filepath.Dir(state), filepath.Dir(assigned)); err != nil || strings.Contains(out, "worker-b") || strings.Contains(out, "settings.txt") {
+	// Linux hides the run state behind an empty tmpfs; macOS denies listing it.
+	if out, err := runSandboxed(t, 10*time.Second, assigned, false, "ls", "-a", filepath.Dir(state), filepath.Dir(assigned)); err != nil && !strings.Contains(out, "Operation not permitted") || strings.Contains(out, "worker-b") || strings.Contains(out, "settings.txt") {
 		t.Fatalf("sandbox listed neighboring state: %v %q", err, out)
 	}
 	if out, err := runSandboxed(t, 10*time.Second, assigned, false, "ls"); err != nil || !strings.Contains(out, "visible.txt") {

@@ -23,6 +23,15 @@ func SandboxedCommand(dir string, write bool, executable string, args []string) 
 	if e != nil {
 		return nil, nil, e
 	}
+	// The read roots bind the executable's resolved directory, so exec it from
+	// there. The name itself stays unresolved: venv interpreters and multi-call
+	// binaries depend on the path they were started by.
+	if path, e = filepath.Abs(path); e != nil {
+		return nil, nil, e
+	}
+	if parent, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
+		path = filepath.Join(parent, filepath.Base(path))
+	}
 	if dir, e = filepath.Abs(dir); e != nil {
 		return nil, nil, e
 	}

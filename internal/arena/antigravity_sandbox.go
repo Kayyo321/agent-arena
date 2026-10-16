@@ -148,6 +148,11 @@ func homeBindBacks(home string) []string {
 		candidates = append(candidates, os.Getenv(name))
 	}
 	candidates = append(candidates, extraReadPaths()...)
+	// Candidates are compared after resolving symlinks, so home must be too
+	// (macOS temp dirs live under /var -> /private/var).
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
 	seen, out := map[string]bool{}, []string{}
 	for _, candidate := range candidates {
 		if candidate == "" || !filepath.IsAbs(candidate) {

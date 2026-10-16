@@ -115,7 +115,7 @@ func TestCommandFenceBwrapArgs(t *testing.T) {
 	mustAfterRoot("--tmpfs", filepath.Join(home, ".codex"))
 	mustAfterRoot("--tmpfs", filepath.Join(home, ".ssh"))
 	mustAfterRoot("--tmpfs", filepath.Join(home, ".config/gh"))
-	mustAfterRoot("--tmpfs", filepath.Join(home, "elsewhere", "aws")) // a symlinked entry hides its target
+	mustAfterRoot("--tmpfs", resolveForTest(filepath.Join(home, "elsewhere", "aws"))) // a symlinked entry hides its target
 	mustAfterRoot("--ro-bind", "/dev/null", filepath.Join(home, ".claude.json"))
 	mustAfterRoot("--ro-bind", "/dev/null", filepath.Join(home, ".netrc"))
 	mustAfterRoot("--overlay-src", f.State, "--tmp-overlay", f.State)
@@ -394,6 +394,7 @@ func TestHomeBindBacksStayUnderHome(t *testing.T) {
 	t.Setenv("PATH", inside+string(os.PathListSeparator)+outside+string(os.PathListSeparator)+"/usr/bin")
 	t.Setenv("ARENA_ANTIGRAVITY_EXTRA_READS", outside)
 	got := homeBindBacks(home)
+	home, inside, outside = resolveForTest(home), resolveForTest(inside), resolveForTest(outside)
 	if !Has(got, inside) {
 		t.Errorf("a PATH dir under home should be bound back: %v", got)
 	}

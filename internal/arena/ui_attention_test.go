@@ -103,8 +103,10 @@ func TestShellPassthroughRunsInProjectRoot(t *testing.T) {
 	}
 	next, _ = next.(LiveModel).Update(cmd())
 	m = next.(LiveModel)
+	// pwd may print the logical or the resolved path (macOS /var -> /private/var).
 	root, _ := filepath.EvalSymlinks(p.Root)
-	if !strings.Contains(m.Panel, "exit 3") || !strings.Contains(strings.Join(m.PanelText, "\n"), root) {
+	text := strings.Join(m.PanelText, "\n")
+	if !strings.Contains(m.Panel, "exit 3") || !strings.Contains(text, root) && !strings.Contains(text, p.Root) {
 		t.Fatalf("shell result: %s %v", m.Panel, m.PanelText)
 	}
 }
