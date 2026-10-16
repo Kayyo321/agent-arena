@@ -26,7 +26,8 @@
     "maxOnCallInvocationsPerRun": 3,
     "maxCoworkerAdditionsPerRun": 1,
     "maxAgentRunMinutes": 30,
-    "maxRetriesPerAgent": 1
+    "maxRetriesPerAgent": 1,
+    "maxFanOutChildrenPerRun": 8
   },
   "context": {
     "defaultHandoffScope": "task-scoped",

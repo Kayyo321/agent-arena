@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "planner",
+  "name": "Planner",
+  "role": "planning",
+  "description": "Splits a scoped task into independent work items.",
+  "objective": "Return independent work items that can be done in parallel without touching the same files.",
+  "instructions": "Split the task into the fewest independent items that cover it, never more than Arena's stated cap. Give each item a short title and complete instructions, including the files it owns. Items must not overlap in the files they change. Do not edit files.",
+  "capabilities": ["read", "research"]
+}

@@ -48,6 +48,7 @@ Other useful settings include:
 - `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.
 - `approvalPolicies.orchestrator-stall-recovery` (optional): `answer-routing` (default when absent) lets the permanent orchestrator answer a stalled router fallback itself, choosing only among that router's declared branches or `stop`; `recommend-only` makes it suggest an answer for `/accept`. Agent questions and permission approvals are never answered by the orchestrator.
 - `limits.maxConcurrentAgents`, `maxTeamRounds`, `maxOnCallInvocationsPerRun`, `maxCoworkerAdditionsPerRun`, and `maxAgentRunMinutes` bound parallelism, deliberation, escalations, config growth, and execution time.
+- `limits.maxFanOutChildrenPerRun` (1-64, default 8) caps the fan-out children one run may start, across every fan-out node and loop pass. New settings write 8; older settings files that omit it get 8. Validation rejects a fan-out whose `maxChildren` exceeds it, and at run time a fan-out may start only what the run has left (see [Fan-out nodes](#fan-out-nodes)).
 - `limits.maxRunTokens` (1 to 1000000000000) and `limits.maxRunMinutes` (1-10080) are optional run budgets and are off when absent, so existing `settings.arena.json` files stay valid. Tokens are the input plus output tokens providers reported for the run (see `/usage`); a provider that reports none adds nothing. Minutes count the time the run spent working, not time paused or waiting for you. Before the scheduler launches the next node it checks both. A reached budget does not kill the run: Arena journals `budget.exceeded` (`budget`, `limit`, `used`), pauses the run and raises a `budget` decision with the choices `continue` and `stop`. `continue` journals `budget.continued`, lifts that budget for the rest of the run and resumes. `stop` leaves the run paused; resuming it later asks again. Running nodes are never interrupted, and the orchestrator cannot answer this decision.
 - `context.defaultHandoffScope` and `context.maxFilesPerHandoff` bound what Arena forwards to provider sessions.
 - `sharedContext.storage` chooses Git-tracked project files or persistent local-only entries. `agentWritePolicy` controls agent additions/revisions, `agentDeletePolicy` controls archive requests, and entry/total limits bound the store. Stale entries are marked for review rather than deleted.
@@ -70,6 +71,7 @@ Core fields:
 - `agents`: path or on-call nodes with profile path and provider runtime selector. Path nodes have an integer level; on-call nodes stay outside the normal graph.
 - `teams`: composite nodes that name their member agents, facilitator, consensus policy, and output contract.
 - `decisionRouters`: deterministic blocks that inspect a structured packet field and select a conditional outgoing branch.
+- `fanOuts`: nodes whose planner splits the task into work items at run time and start one capped worker copy per item.
 - `onCall`: trigger rules for on-call agents. Rules can match a supported event or allow manual invocation.
 - `relationships`: explicit delegation and communication links. A delegation target may be an agent or a team; communication links always connect agents.
 - `settings`: concurrency, worktree, audit, and integration policy.
@@ -80,13 +82,37 @@ Two layers enforce concurrency, and both must have room before a provider proces
 
 Decision routers use `inputKind` and a JSON Pointer into the packet `payload`. Each branch matches one exact scalar value and points to an agent, team, or another router. Their branch edges count toward reachability and cycle checks, except a loop route: a route with `"loop": true` and `"maxIterations"` (1-5) may return to an ancestor of the router to start a bounded revision pass (see [loop routes](INTEROPERABILITY.md#loop-routes)). Every router declares what happens when the packet kind/field/value does not match: ask the user, stop, or route to a named fallback. Routes are deterministic; they do not ask an LLM to infer a branch from prose. Router IDs share the workflow node namespace, but routers are not agents, team members, or on-call targets. Incoming work uses a `delegates` relationship; conditional outgoing edges are defined by the router's route table. Peer communication links remain agent-to-agent.
 
-Levels group path nodes visually. Relationships define ordinary task flow and peer message permissions. A team is addressed as one graph node; its members run inside the team boundary at their shared level. Team members cannot be the head or endpoints in ordinary relationships, so a member is never assigned both directly and through its team. The delegation graph must be acyclic; back edges are allowed only as explicitly capped router loop routes. Agent and team IDs share one unique namespace. Every referenced agent, team, and profile must exist exactly once. On-call agents cannot appear in relationships or teams.
+Levels group path nodes visually. Relationships define ordinary task flow and peer message permissions. A team is addressed as one graph node; its members run inside the team boundary at their shared level. Team members cannot be the head or endpoints in ordinary relationships, so a member is never assigned both directly and through its team. A fan-out node is addressed the same way, with its planner and worker inside it. The delegation graph must be acyclic; back edges are allowed only as explicitly capped router loop routes. Agent and team IDs share one unique namespace. Every referenced agent, team, and profile must exist exactly once. On-call agents cannot appear in relationships or teams.
 
 ## Teams
 
 A team has at least two distinct path agents, one of whom is its facilitator. A given agent belongs to at most one team in a workflow. Team members receive the same task scope, then deliberate for a bounded number of rounds. In schema version 1, consensus is unanimous: every member must affirm the same configured verdict. If they disagree or a member cannot return a position, the team returns one packet with `outcome: "no-consensus"`, `verdict: null`, member positions, dissent, and a next action.
 
 Every team output uses `format: "arena.team-verdict.v1"`. Its stable fields are `teamId`, `outcome`, `verdict`, `summary`, `rationale`, `evidence`, `memberPositions`, `dissent`, `rounds`, and `nextAction`. The workflow declares allowed verdict labels so downstream agents can interpret the packet consistently. A team is not complete until it emits this packet, even when the outcome is no-consensus.
+
+## Fan-out nodes
+
+A fan-out node lets the number of workers be decided at run time while the graph stays validated before the run and the count stays hard-capped:
+
+```json
+{ "id": "split", "name": "Parallel fixes", "planner": "planner", "worker": "fixer", "maxChildren": 4, "approval": "required" }
+```
+
+- `planner` and `worker` are two distinct path agents in `agents`, at the same level, which becomes the node's level. Like team members they cannot be the head, a relationship endpoint, a team member, or part of another fan-out. Deliver work to the fan-out node's ID and delegate from it.
+- `maxChildren` (1-32) caps the worker copies one pass starts, and must not exceed the project's `limits.maxFanOutChildrenPerRun`.
+- `approval` is `required` (the default) or `auto-within-cap`.
+
+When the node runs, the planner gets the node's input packets and runs read-only, whatever its profile grants. It returns `items`, each with a `title` and `instructions`. Arena then settles how many items run. The limit is `maxChildren`, or what the run has left of `maxFanOutChildrenPerRun`, whichever is smaller:
+
+- With `required`, the item list becomes a `fanout` decision (`approve` or `stop`) before any child starts.
+- With `auto-within-cap`, a list within the limit starts without a question.
+- A list over the limit always asks, in either mode, with the choices `truncate` (run the first items up to the limit and record the rest as dropped) or `stop`. Arena never runs more items than the limit.
+- An empty list completes the node with an empty result.
+- `stop` fails the node.
+
+Each approved item starts one copy of the worker as `<fanOutId>.<n>` (1-based). A copy keeps the worker's runtime and profile, gets its own worktree, and its changes enter the integration queue. Children run in parallel, within `settings.maxConcurrentAgents` and the project's provider slots, and cannot message peers or request coworkers. A child that fails is recorded and its siblings continue. The node fails only when every child fails. The next node receives one `fanout-result` packet (see [Fan-out packets](INTEROPERABILITY.md#fan-out-packets)) whose change IDs give it a workspace containing every successful child's change. A router may branch on `fanout-result`.
+
+A fan-out may sit inside a loop route's body: each pass replans, and children get `-iterN` worktrees. Approved coworkers requested by the planner attach below the fan-out node.
 
 ## On-call agents
 
@@ -218,7 +244,7 @@ The placeholder model ID is intentional: Arena must use the model the local back
 
 ## Example fixture
 
-[`../examples/project/.arena/`](../examples/project/.arena/) illustrates a coordinator that delegates to an implementer, a cross-provider review team downstream of the implementer with a structured verdict, a review gate that loops `ChangesRequested` back to the implementer at most twice, and an on-call specialist for unresolved consensus. It scores S+ on the [score sheet](ARENA-SCORING.md). It is a format example, not a required hand-authored setup path.
+[`../examples/project/.arena/`](../examples/project/.arena/) illustrates a coordinator that delegates to an implementer, a cross-provider review team downstream of the implementer with a structured verdict, a review gate that loops `ChangesRequested` back to the implementer at most twice, and an on-call specialist for unresolved consensus. It scores S+ on the [score sheet](ARENA-SCORING.md). `parallel-fixes.arena.json` beside it shows a fan-out node: a planner splits the coordinator's task into at most four items, one fixer copy works on each in its own worktree after approval, and a reviewer receives every proposal together. It is a format example, not a required hand-authored setup path.
 
 ## Compatibility rules
 
@@ -231,6 +257,7 @@ The placeholder model ID is intentional: Arena must use the model the local back
 - Teams have at least two distinct path-agent members at one shared level, exactly one member facilitator, and a configured verdict contract; an agent belongs to at most one team. Team members cannot be the head or relationship endpoints.
 - On-call entries reference on-call agents exactly once, include at least one valid trigger, and enforce the per-run invocation cap. On-call agents cannot be the head, team members, or relationship endpoints.
 - A delegation edge may target a team ID. Communication edges may target only path-agent IDs. Internal team deliberation does not require normal graph edges.
+- Fan-outs have distinct planner and worker path agents at one shared level, neither in a team or another fan-out, and `maxChildren` within `limits.maxFanOutChildrenPerRun`. A fan-out ID is at most 55 characters, and no other ID may take the shape `<fanOutId>.<n>` that its children use. An `agent.failed` trigger cannot name a fan-out worker, because the worker only runs as children.
 
 ## Per-arena background shader
 

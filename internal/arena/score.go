@@ -10,7 +10,7 @@ import (
 // RubricVersion identifies the score sheet in docs/ARENA-SCORING.md. A score
 // is a pure function of the workflow and its profiles, so the sender and the
 // receiver of a share code see the same grade.
-const RubricVersion = 2
+const RubricVersion = 3
 
 // Finding is one deduction with a stable check ID from the score sheet.
 type Finding struct {
@@ -127,13 +127,14 @@ type arenaGraph struct {
 	w        Workflow
 	profiles map[string]Profile
 	agents   map[string]Agent
-	members  map[string]string // team member -> team
+	members  map[string]string // team member, fan-out planner or worker -> its node
 	teams    map[string]Team
+	fanOuts  map[string]FanOut
 	edges    map[string][]string
 	parents  map[string][]string
 	path     []string // standalone path agents in workflow order
-	writers  []string // path agents with write, and teams with a writing member
-	gates    []string // review agents and review teams
+	writers  []string // path agents with write, teams with a writing member, fan-outs with a writing worker
+	gates    []string // review agents, review teams and fan-outs of reviewers
 }
 
 func has(p Profile, capability string) bool { return Has(p.Capabilities, capability) }
@@ -209,7 +210,7 @@ func forwardEdges(w Workflow) map[string][]string {
 }
 
 func analyzeArena(w Workflow, profiles map[string]Profile) arenaGraph {
-	g := arenaGraph{w: w, profiles: profiles, agents: map[string]Agent{}, members: map[string]string{}, teams: map[string]Team{}, edges: forwardEdges(w), parents: map[string][]string{}}
+	g := arenaGraph{w: w, profiles: profiles, agents: map[string]Agent{}, members: map[string]string{}, teams: map[string]Team{}, fanOuts: map[string]FanOut{}, edges: forwardEdges(w), parents: map[string][]string{}}
 	for _, a := range w.Agents {
 		g.agents[a.Id] = a
 	}
@@ -218,6 +219,10 @@ func analyzeArena(w Workflow, profiles map[string]Profile) arenaGraph {
 		for _, id := range t.Members {
 			g.members[id] = t.Id
 		}
+	}
+	for _, f := range w.FanOuts {
+		g.fanOuts[f.Id] = f
+		g.members[f.Planner], g.members[f.Worker] = f.Id, f.Id
 	}
 	for from, targets := range g.edges {
 		for _, to := range targets {
@@ -252,6 +257,16 @@ func analyzeArena(w Workflow, profiles map[string]Profile) arenaGraph {
 			}
 		}
 	}
+	// A fan-out is one graph node standing for its worker's children; the
+	// planner runs read-only.
+	for _, f := range w.FanOuts {
+		if p := profiles[f.Worker]; p.Role == "review" || has(p, "review") {
+			g.gates = append(g.gates, f.Id)
+		}
+		if has(profiles[f.Worker], "write") {
+			g.writers = append(g.writers, f.Id)
+		}
+	}
 	return g
 }
 
@@ -266,6 +281,9 @@ func (g arenaGraph) writerRuntimes(id string) map[string]bool {
 		}
 		return keys
 	}
+	if f, ok := g.fanOuts[id]; ok {
+		id = f.Worker
+	}
 	keys[runtimeKey(g.agents[id].Runtime)] = true
 	return keys
 }
@@ -274,6 +292,9 @@ func (g arenaGraph) writerRuntimes(id string) map[string]bool {
 func (g arenaGraph) reviewers(gate string) []string {
 	if t, ok := g.teams[gate]; ok {
 		return t.Members
+	}
+	if f, ok := g.fanOuts[gate]; ok {
+		return []string{f.Worker}
 	}
 	return []string{gate}
 }
@@ -345,12 +366,15 @@ func (g arenaGraph) revisable(id string) bool {
 	return false
 }
 
-// agentCount counts invocations a node stands for: team members, or one agent.
+// agentCount counts invocations a node stands for: team members, a
+// fan-out's planner and up to maxChildren workers, or one agent.
 func (g arenaGraph) agentCount(nodes []string) int {
 	n := 0
 	for _, id := range nodes {
 		if t, ok := g.teams[id]; ok {
 			n += len(t.Members)
+		} else if f, ok := g.fanOuts[id]; ok {
+			n += 1 + f.MaxChildren
 		} else if _, ok := g.agents[id]; ok {
 			n++
 		}
@@ -358,10 +382,19 @@ func (g arenaGraph) agentCount(nodes []string) int {
 	return n
 }
 
+// pathAgents counts the agent instances one pass can start: standalone path
+// agents, team members, and each fan-out's planner plus maxChildren workers.
+func (g arenaGraph) pathAgents() int {
+	n := len(g.path) + len(g.members)
+	for _, f := range g.w.FanOuts {
+		n += f.MaxChildren - 1
+	}
+	return n
+}
+
 // worstCase bounds the agent invocations one run can make.
 func (g arenaGraph) worstCase() int {
-	pathAgents := len(g.path) + len(g.members)
-	n := pathAgents
+	n := g.pathAgents()
 	for _, r := range g.w.DecisionRouters {
 		for _, route := range r.Routes {
 			if LoopRoute(route) && route.MaxIterations != nil {
@@ -567,7 +600,10 @@ func ScoreArena(w Workflow, profiles map[string]Profile) Scorecard {
 	for _, targets := range g.edges {
 		fanout = max(fanout, len(targets))
 	}
-	pathAgents := len(g.path) + len(g.members)
+	for _, f := range w.FanOuts {
+		fanout = max(fanout, f.MaxChildren)
+	}
+	pathAgents := g.pathAgents()
 	if fanout > w.Settings.MaxConcurrentAgents && w.Settings.MaxConcurrentAgents > 1 || w.Settings.MaxConcurrentAgents > pathAgents {
 		add("P4", "", 2, 0, nil, "maxConcurrentAgents %d does not fit a widest fan-out of %d over %d path agents", w.Settings.MaxConcurrentAgents, fanout, pathAgents)
 	}

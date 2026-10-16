@@ -89,3 +89,26 @@ func TestValidationRejectsAmbiguityAndWrongVersions(t *testing.T) {
 		}
 	}
 }
+func TestFanOutResultNeedsProtocolOneThree(t *testing.T) {
+	envelope := func(version string, payload string) []byte {
+		return []byte(`{"protocolVersion":"` + version + `","messageId":"message-1","runId":"run-1","kind":"fanout-result","from":{"agentId":"split","provider":"arena"},"to":{"agentId":"lead","provider":"codex"},"createdAt":"2026-10-16T00:00:00Z","correlationId":"c","attemptId":"a","replyTo":null,"payload":` + payload + `,"providerContext":{"model":"","reasoningEffort":"","options":{}}}`)
+	}
+	payload := `{"format":"arena.fanout-result.v1","fanOutId":"split","summary":"1 of 1 children succeeded.","planned":1,"results":[{"childId":"split.1","item":{"title":"t","instructions":"i"},"status":"succeeded","messageId":"message-2","changeIds":[],"summary":"done"}],"dropped":[]}`
+	if err := ValidateEnvelope(envelope("1.3", payload)); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateEnvelope(envelope("1.2", payload)) == nil {
+		t.Fatal("fanout-result accepted below protocol 1.3")
+	}
+	if err := ValidateEnvelope(envelope("1.10", payload)); err != nil {
+		t.Fatalf("protocol 1.10: %v", err)
+	}
+	for _, bad := range []string{
+		`{"format":"arena.fanout-result.v1","fanOutId":"split","summary":"s","planned":1,"results":[{"childId":"split.1","item":{"title":"t","instructions":"i"},"status":"skipped","messageId":null,"changeIds":[],"summary":""}],"dropped":[]}`,
+		`{"format":"arena.fanout-result.v1","fanOutId":"split","summary":"s","planned":0,"results":[]}`,
+	} {
+		if ValidateEnvelope(envelope("1.3", bad)) == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+}

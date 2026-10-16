@@ -21,6 +21,9 @@ type Run struct {
 	BaseCommit  string             `json:"baseCommit"`
 	Retention   string             `json:"retention"`
 	Simulated   bool               `json:"simulated"`
+	// FanOutChildren are the worker instances fan-out nodes started in this
+	// run. They stay out of Workflow, which remains the validated static graph.
+	FanOutChildren []FanOutChild `json:"fanOutChildren,omitempty"`
 	// Score caches the arena's grade for the live view; it is never persisted.
 	Score *Scorecard `json:"-"`
 }
@@ -70,7 +73,7 @@ func (p *Project) ReadRun(id string) (Run, error) {
 		return r, e
 	}
 	var current Run
-	if err := ReadJSON(filepath.Join(p.RunDir(id), "current-config.json"), &current); err == nil {
+	if err := ReadJSON(filepath.Join(p.RunDir(id), currentConfigFile), &current); err == nil {
 		r = current
 	} else if !os.IsNotExist(err) {
 		return r, err
@@ -304,11 +307,28 @@ func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string,
 	if _, e := p.Append(r.ID, r.Workflow.Id, agent, "decision.requested", map[string]any{"decision": d}); e != nil {
 		return "", e
 	}
+	return p.awaitDecision(ctx, r.ID, d.ID)
+}
+
+// awaitOpenDecision waits on a decision an interrupted supervisor left
+// open, so a resumed run answers that question instead of asking again.
+func (p *Project) awaitOpenDecision(ctx context.Context, r Run, id string) (answer string, err error) {
+	if r.Retention != "full-local" {
+		defer func() {
+			if closeErr := p.closeDecision(r.ID, id); closeErr != nil && err == nil {
+				answer, err = "", closeErr
+			}
+		}()
+	}
+	return p.awaitDecision(ctx, r.ID, id)
+}
+
+func (p *Project) awaitDecision(ctx context.Context, run, id string) (string, error) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var current Decision
-		if e := ReadJSON(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), &current); e != nil {
+		if e := ReadJSON(filepath.Join(p.RunDir(run), "decisions", id+".json"), &current); e != nil {
 			return "", e
 		}
 		if current.Answer != "" {

@@ -29,10 +29,16 @@ type Engine struct {
 	// (absent means its first pass); loops counts revisions per router/target.
 	iterations map[string]int
 	loops      map[string]int
+	// children are the fan-out worker instances registered so far; guarded by mu.
+	children map[string]FanOutChild
 }
 
 func NewEngine(p *Project, r Run, invoker Invoker) *Engine {
-	return &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}}
+	e := &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}, children: map[string]FanOutChild{}}
+	for _, child := range r.FanOutChildren {
+		e.children[child.Agent.Id] = child
+	}
+	return e
 }
 
 // iteration is the 1-based pass a node is on; a loop route starts the next one.
@@ -144,6 +150,11 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 			delete(nodes, id)
 		}
 	}
+	for _, f := range e.Run.Workflow.FanOuts {
+		nodes[f.Id] = "pending"
+		delete(nodes, f.Planner)
+		delete(nodes, f.Worker)
+	}
 	for _, r := range e.Run.Workflow.DecisionRouters {
 		nodes[r.Id] = "pending"
 	}
@@ -214,6 +225,9 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 				if t.Id == id {
 					agents = append(agents, t.Members...)
 				}
+			}
+			if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+				agents = append(agents, append([]string{f.Planner}, e.childIDs(f.Id)...)...)
 			}
 		}
 		for _, id := range body {
@@ -464,6 +478,10 @@ func (e *Engine) executeNode(ctx context.Context, id string, parents []Packet, t
 			return packet, targets, err
 		}
 	}
+	if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+		packet, err := e.fanOut(ctx, f, parents)
+		return packet, targets, err
+	}
 	a, ok := agentByID(e.Run.Workflow, id)
 	if !ok {
 		return nil, nil, fmt.Errorf("missing agent %s", id)
@@ -485,14 +503,17 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 			return nil, err
 		}
 	}
-	profile := e.Run.Profiles[a.Id]
-	if invocation != nil && invocation["mode"] == "team-composition" {
+	profile := e.profileOf(a.Id)
+	if invocation != nil && (invocation["mode"] == "team-composition" || invocation["mode"] == "fanout-planner") {
 		profile.Capabilities = []string{"read"}
 	}
 	write := Has(profile.Capabilities, "write")
 	node := a.Id
 	if invocation != nil && (invocation["mode"] == "team-member" || invocation["mode"] == "team-composition") {
 		node = str(invocation["teamId"])
+	}
+	if invocation != nil && (invocation["mode"] == "fanout-planner" || invocation["mode"] == "fanout-child") {
+		node = str(invocation["fanOutId"])
 	}
 	iteration := e.iteration(node)
 	taskID := iterationTask(a.Id, iteration)
@@ -724,6 +745,10 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		packet["kind"] = "message"
 		packet["payload"] = map[string]any{"text": string(JSON(result)), "position": result}
 	}
+	if invocation != nil && invocation["mode"] == "fanout-planner" { // Arena checks the plan against the cap itself.
+		packet["kind"] = "message"
+		packet["payload"] = map[string]any{"text": string(JSON(result)), "plan": result}
+	}
 	id, err := e.Project.Deliver(e.Run, packet)
 	if err != nil {
 		event, eventErr := e.event(a.Id, "validation.failed", map[string]any{"error": Redact(err.Error())})
@@ -934,7 +959,7 @@ func (e *Engine) onCall(ctx context.Context, id string, trigger Event, manual bo
 	}
 	agent, _ := agentByID(e.Run.Workflow, id)
 	sourceProvider := "arena"
-	if source, ok := agentByID(e.Run.Workflow, sourceID(trigger)); ok {
+	if source, ok := e.agentByID(sourceID(trigger)); ok {
 		sourceProvider = source.Runtime.Provider
 	}
 	contextPacket := NewPacket(e.Run.ID, "message", sourceID(trigger), sourceProvider, id, agent.Runtime.Provider, "", map[string]any{"text": "Configured on-call trigger: " + string(SafeJSON(trigger))}, Runtime{Provider: "arena"})

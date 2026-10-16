@@ -1,8 +1,10 @@
 # Arena scoring
 
-Arena grades every arena against this score sheet (rubric v2). The score is computed by Arena, not by a model, from the workflow and its agent profiles only. Project settings, provider readiness and the background shader do not change it, so the person who shares an arena and the person who pastes it see the same grade.
+Arena grades every arena against this score sheet (rubric v3). The score is computed by Arena, not by a model, from the workflow and its agent profiles only. Project settings, provider readiness and the background shader do not change it, so the person who shares an arena and the person who pastes it see the same grade.
 
 Capabilities count only where the agent's provider adapter can exercise them. These adapter limits are fixed per provider and runtime options in Arena, not probed, so they keep the score a pure function of the arena. Today one applies: Antigravity's headless mode cannot execute commands, so `run_commands` on an Antigravity agent earns nothing (it does not satisfy V5, for example) and costs C6, unless that agent's runtime sets `options.commandApproval: "sandboxed-blanket"` (see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)). With the option the grant counts like any other provider's. Every arena that was valid before the option existed scores the same, so the rubric version is unchanged. `arena workflow validate` and `arena workflow create` print a warning for each such grant, because that agent fails when it starts.
+
+Rubric v3 counts fan-out nodes at their cap: a fan-out stands for its planner plus `maxChildren` worker instances wherever the sheet counts agents. Arenas without a fan-out score exactly as they did under v2.
 
 The grade appears in the setup conversation when a draft validates, in the CLI before `arena workflow create` confirms, in the launcher, at the top of the live view, and in full with `/score` or `arena score ID`.
 
@@ -16,13 +18,14 @@ The grade appears in the setup conversation when a draft validates, in the CLI b
 
 ## Terms
 
-- **Writer:** a path agent whose profile has `write`, or a team with a member that has `write` (the team node carries that member's change).
-- **Review gate:** a path agent with role `review`, or a team with at least one member whose role is `review` or who has the `review` capability. A gate's reviewers are the agent itself, or the team's members.
+- **Writer:** a path agent whose profile has `write`, a team with a member that has `write` (the team node carries that member's change), or a fan-out whose worker has `write` (the fan-out node carries every child's change).
+- **Review gate:** a path agent with role `review`, a team with at least one member whose role is `review` or who has the `review` capability, or a fan-out whose worker has that role or capability. A gate's reviewers are the agent itself, the team's members, or the fan-out's worker.
+- **Path agents:** standalone path agents and team members, plus each fan-out's planner and `maxChildren` worker instances.
 - **Forward edges:** `delegates` relationships, non-loop router routes and `route` fallbacks. These are the edges along which Arena hands a node's result packet to the next node. Loop routes are back edges.
 - **Reviewed:** a review gate is reachable from the writer along forward edges, so the gate receives the writer's change. A reviewer that is the writer's sibling does not receive the change and does not count.
 - **Independent:** at least one of a gate's reviewers differs from the reviewed agent in provider or model.
 - **Revision loop:** a router that consumes `review-result` or `team-result`, downstream of the writer, has a `loop: true` route back to the writer or one of its ancestors.
-- **Worst-case invocations:** path agents and team members, plus each loop's `maxIterations` × the agents in its loop body, plus team members × `maxRounds`, plus every on-call cap.
+- **Worst-case invocations:** path agents (with every fan-out at `maxChildren`), plus each loop's `maxIterations` × the agents in its loop body (a fan-out in the body counts as its planner plus `maxChildren`), plus team members × `maxRounds`, plus every on-call cap. The project's `limits.maxFanOutChildrenPerRun` can stop a run sooner, but it is a project setting and does not change the grade.
 - **Redundant:** same role, same capability set, and a word-overlap (Jaccard) score of at least 0.6 between objective + instructions, after common words are dropped.
 
 ## Categories and checks
@@ -52,7 +55,7 @@ The five categories add up to 100 points. Each finding deducts points from its c
 | P1 | Two redundant agents outside the same team | −6 per pair | moderate |
 | P2 | A relay: a non-head path agent with one parent and one agent child, that neither writes nor verifies, and whose capabilities the child already has | −5 each | moderate |
 | P3 | Deepest level above 3 (more than four tiers) | −3 per extra level | moderate |
-| P4 | `maxConcurrentAgents` above the number of path agents, or above 1 but below the widest fan-out (a single slot is R3) | −2 | minor |
+| P4 | `maxConcurrentAgents` above the number of path agents, or above 1 but below the widest fan-out: the most forward edges out of one node, or the largest fan-out `maxChildren` (a single slot is R3) | −2 | minor |
 | P5 | A team with more than 3 members, or more than 3 deliberation rounds | −2 each | minor |
 | P6 | A router with no loop route whose branches all lead to one place (one route and a `stop` fallback, or every route to the same node) | −3 each | moderate |
 | P7 | An on-call agent redundant with a path agent, or an on-call cap above 3 | −2 each | minor |
@@ -92,7 +95,7 @@ The five categories add up to 100 points. Each finding deducts points from its c
 |---|---|---|---|
 | R1 | Three or more agents, all on one provider: one outage stops the arena | −2 | minor |
 | R2 | Writers exist and an on-call rule has no event trigger, only `manual` | −1 each | minor |
-| R3 | A node fans out to parallel branches but `maxConcurrentAgents` is 1 | −1 | minor |
+| R3 | A node fans out to parallel branches, or a fan-out allows more than one child, but `maxConcurrentAgents` is 1 | −1 | minor |
 | R4 | Worst-case invocations above 60 | −4 | moderate |
 
 ## Grades
