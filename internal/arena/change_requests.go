@@ -27,11 +27,13 @@ func (p *Project) requireLiveRun(run string) (Run, error) {
 	if e := validID(run); e != nil {
 		return Run{}, e
 	}
+	// An imported run lives only under .state/imported/RUN (audit import), never
+	// as a live run directory.
+	if _, e := os.Stat(p.Path(".state", "imported", run)); e == nil {
+		return Run{}, fmt.Errorf("run %s was imported from an audit bundle; its changes were made elsewhere and cannot be integrated or rolled back here", run)
+	}
 	if _, e := os.Stat(p.RunDir(run)); e != nil {
 		return Run{}, fmt.Errorf("run %s has no history here; it may have been retired", run)
-	}
-	if _, e := os.Stat(filepath.Join(p.RunDir(run), "imported.json")); e == nil {
-		return Run{}, fmt.Errorf("run %s was imported from an audit bundle; its changes were made elsewhere and cannot be integrated or rolled back here", run)
 	}
 	return p.ReadRun(run)
 }

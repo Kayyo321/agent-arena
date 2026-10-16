@@ -349,7 +349,11 @@ func TestControlRequestsRefuseRetiredRuns(t *testing.T) {
 func TestControlRequestsRefuseImportedRuns(t *testing.T) {
 	p, r, c := requestFixture(t)
 	change := proposedChange(t, p, r, "one", "one.txt", "one\n")
-	if e := os.WriteFile(filepath.Join(p.RunDir(r.ID), "imported.json"), []byte("{}"), 0600); e != nil {
+	// Audit import keeps a run only under .state/imported/RUN.
+	if e := os.MkdirAll(p.Path(".state", "imported"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.Rename(p.RunDir(r.ID), p.Path(".state", "imported", r.ID)); e != nil {
 		t.Fatal(e)
 	}
 	mustFail(t, c, "arena_integrate", r.ID, change.ID, "imported")
