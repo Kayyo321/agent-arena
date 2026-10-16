@@ -18,7 +18,7 @@ type object = map[string]any
 var out bytes.Buffer
 var funcs []string
 var models = map[string]string{}
-var roots = map[string]string{"workflow": "Workflow", "project-settings": "ProjectSettings", "agent": "Profile", "message-envelope": "Envelope", "context-entry": "ContextEntry"}
+var roots = map[string]string{"workflow": "Workflow", "project-settings": "ProjectSettings", "agent": "Profile", "message-envelope": "Envelope", "context-entry": "ContextEntry", "share-bundle": "ShareBundle"}
 
 func main() {
 	base := "."

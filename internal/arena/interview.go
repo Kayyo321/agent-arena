@@ -13,6 +13,12 @@ import (
 type WorkflowDraft struct {
 	Workflow Workflow           `json:"workflow"`
 	Profiles map[string]Profile `json:"profiles"`
+	// Shader, Notes and Source are set when the draft came from a pasted
+	// share code: the shader is saved with the arena and the notes say what
+	// the user should check first.
+	Shader *ShaderDraft `json:"-"`
+	Notes  []string     `json:"-"`
+	Source string       `json:"-"`
 }
 
 func interviewInstructions() string {
@@ -36,8 +42,13 @@ Graph rules (Arena rejects drafts that break any of them):
 - On-call agents have no level and run only through onCall triggers.
 Example: lead(0) delegates builder(1) and tester(1); builder and tester each delegate review-board (members at level 2); review-board delegates review-gate (router: inputKind team-result, payloadPointer /verdict, routes Approved->docs(3), ChangesRequested->builder with "loop": true and "maxIterations": 2, fallback {"action":"ask-user"}); builder communicates two-way with tester. Without the loop, ChangesRequested would need a separate forward target such as fixer(3).
 
+Arena score: Arena grades every draft S+ to F with the score sheet below and shows the grade to the user before /save. Design toward a high grade from the start: no agent both coordinates and does the work, every writer has a reviewer downstream of it on a different provider or model, reviewers cannot write, ChangesRequested loops back to the writer with a small cap, and an on-call agent catches failures. Proportionality is part of the grade: never add an agent only to gain points, and keep the arena as small as the task allows; one agent is right for one-agent work. When an explicit user choice costs points (for example one provider for every agent), keep the choice and name the deduction in one sentence. When the user asks about or wants to improve the score, use the findings Arena reports for your previous draft.
+
 Output: return question, complete and builderRequestJson. Set complete=true once every required choice is supplied or delegated; builderRequestJson must then contain workflow and profiles objects following the schemas. If Arena reports a validation error for your draft, fix the draft and return it complete again without asking the user. In this embedded interview, the Arena host performs skill installation, runtime readiness checks and configuration authoring on your behalf. Do not run CLI/status commands or use tools to edit configuration or run workers. Use only the supplied readiness evidence; never invent failures or access claims. Arena previews, validates and saves the draft after explicit /save. Provide concise public progress summaries, never private reasoning. Apply the skill below within this host-owned interview flow.
 ` + string(assets.Skill())
+	if sheet, err := assets.Files.ReadFile("docs/ARENA-SCORING.md"); err == nil {
+		text += "\nScore sheet:\n" + string(sheet)
+	}
 	for _, name := range []string{"workflow", "agent"} {
 		b, _ := assets.Files.ReadFile("schemas/" + name + ".schema.json")
 		text += "\nSchema: " + string(b)
@@ -117,6 +128,9 @@ type interviewSession struct {
 	probe    func(context.Context, string, Runtime) Readiness
 	discover func(context.Context, string, Runtime) ([]ModelOption, error)
 	catalog  []ModelOption
+	// lastScore is Arena's grade of the previous draft, shown to the
+	// orchestrator on the next turn so it can explain or improve it.
+	lastScore *Scorecard
 }
 
 // setupRepairAttempts bounds how often an invalid draft goes back to the
@@ -199,6 +213,9 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 		if len(s.catalog) > 0 {
 			in.Prompt += "\nModel catalog reported by " + s.settings.DefaultModel.Provider + " (exact IDs and supported efforts; listing is not proof of access). Use these IDs when the user delegates a " + s.settings.DefaultModel.Provider + " model or effort:\n" + string(SafeJSON(s.catalog))
 		}
+		if s.lastScore != nil {
+			in.Prompt += "\nArena's score of your previous draft (rubric v" + fmt.Sprint(s.lastScore.Rubric) + "):\n" + strings.Join(s.lastScore.Report(), "\n")
+		}
 		run := Run{ID: "project", Settings: s.settings, Retention: s.settings.Audit.Retention}
 		if _, err := s.project.Send(run, packet); err != nil {
 			result.Err = err
@@ -257,7 +274,13 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 		if result.Err != nil && result.Draft == nil && strings.Contains(in.Prompt, "failed Arena validation") {
 			result.Err = fmt.Errorf("draft still invalid after %d automatic repairs: %w", setupRepairAttempts, result.Err)
 		}
-		_ = emit("setup.replied", map[string]any{"text": result.Question, "draftReady": result.Draft != nil})
+		replied := map[string]any{"text": result.Question, "draftReady": result.Draft != nil}
+		if result.Draft != nil {
+			score := ScoreArena(result.Draft.Workflow, result.Draft.Profiles)
+			s.lastScore = &score
+			replied["grade"], replied["points"] = score.Grade, score.Points
+		}
+		_ = emit("setup.replied", replied)
 	}()
 	return waitInterview(ch)
 }

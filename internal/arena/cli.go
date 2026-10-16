@@ -37,7 +37,7 @@ func (o Options) Bool(k string) bool { return o.Get(k) == "true" }
 func parseArgs(args []string) ([]string, Options, error) {
 	o := Options{}
 	pos := []string{}
-	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted"}
+	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -156,6 +156,10 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		return cli.workflow(ctx, p, pos[1:], o)
 	case "shader":
 		return cli.shader(ctx, p, pos[1:], o)
+	case "score":
+		return cli.score(p, pos[1:], o)
+	case "share":
+		return cli.share(ctx, p, pos[1:], o)
 	case "settings":
 		return cli.settings(p, pos[1:], o)
 	case "status", "auth":
@@ -446,6 +450,7 @@ func (cli *CLI) workflow(ctx context.Context, p *Project, args []string, o Optio
 			return e
 		}
 		fmt.Fprintln(cli.Out, GraphSummary(w))
+		fmt.Fprintln(cli.Out, ScoreArena(w, profiles).Summary())
 		if o.Bool("dry-run") {
 			return nil
 		}
@@ -923,6 +928,9 @@ arena workflow list|show|validate|delete [ID]
 arena shader show|validate|preview|default|off ID
 arena shader set ID --input FILE [--glyphs RAMP] [--yes]
 arena shader create ID "description" [--yes] [--dry-run]
+arena score ID [--json]           Grade an arena S+ to F (docs/ARENA-SCORING.md)
+arena share export ID [--shader] [--copy]
+arena share import [CODE|-] [--clipboard] [--as ID] [--into ID] [--dry-run] [--yes]
 arena settings show|edit [--set /pointer=JSON-value] [--yes]
 arena status [--workflow ID] [--json]
 arena auth status

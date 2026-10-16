@@ -18,6 +18,9 @@ func (cli *CLI) bootstrap(ctx context.Context, p *Project, s Settings) error {
 	// API/local hosts use the same embedded skill and submit a builder request to
 	// Arena's authoring command. Models never write generated configuration files.
 	transcript := "Use the arena-orchestrator skill below to interview the user. Ask one concise question for missing choices. Do not invent providers, model IDs, effort, roles, edges, teams, router matches, or triggers. Once the user has supplied everything, return a builder request JSON with workflow and profiles following the embedded schemas. Set complete=true only then.\n" + string(assets.Skill())
+	if sheet, err := assets.Files.ReadFile("docs/ARENA-SCORING.md"); err == nil {
+		transcript += "\nArena grades the arena with this score sheet; design toward a high grade without adding agents only for points:\n" + string(sheet)
+	}
 	for _, name := range []string{"workflow", "agent"} {
 		b, err := assets.Files.ReadFile("schemas/" + name + ".schema.json")
 		if err != nil {

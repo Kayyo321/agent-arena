@@ -10,7 +10,9 @@ Setup asks for missing runtime choices and opens the configured default
 orchestrator's interview inside Arena. Codex runs as a background app-server;
 its native terminal interface is never launched. Type answers in Arena, review
 the proposed graph, and use `/save` to apply it and open the graph in the same TUI.
-`arena --workflow ID` selects one directly. Discovery uses the resolved project root
+The chooser shows each arena's grade; `c` copies the selected arena as a share
+code, `C` copies only its shader, and `p` (or pasting a code) previews an arena
+code for import, saved with Enter. `arena --workflow ID` selects one directly. Discovery uses the resolved project root
 and never inherits workflows across a nested Git project boundary.
 
 The initial graph is idle: it has no run ID or invented history. Required-provider
@@ -212,6 +214,31 @@ shows a diagnostic and disables the background, leaving the graph usable.
 source; `/shader-save` applies it, `/shader-off` disables it, and `/refresh` reloads
 external CLI changes. See [the shader contract](BACKGROUND-SHADERS.md).
 
+## Arena score
+
+The identity column of the status band shows the arena's grade beside its name,
+from S+ down to F, and the compact one-row header keeps it after the name. While
+the setup conversation has a draft, the band and the draft message show the
+draft's grade and its costliest deductions. `/score` opens the breakdown for the
+draft or the open arena: points per category, each finding with its fix, the
+ceilings that capped the grade, and what the next tier needs. The score is
+computed by Arena from the workflow and profiles; see
+[Arena scoring](ARENA-SCORING.md).
+
+## Sharing arenas and shaders
+
+`/copy` copies the open arena as a one-line share code and `/copy-shader` copies
+only its shader. Arena writes the code with `pbcopy` on macOS or `wl-copy`,
+`xclip` or `xsel` on Linux, and also sends it to the terminal clipboard with OSC
+52 so copying works over SSH. Pasting a share code anywhere in the composer,
+through the terminal's paste or Ctrl+V, never inserts it as text:
+- an arena code opens an import draft in the orchestrator chat with its graph,
+  grade, trust notes (who writes, who runs commands, auto-if-clean) and the
+  readiness of each runtime; `/save` imports it, and typing asks the
+  orchestrator to revise it first;
+- a shader code opens the shader preview for the open arena, and `/shader-save`
+  applies it.
+
 ## Attachments and clipboard
 
 `/attach PATH [PATH ...]` snapshots images and other regular files for the next
@@ -228,7 +255,8 @@ including TIFF-to-PNG conversion for screenshots; Linux uses `wl-paste` on Wayla
 or `xclip` on X11. Clipboard reading is asynchronous, bounded and cancellable.
 Cmd+V is owned by the terminal; terminals that only forward text cannot forward
 clipboard image bytes, so use Ctrl+V or `/paste` for images. Clipboard failures
-leave the existing draft intact. Arena does not write to the user's clipboard.
+leave the existing draft intact. Arena writes to the clipboard only for `/copy`,
+`/copy-shader` and the chooser's copy keys.
 
 Limits are eight files, 10 MiB per file and 32 MiB total (also the cumulative
 attachment limit for an orchestrator chat). PNG, JPEG, GIF and WebP are delivered

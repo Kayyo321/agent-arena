@@ -133,6 +133,7 @@ func (m LiveModel) agentDiffs() map[string]diffStat {
 // run state, worktree records and the journal.
 type bandSummary struct {
 	name, status, elapsed string
+	grade                 string // arena grade, or the draft's during setup
 	running, queued       []string
 	done, failed, total   int
 	decisions, inflight   int
@@ -149,6 +150,12 @@ func (m LiveModel) bandSummary() bandSummary {
 	s := bandSummary{name: m.Run.Workflow.Id, status: m.State.Status, trees: len(m.Trees), decisions: len(m.Decisions), base: m.Run.BaseCommit[:min(7, len(m.Run.BaseCommit))]}
 	if s.name == "" {
 		s.name = "arena"
+	}
+	switch {
+	case m.Draft != nil && m.DraftScore != nil:
+		s.name, s.grade = m.Draft.Workflow.Id+" (draft)", m.DraftScore.Grade
+	case m.Run.Workflow.Id != "":
+		s.grade = m.Run.scorecard().Grade
 	}
 	if s.status == "" || m.Run.ID == "" {
 		s.status = "idle"
@@ -350,6 +357,9 @@ func (m LiveModel) header(width, height int, color bool) []string {
 			b.add("  ", "")
 		}
 		b.add(s.name, sgrStrong).add("  ", "")
+		if s.grade != "" {
+			b.add(s.grade, gradeSGR(s.grade)).add("  ", "")
+		}
 		vitals(&b)
 		b.add("   ", "")
 		activity(&b, width/2)
@@ -382,6 +392,9 @@ func (m LiveModel) header(width, height int, color bool) []string {
 	}
 	identity := newColumn("", 24)
 	identity.rows[0].add(s.name, sgrStrong)
+	if s.grade != "" {
+		identity.rows[0].add("  ", "").add(s.grade, gradeSGR(s.grade)).add(" score", sgrLabel)
+	}
 	vitals(&identity.rows[1])
 	progress(&identity.rows[2], 26)
 

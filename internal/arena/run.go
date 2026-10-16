@@ -21,7 +21,18 @@ type Run struct {
 	BaseCommit  string             `json:"baseCommit"`
 	Retention   string             `json:"retention"`
 	Simulated   bool               `json:"simulated"`
+	// Score caches the arena's grade for the live view; it is never persisted.
+	Score *Scorecard `json:"-"`
 }
+
+// scorecard returns the cached grade, scoring the workflow when needed.
+func (r Run) scorecard() Scorecard {
+	if r.Score != nil {
+		return *r.Score
+	}
+	return ScoreArena(r.Workflow, r.Profiles)
+}
+
 type RunState struct {
 	Status    string                    `json:"status"`
 	Agents    map[string]string         `json:"agents"`

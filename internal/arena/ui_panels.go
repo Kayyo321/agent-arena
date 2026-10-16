@@ -216,7 +216,13 @@ func (m LiveModel) chatBody(width int, color bool) []string {
 	lines = append(lines, m.chatTranscript(width, color)...)
 	if m.Draft != nil {
 		lines = append(lines, chatRule("Workflow preview", width, color))
-		lines = append(lines, plainUILines([]string{GraphSummary(m.Draft.Workflow), "Review runtimes and policy above. /save applies this draft; typing revises it."}, width)...)
+		preview := []string{GraphSummary(m.Draft.Workflow)}
+		if m.DraftScore != nil {
+			preview = append(preview, m.DraftScore.Summary())
+		}
+		preview = append(preview, m.Draft.Notes...)
+		preview = append(preview, "Review runtimes and policy above. /save applies this draft; typing revises it.")
+		lines = append(lines, plainUILines(preview, width)...)
 	}
 	if m.ChatBusy {
 		lines = append(lines, short(m.spinner(color)+" Working · /view arena-orchestrator for activity", width+20))

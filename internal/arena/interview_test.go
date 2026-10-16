@@ -76,7 +76,7 @@ func TestArenaInterviewQuestionsPreviewAndExplicitSave(t *testing.T) {
 		w := NewWorkflow("from-chat", "From chat")
 		w.HeadAgent = "head"
 		w.Agents = []Agent{{Id: "head", Level: Int(0), Profile: ".agents/from-chat/head.agent.json", Runtime: in.Runtime}}
-		draft := WorkflowDraft{w, map[string]Profile{"head": NewProfile("head", "research", "Inspect the project", "Use evidence", []string{"read"})}}
+		draft := WorkflowDraft{Workflow: w, Profiles: map[string]Profile{"head": NewProfile("head", "research", "Inspect the project", "Use evidence", []string{"read"})}}
 		return map[string]any{"question": "Review the proposed read-only workflow.", "complete": true, "builderRequestJson": string(JSON(draft))}, nil
 	})
 	next, cmd := m.submit("Build a project")
@@ -272,7 +272,7 @@ func TestInvalidDraftIsRepairedByOrchestratorBeforeUserSeesIt(t *testing.T) {
 			w.Relationships = []Relationship{{Type: "delegates", From: "head", To: "worker"}}
 		}
 		profiles := map[string]Profile{"head": NewProfile("head", "lead", "Plan", "Use evidence", []string{"read"}), "worker": NewProfile("worker", "builder", "Build", "Use evidence", []string{"read"})}
-		return map[string]any{"question": "Draft ready.", "complete": true, "builderRequestJson": string(JSON(WorkflowDraft{w, profiles}))}, nil
+		return map[string]any{"question": "Draft ready.", "complete": true, "builderRequestJson": string(JSON(WorkflowDraft{Workflow: w, Profiles: profiles}))}, nil
 	})
 	next, cmd := m.submit("Build it; you pick everything")
 	m = pumpInterview(t, next.(LiveModel), cmd, "")

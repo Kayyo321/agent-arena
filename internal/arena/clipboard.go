@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -171,4 +172,53 @@ func (m LiveModel) pasteClipboard() tea.Cmd {
 		return m.Session.action(operation)
 	}
 	return operation
+}
+
+// readClipboardText reads text from the system clipboard.
+func readClipboardText(ctx context.Context) clipboardResult {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result := readClipboard(bounded, runtime.GOOS, runClipboardCommand)
+	if result.Err == nil && result.Attachment != nil {
+		result = clipboardResult{Err: fmt.Errorf("clipboard holds an image, not a share code")}
+	}
+	return result
+}
+
+type clipboardInput func(ctx context.Context, input []byte, name string, args ...string) error
+
+func runClipboardInput(ctx context.Context, input []byte, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	// wl-copy and xclip keep serving the selection from a forked child, so
+	// leave stdout unattached and wait only for the parent.
+	cmd.Stdin = bytes.NewReader(input)
+	return cmd.Run()
+}
+
+// copyClipboard writes text with the platform's clipboard tool and names the
+// tool that took it. Never runs a shell.
+func copyClipboard(ctx context.Context, platform, text string, run clipboardInput) (string, error) {
+	writers := map[string][][]string{
+		"darwin": {{"pbcopy"}},
+		"linux":  {{"wl-copy"}, {"xclip", "-selection", "clipboard", "-i"}, {"xsel", "--clipboard", "--input"}},
+	}[platform]
+	if len(writers) == 0 {
+		return "", fmt.Errorf("clipboard copy is supported on macOS and Linux")
+	}
+	var last error
+	for _, w := range writers {
+		if last = run(ctx, []byte(text), w[0], w[1:]...); last == nil {
+			return w[0], nil
+		}
+	}
+	if platform == "linux" {
+		return "", fmt.Errorf("no clipboard tool worked; install wl-clipboard (Wayland) or xclip (X11): %w", last)
+	}
+	return "", last
+}
+
+func writeClipboard(ctx context.Context, text string) (string, error) {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return copyClipboard(bounded, runtime.GOOS, text, runClipboardInput)
 }

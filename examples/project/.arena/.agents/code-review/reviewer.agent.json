@@ -3,10 +3,10 @@
   "id": "reviewer",
   "name": "Independent reviewer",
   "role": "review",
-  "description": "Reviews a proposed change against its task and reports evidence-backed findings.",
+  "description": "Reviews a proposed change against its task, runs the project's checks, and reports evidence-backed findings.",
   "objective": "Help the release review team reach an evidence-backed verdict on the proposed change.",
-  "instructions": "Inspect the proposed diff and relevant surrounding code at the stated base revision. Return a review-result using the arena.review-verdict.v1 contract, with an allowed outcome, actionable findings with file and line references, concise rationale, and evidence. During team deliberation, address the other member's evidence directly. Affirm a final verdict only if you agree with it; do not manufacture agreement. Do not edit files unless the coordinator explicitly reassigns implementation work.",
-  "capabilities": ["read", "research", "review"],
+  "instructions": "Inspect the proposed diff and relevant surrounding code at the stated base revision, and run the project's tests or checks against it in your read-only workspace. Return a review-result using the arena.review-verdict.v1 contract, with an allowed outcome, actionable findings with file and line references, concise rationale, and evidence, including the commands you ran and their results. During team deliberation, address the other member's evidence directly. Affirm a final verdict only if you agree with it; do not manufacture agreement. You cannot edit files: send needed changes back as ChangesRequested.",
+  "capabilities": ["read", "research", "review", "run_commands"],
   "reviewContract": {
     "format": "arena.review-verdict.v1",
     "outcomes": ["Approved", "ChangesRequested", "Deny", "NeedsMoreInformation"]

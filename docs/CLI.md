@@ -76,6 +76,31 @@ The exact same validation, preview, transaction, and conflict checks apply.
 `--dry-run` previews without saving. This is an optional programmatic input, not a
 manual setup prerequisite.
 
+Every preview ends with the arena's grade (S+ to F) and its costliest deductions.
+`arena score ID [--json]` prints the full breakdown: points per category, the
+findings with fixes, any ceiling that capped the grade, and what the next tier
+needs. The score sheet is [docs/ARENA-SCORING.md](ARENA-SCORING.md).
+
+### Sharing arenas and shaders
+
+```sh
+arena share export development --copy           # whole arena: arena1.a.…
+arena share export development --shader --copy  # shader only: arena1.s.…
+arena share import 'arena1.a.…'                 # or - for stdin, or --clipboard
+arena share import --clipboard --as review-copy --dry-run
+arena share import 'arena1.s.…' --into development
+```
+
+A share code is a single line holding the workflow, its profiles and its
+background shader (or only the shader). Export refuses secret-like values.
+Import validates the code, picks a free ID (`--as ID`, or the author's ID with a
+`-2`, `-3` … suffix), prints the graph, score, who writes or runs commands,
+the integration policy, and readiness for each of the author's runtimes, then
+saves through the normal transaction after confirmation. A shader code goes
+through `arena shader set` for the `--into` arena. Shared context, run history
+and project settings are never part of a code. The format is described in
+[Configuration format](CONFIGURATION.md#share-codes).
+
 `settings edit --set /pointer=JSON-value` is repeatable and validates every workflow
 against the proposed settings. Runtime IDs/options retain provider-specific meaning.
 

@@ -136,7 +136,7 @@ The placeholder model ID is intentional: Arena must use the model the local back
 
 ## Example fixture
 
-[`../examples/project/.arena/`](../examples/project/.arena/) illustrates an implementer, a cross-provider review team with a structured verdict, and an on-call specialist for unresolved consensus. It is a format example, not a required hand-authored setup path.
+[`../examples/project/.arena/`](../examples/project/.arena/) illustrates a coordinator that delegates to an implementer, a cross-provider review team downstream of the implementer with a structured verdict, a review gate that loops `ChangesRequested` back to the implementer at most twice, and an on-call specialist for unresolved consensus. It scores S+ on the [score sheet](ARENA-SCORING.md). It is a format example, not a required hand-authored setup path.
 
 ## Compatibility rules
 
@@ -161,3 +161,30 @@ without this optional setting get the embedded default. `arena shader create ID
 it without hand-editing JSON. Source and settings have recoverable transactions,
 and concurrent source changes invalidate an outstanding edit. See
 [Background Shader Creation](BACKGROUND-SHADERS.md) for commands and HLSL limits.
+
+## Share codes
+
+A share code carries an arena or its shader as one line of text:
+
+```text
+arena1.<kind>.<check>.<payload>
+```
+
+- `kind` is `a` for an arena or `s` for a shader.
+- `payload` is base64url without padding of raw DEFLATE over compact JSON
+  following [share-bundle.schema.json](../schemas/share-bundle.schema.json):
+  `{"format": "arena.share.v1", "kind", "rubric", "workflow", "profiles", "shader"}`
+  for an arena, `{"format", "kind": "shader", "from", "shader"}` for a shader.
+  `shader` is `{source, glyphs}`, or `null` when the arena has none.
+- `check` is the first 8 hex digits of SHA-256 over `payload`. A truncated or
+  edited code is rejected before decoding. Whitespace inside a code is ignored,
+  so line-wrapped codes and codes inside a chat message still paste.
+
+Codes are capped at 512 KiB and 1 MiB once inflated. The workflow and each
+profile are validated against their schemas, runtimes are refused if their
+options look secret, the profile set must match the agents exactly, and the
+shader must compile. On import the graph is validated against this project's
+settings and limits, the arena is renamed when its ID or shader file is taken
+(rewriting every profile path and the shader source), and it is saved through a
+recoverable configuration transaction. Codes never contain shared context, run
+history, audit data, project settings or the orchestrator profile.

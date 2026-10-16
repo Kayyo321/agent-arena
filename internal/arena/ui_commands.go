@@ -15,8 +15,11 @@ var slashHelp = []string{
 	"Attachments retain exact file snapshots in full-local history. Images require Codex.",
 	"/shader DESCRIPTION         Create a background shader with the default model",
 	"/shader-save /shader-off    Apply the preview or disable the background",
+	"/copy /copy-shader          Copy this arena (or only its shader) as a share code",
+	"Paste a share code (Ctrl+V or your terminal's paste) to preview and import it.",
 	"/help                       Commands and keyboard controls",
 	"/agents                     Agents, roles and selected runtimes",
+	"/score                      Arena grade (S+ to F) and what costs points",
 	"/view NAME                  Live agent activity mini-window",
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
@@ -45,7 +48,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -109,6 +112,16 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "attach", "attachments", "detach":
 			m.attachmentCommand(name, arg)
+		case "copy", "copy-shader":
+			if arg != "" {
+				m.Error = "usage: /" + name
+				break
+			}
+			kind := "arena"
+			if name == "copy-shader" {
+				kind = "shader"
+			}
+			return m.copyShare(kind)
 		case "shader", "shader-save", "shader-off":
 			if name == "shader" && len(m.Attachments) > 0 {
 				m.Error = "Shader commands accept text only; detach the files or send them as a workflow/chat message"
@@ -119,6 +132,15 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "help":
 			m.Panel, m.PanelText = "Help", slashHelp
+		case "score":
+			switch {
+			case m.Draft != nil && m.DraftScore != nil:
+				m.Panel, m.PanelText = "Arena score · draft "+m.Draft.Workflow.Id, m.DraftScore.Report()
+			case m.Run.Workflow.Id != "":
+				m.Panel, m.PanelText = "Arena score · "+m.Run.Workflow.Id, m.Run.scorecard().Report()
+			default:
+				m.Error = "No arena or draft to score yet"
+			}
 		case "agents":
 			m.Panel, m.PanelText = "Agents", []string{"arena-orchestrator | permanent project control | " + m.Run.Settings.DefaultModel.Provider + " / " + m.Run.Settings.DefaultModel.Model}
 			for _, a := range m.Run.Workflow.Agents {
@@ -197,18 +219,22 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				m.Error = "No validated draft to save; finish the setup interview first"
 				break
 			}
-			if m.Run.Settings.ApprovalPolicies.AgentWorkflowEdit == "auto-refuse" {
+			if m.Draft.Source != "share-import" && m.Run.Settings.ApprovalPolicies.AgentWorkflowEdit == "auto-refuse" {
 				m.Error = "project workflow-edit policy refuses agent proposals"
 				break
 			}
 			draft := *m.Draft
 			m.ChatBusy = true
 			operation := func() tea.Msg {
-				_, err := m.Project.Save(draft.Workflow, draft.Profiles, "")
+				_, err := m.Project.SaveDraft(draft)
 				if err != nil {
 					return draftSaved{Err: err}
 				}
-				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": "tui-setup", "approvedBy": "user"})
+				source := draft.Source
+				if source == "" {
+					source = "tui-setup"
+				}
+				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": source, "approvedBy": "user"})
 				if err != nil {
 					return draftSaved{Err: fmt.Errorf("workflow saved, audit failed: %w", err)}
 				}

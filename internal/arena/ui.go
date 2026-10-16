@@ -76,6 +76,8 @@ type LiveModel struct {
 	Chat               []chatLine
 	Transcript         string
 	Draft              *WorkflowDraft
+	DraftScore         *Scorecard
+	PastedShader       *ShaderDraft // a pasted arena's shader, kept across revisions
 	ControlEvents      []Event
 	Panel              string
 	PanelText          []string
@@ -126,6 +128,8 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.Attachments = items
 			}
+		} else if next, cmd, ok := m.pasteShare(v.Text); ok {
+			return next, cmd
 		} else if v.Text != "" {
 			m.insertPrompt(v.Text)
 		} else {
@@ -287,13 +291,26 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Chat = append(m.Chat, chatLine{"Arena", "Request failed: " + Redact(m.Error) + ". You can retry your message."})
 				return m, nil
 			}
-			m.Draft = v.Result.Draft
+			m.Draft, m.DraftScore = v.Result.Draft, nil
+			if m.Draft != nil && m.PastedShader != nil {
+				d := *m.Draft
+				d.Shader, d.Source = m.PastedShader, "share-import"
+				if d.Workflow.Settings.BackgroundShader == nil {
+					d.Workflow.Settings.BackgroundShader = defaultShader(d.Workflow.Id)
+				}
+				d.Workflow.Settings.BackgroundShader.Glyphs = m.PastedShader.Glyphs
+				m.Draft = &d
+			}
+			if m.Draft != nil {
+				score := ScoreArena(m.Draft.Workflow, m.Draft.Profiles)
+				m.DraftScore = &score
+			}
 			if v.Result.Question != "" {
 				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", Redact(v.Result.Question)})
 				m.Transcript += "\nAssistant: " + Redact(v.Result.Question)
 			}
 			if m.Draft != nil {
-				m.Chat = append(m.Chat, chatLine{"Arena", "Draft ready. Review the graph below, then /save to create it. Continue typing to revise."})
+				m.Chat = append(m.Chat, chatLine{"Arena", "Draft ready · " + m.DraftScore.Summary() + ". /score for the breakdown. Review the graph below, then /save to create it. Continue typing to revise."})
 			}
 			m.Offset = 1 << 30
 		}
@@ -303,7 +320,7 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Error = v.Err.Error()
 			return m, nil
 		}
-		m.Run, m.Draft, m.ChatMode = v.Run, nil, false
+		m.Run, m.Draft, m.DraftScore, m.PastedShader, m.ChatMode = v.Run, nil, nil, nil, false
 		saved := "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."
 		switch {
 		case v.CommitErr != nil:
@@ -375,8 +392,13 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.MouseWheelDown:
 			m.scrollBy(3)
 		}
+	case shareCopied, shareImported:
+		return m.updateShare(msg)
 	case tea.PasteMsg:
 		m.noteShaderInput()
+		if next, cmd, ok := m.pasteShare(v.Content); ok {
+			return next, cmd
+		}
 		if !m.pasteAttachments(v.Content) {
 			m.insertPrompt(v.Content)
 		}

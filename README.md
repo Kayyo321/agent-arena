@@ -57,6 +57,12 @@ arena status --workflow development
 arena
 ```
 
+Every arena gets a grade from S+ to F for how it spreads trust, verifies work
+and avoids needless agents ([score sheet](docs/ARENA-SCORING.md)); `arena score ID`
+and `/score` explain it. Share an arena with `/copy` (or
+`arena share export ID --copy`) and paste the code into another Arena to import
+it; `/copy-shader` shares only the background shader.
+
 Running `arena` opens the graph TUI. It automatically opens the sole arena in the
 current project, or asks you to choose when several exist. Opening a graph starts
 no task. Enter `run TASK` in its prompt to start an attached run. Use
@@ -132,7 +138,7 @@ Copilot and OpenCode are skill hosts; execution adapters are not advertised for 
 Product contracts: [product](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [interoperability](docs/INTEROPERABILITY.md), [configuration](docs/CONFIGURATION.md),
 [schemas](schemas/), [shared context](docs/SHARED-CONTEXT.md),
-[terminal UI](docs/TERMINAL-UI.md), and [audit/rollback](docs/AUDIT-AND-ROLLBACK.md).
+[terminal UI](docs/TERMINAL-UI.md), [arena scoring](docs/ARENA-SCORING.md), and [audit/rollback](docs/AUDIT-AND-ROLLBACK.md).
 Implementation choices are recorded in [ADR 0001](docs/adr/0001-implementation-foundation.md).
 
 ## Development checks

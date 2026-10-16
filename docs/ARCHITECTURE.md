@@ -108,7 +108,7 @@ The scheduler may only request capabilities the adapter declares. If an adapter 
   .state/context/<workflow-id>/entries/... # when configured local-only
 ```
 
-Definitions, project settings, and profiles are portable and may be committed. Run data is local, ignored by Git by default, and excluded from remote synchronization unless a future explicit feature provides a reviewed export. Keep provider secrets out of all these files. See [Configuration format](CONFIGURATION.md) and [Audit and rollback](AUDIT-AND-ROLLBACK.md).
+Definitions, project settings, and profiles are portable and may be committed. Run data is local, ignored by Git by default, and excluded from remote synchronization. Share codes (`arena share`, `/copy`) export an arena's definition, profiles and shader, never run data or shared context, and every import is previewed and validated before it is saved. Keep provider secrets out of all these files. See [Configuration format](CONFIGURATION.md) and [Audit and rollback](AUDIT-AND-ROLLBACK.md).
 
 The terminal's Git tree shows active branches and worktrees for the loaded arena, with stable agent colors. The status row probes only providers used by that arena and its permanent control agent. The graph and packet animation are projections of journaled events; their layout and small-terminal behavior are defined in [Terminal interface](TERMINAL-UI.md).
 
