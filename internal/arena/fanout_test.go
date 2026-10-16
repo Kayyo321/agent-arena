@@ -701,3 +701,65 @@ func TestFanOutInsideALoopReplansEachPass(t *testing.T) {
 		t.Fatalf("children must show the second pass: %v", state.Iterations)
 	}
 }
+
+func TestFanOutScoreCountsEveryAllowedChild(t *testing.T) {
+	s := DefaultSettings(Runtime{Provider: "codex", Model: "gpt-test", ReasoningEffort: "high"})
+	s.Limits.MaxFanOutChildrenPerRun = Int(64)
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	// lead, reviewer, planner, then fixer at maxChildren 4.
+	if g := analyzeArena(w, profiles); g.pathAgents() != 7 || g.worstCase() != 7 || !Has(g.writers, "split") {
+		t.Fatalf("path agents %d, worst case %d, writers %v", g.pathAgents(), g.worstCase(), g.writers)
+	}
+	// Six slots fit seven possible instances; v2 would have flagged them
+	// against four agents.
+	w.Settings.MaxConcurrentAgents = 6
+	if Has(findingIDs(ScoreArena(w, profiles)), "P4") {
+		t.Fatal("P4 must count fan-out children as path agents")
+	}
+	wide := convert[Workflow](w)
+	wide.Settings.MaxConcurrentAgents = 4
+	wide.FanOuts[0].MaxChildren = 8
+	if !Has(findingIDs(ScoreArena(wide, profiles)), "P4") {
+		t.Fatal("P4 must flag slots below the widest fan-out")
+	}
+	single := convert[Workflow](w)
+	single.Settings.MaxConcurrentAgents = 1
+	if !Has(findingIDs(ScoreArena(single, profiles)), "R3") {
+		t.Fatal("R3 must flag a fan-out that can only run one child at a time")
+	}
+	// A loop around a 32-child fan-out reaches R4; a 1-child one does not.
+	looped := convert[Workflow](w)
+	profiles["reviewer"] = NewProfile("reviewer", "review", "Review", "Review", []string{"read"})
+	looped.Agents = append(looped.Agents, Agent{Id: "done", Level: Int(3), Profile: ".agents/parallel/done.agent.json", Runtime: s.DefaultModel})
+	profiles["done"] = NewProfile("done", "research", "Finish", "Finish", []string{"read"})
+	loop := true
+	looped.DecisionRouters = []Router{{Id: "gate", Name: "Gate", InputKind: "review-result", PayloadPointer: "/outcome", Routes: []c.WorkflowDecisionRoute{{Id: "approved", Equals: "Approved", To: "done"}, {Id: "again", Equals: "ChangesRequested", To: "split", Loop: &loop, MaxIterations: Int(1)}}, Fallback: c.WorkflowDecisionRouterFallback{Action: "stop"}}}
+	looped.Relationships = append(looped.Relationships, Relationship{Type: "delegates", From: "reviewer", To: "gate"})
+	looped.FanOuts[0].MaxChildren = 32
+	looped.Settings.MaxConcurrentAgents = 4
+	if err := ValidateWorkflow(looped, profiles, s); err != nil {
+		t.Fatal(err)
+	}
+	// 3 + 32 + done on the path, then the loop body again: split (1 + 32),
+	// reviewer and done.
+	if worst := analyzeArena(looped, profiles).worstCase(); worst != 71 {
+		t.Fatalf("worst case %d", worst)
+	}
+	card := ScoreArena(looped, profiles)
+	if !Has(findingIDs(card), "R4") || card.Rubric != 3 {
+		t.Fatalf("R4 missing at 71 invocations: %+v", card.Findings)
+	}
+	looped.FanOuts[0].MaxChildren = 1
+	if Has(findingIDs(ScoreArena(looped, profiles)), "R4") {
+		t.Fatal("R4 at one child")
+	}
+	// The fan-out is the writer review must receive.
+	unreviewed := convert[Workflow](w)
+	profiles["reviewer"] = NewProfile("reviewer", "research", "Do the reviewer work", "Use evidence", []string{"read"})
+	if f := ScoreArena(unreviewed, profiles).Findings; len(f) == 0 || !Has(findingIDs(ScoreArena(unreviewed, profiles)), "T1") {
+		t.Fatalf("unreviewed fan-out writer: %+v", f)
+	}
+	if !strings.Contains(roughCost(w), "7 agent turns") {
+		t.Fatalf("rough cost must count every allowed child: %s", roughCost(w))
+	}
+}
