@@ -279,6 +279,22 @@ Raw process output is journaled only when the run keeps full local history and
 `audit.processOutput` is `full`; otherwise `view` says so under the header and
 shows `Output recorded: N bytes` where the text would be.
 
+### Control server for other agents and IDEs
+
+```sh
+arena mcp --control [--project PATH]
+```
+
+serves a project-scoped [MCP control server](INTEROPERABILITY.md#project-control-mcp-server)
+on stdio, so an agent or IDE can read Arena state and start a run of a saved
+workflow. It is separate from the per-agent worker bridge (`arena mcp --run RUN
+--actor AGENT`, four tools for one agent in one run), which is unchanged;
+`--control` cannot be combined with `--run` or `--actor`. Read tools return the
+same JSON as `status --json`, `history RUN --json`, `changes`, `score --json` and
+`workflow show --json`. `arena_run_start` applies `arena run`'s readiness, policy
+and budget checks, and the run is supervised by the server process only while the
+MCP session stays open.
+
 ## Code review, recovery, and context
 
 ```sh

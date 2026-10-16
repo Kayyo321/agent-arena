@@ -37,7 +37,7 @@ func (o Options) Bool(k string) bool { return o.Get(k) == "true" }
 func parseArgs(args []string) ([]string, Options, error) {
 	o := Options{}
 	pos := []string{}
-	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow"}
+	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow", "control"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,follow,as,into")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,follow,as,into,control")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -630,43 +630,13 @@ func SetPointer(m map[string]any, pointer string, v any) error {
 	return nil
 }
 func (cli *CLI) status(ctx context.Context, p *Project, args []string, o Options) error {
-	s, e := p.Settings()
-	if e != nil {
-		return e
-	}
-	workflows := []Workflow{}
 	id := o.Get("workflow")
 	if len(args) > 0 && args[0] != "status" {
 		id = args[0]
 	}
-	if id != "" {
-		w, _, e := p.Load(id)
-		if e != nil {
-			return e
-		}
-		workflows = append(workflows, w)
-	} else {
-		ids, e := p.List()
-		if e != nil {
-			return e
-		}
-		for _, id := range ids {
-			w, _, e := p.Load(id)
-			if e != nil {
-				return e
-			}
-			workflows = append(workflows, w)
-		}
-	}
-	results := []Readiness{}
-	seen := map[string]bool{}
-	for _, r := range Required(workflows, s) {
-		key := string(JSON(r))
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		results = append(results, Probe(ctx, p.Root, r))
+	results, e := p.readiness(ctx, id)
+	if e != nil {
+		return e
 	}
 	if o.Bool("json") {
 		cli.print(results)
