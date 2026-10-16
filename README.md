@@ -109,13 +109,16 @@ Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, 
 ## Providers and credentials
 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
-- Claude Code uses bare programmatic mode with API-key or supported cloud authentication.
+- Claude Code uses bare programmatic mode with API-key or supported cloud authentication, or, when you select `claude-code-sign-in`, runs in the background under its own sign-in like Codex.
+- Antigravity (`agy`) runs in the background under its own sign-in, inside a write fence that keeps it in its worktree.
 - Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
 - Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
 
 Arena does not collect passwords, read or copy provider tokens, pool subscriptions,
-or bypass usage limits. Gemini CLI personal OAuth and Claude subscription OAuth
-are not Arena authentication routes. Readiness distinguishes interface, auth,
+or bypass usage limits. Gemini CLI personal OAuth is not an Arena authentication
+route. The Claude Code and Antigravity sign-in routes are explicit user choices:
+Arena starts the official CLI, which keeps its own credentials, and the plan's
+terms are the user's to check. Readiness distinguishes interface, auth,
 advertised models and verified inference. See [provider boundaries and evidence](docs/PROVIDERS.md).
 
 ## Project files and contracts

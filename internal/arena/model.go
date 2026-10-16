@@ -89,7 +89,15 @@ func ValidateRuntime(r Runtime) error {
 		return fmt.Errorf("%s: select reasoning effort explicitly (status shows verifiable choices)", r.Provider)
 	}
 	switch r.Provider {
-	case "codex", "claude-code":
+	case "codex":
+	case "claude-code":
+		if a := str(r.Options["authMethod"]); a != "" && a != "api-key-or-cloud" && a != claudeSignInAuth {
+			return fmt.Errorf("Claude Code authMethod must be api-key-or-cloud or %s", claudeSignInAuth)
+		}
+	case "antigravity":
+		if len(r.Options) > 0 {
+			return fmt.Errorf("antigravity takes no provider options; its CLI owns sign-in and model settings")
+		}
 	case "gemini":
 		a, _ := r.Options["authMethod"].(string)
 		if a != "google-ai-studio-api-key" && a != "vertex-ai" {

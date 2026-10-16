@@ -138,16 +138,24 @@ func executionReadiness(ctx context.Context, p *Project, r Run) ([]Readiness, er
 		}
 	}
 	for _, a := range r.Workflow.Agents {
-		if a.Runtime.Provider == "codex" && r.Settings.ApprovalPolicies.ShellCommandExecution != "adapter-default" {
-			return readiness, fmt.Errorf("Codex cannot enforce Arena's %s shell policy with this CLI interface; use adapter-default or a mediated adapter", r.Settings.ApprovalPolicies.ShellCommandExecution)
+		native := a.Runtime.Provider == "codex" || a.Runtime.Provider == "antigravity" || a.Runtime.Provider == "claude-code" && claudeSignIn(a.Runtime)
+		if native && r.Settings.ApprovalPolicies.ShellCommandExecution != "adapter-default" {
+			return readiness, fmt.Errorf("%s cannot enforce Arena's %s shell policy with its CLI interface; use adapter-default or a mediated adapter", a.Runtime.Provider, r.Settings.ApprovalPolicies.ShellCommandExecution)
 		}
 	}
 	for _, profile := range r.Profiles {
-		if Has(profile.Capabilities, "run_commands") && !sandboxAvailable() {
-			for _, a := range r.Workflow.Agents {
-				if a.Id == profile.Id && a.Runtime.Provider != "codex" {
-					return readiness, fmt.Errorf("%s needs a supported OS command sandbox before launch", a.Id)
-				}
+		if !Has(profile.Capabilities, "run_commands") {
+			continue
+		}
+		for _, a := range r.Workflow.Agents {
+			if a.Id != profile.Id {
+				continue
+			}
+			if a.Runtime.Provider == "antigravity" {
+				return readiness, fmt.Errorf("%s runs on Antigravity, whose headless mode cannot run commands without blanket approval; remove run_commands or choose another provider", a.Id)
+			}
+			if a.Runtime.Provider != "codex" && !claudeSignIn(a.Runtime) && !sandboxAvailable() {
+				return readiness, fmt.Errorf("%s needs a supported OS command sandbox before launch", a.Id)
 			}
 		}
 	}

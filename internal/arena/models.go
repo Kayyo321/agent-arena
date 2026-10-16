@@ -69,6 +69,8 @@ func DiscoverModels(ctx context.Context, root string, r Runtime) ([]ModelOption,
 		}
 		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 		return models, nil
+	case "antigravity":
+		return antigravityCatalog(ctx)
 	case "claude-code":
 		return nil, fmt.Errorf("the Claude Code CLI exposes no model catalog; enter an exact model ID or alias it accepts")
 	}

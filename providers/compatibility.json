@@ -28,18 +28,35 @@
     },
     {
       "id": "claude-code",
-      "interface": "claude --bare -p --tools '' --output-format stream-json",
+      "interface": "claude --bare -p --tools '' --output-format stream-json; or, with authMethod claude-code-sign-in, claude -p with its own tools, sign-in and an Arena MCP bridge",
       "observedVersions": [
-        "2.1.224 (Claude Code)"
+        "2.1.224 (Claude Code)",
+        "2.1.301 (Claude Code)"
       ],
       "requiredFlags": [
         "--bare",
         "--output-format",
         "--effort"
       ],
-      "auth": "API key or supported cloud route; subscription OAuth refused",
-      "verification": "installed CLI and flags checked; live inference requires approved credentials",
+      "auth": "API key or supported cloud route (bare); Claude Code-owned sign-in when the user selects claude-code-sign-in",
+      "verification": "2.1.301 headless stream-json, tool restriction and structured output inspected with a one-turn read-only probe; Arena workflows not yet verified live",
       "source": "https://code.claude.com/docs/en/legal-and-compliance"
+    },
+    {
+      "id": "antigravity",
+      "interface": "agy headless stream-json input/output with --json-schema, inside Arena's write fence",
+      "observedVersions": [
+        "1.3.6"
+      ],
+      "requiredFlags": [
+        "--input-format",
+        "--output-format",
+        "--json-schema",
+        "--disable-slash-commands"
+      ],
+      "auth": "Antigravity-owned sign-in",
+      "verification": "1.3.6 headless stream-json and structured output inspected with one-turn probes; headless mode writes files without asking and denies commands; Arena workflows not yet verified live",
+      "source": "agy --help"
     },
     {
       "id": "gemini",

@@ -202,7 +202,8 @@ func checkShareOptions(r Runtime, path string) error {
 	}
 	allowed := map[string][]string{
 		"codex":       {"config"},
-		"claude-code": {},
+		"claude-code": {"authMethod"},
+		"antigravity": {},
 		"gemini":      {"authMethod", "generation"},
 		"local":       {"backend", "endpoint", "generation"},
 	}[r.Provider]

@@ -44,6 +44,9 @@ func probe(ctx context.Context, root string, r Runtime) Readiness {
 	if r.Provider == "local" {
 		return probeLocal(ctx, r, result)
 	}
+	if r.Provider == "antigravity" {
+		return probeAntigravity(ctx, r, result)
+	}
 	cli := map[string]string{"codex": "codex", "claude-code": "claude"}[r.Provider]
 
 	if r.Provider == "gemini" {
@@ -97,10 +100,16 @@ func probe(ctx context.Context, root string, r Runtime) Readiness {
 		if e != nil {
 			return result
 		}
-		if !strings.Contains(string(help), "--output-format") || !strings.Contains(string(help), "--bare") {
-			result.State = "incompatible version"
-			result.Detail = "requires structured output and JSON Schema CLI flags"
-			return result
+		flags := []string{"--output-format", "--bare"}
+		if claudeSignIn(r) {
+			flags = []string{"--output-format", "--json-schema", "--mcp-config", "--permission-prompts", "--setting-sources"}
+		}
+		for _, flag := range flags {
+			if !strings.Contains(string(help), flag) {
+				result.State = "incompatible version"
+				result.Detail = "installed Claude CLI lacks " + flag
+				return result
+			}
 		}
 		if match := regexp.MustCompile(`(?s)--effort[^\(]*\(([^)]+)\)`).FindSubmatch(help); len(match) > 1 {
 			result.Efforts = split(string(match[1]))
@@ -109,6 +118,9 @@ func probe(ctx context.Context, root string, r Runtime) Readiness {
 			result.State = "unsupported effort"
 			result.Detail = "effort not accepted by installed Claude CLI"
 			return result
+		}
+		if claudeSignIn(r) {
+			return probeClaudeSignIn(ctx, result)
 		}
 		result.Auth = "API-key or supported cloud credentials required"
 		if os.Getenv("ANTHROPIC_API_KEY") != "" {

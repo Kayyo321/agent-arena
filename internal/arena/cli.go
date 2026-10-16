@@ -212,7 +212,7 @@ func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Opti
 	}
 	if r.Provider == "" {
 		fmt.Fprintln(cli.Out, "Provider:")
-		r.Provider, e = cli.choose("Provider", []string{"codex", "claude-code", "gemini", "local"}, []string{"Codex CLI, its own sign-in", "Claude Code CLI, API key or cloud auth", "Google GenAI SDK, API key or Vertex AI", "Ollama or OpenAI-compatible server on this machine"}, true)
+		r.Provider, e = cli.choose("Provider", []string{"codex", "claude-code", "antigravity", "gemini", "local"}, []string{"Codex CLI, its own sign-in", "Claude Code CLI, its own sign-in or API key/cloud auth", "Antigravity CLI (agy), its own sign-in", "Google GenAI SDK, API key or Vertex AI", "Ollama or OpenAI-compatible server on this machine"}, true)
 		if e != nil {
 			return r, e
 		}
@@ -235,6 +235,19 @@ func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Opti
 			}
 			r.Options[x.key] = value
 		}
+	}
+	if r.Provider == "claude-code" {
+		v := o.Get("auth-method")
+		if v == "" {
+			v = str(r.Options["authMethod"])
+		}
+		if v == "" {
+			v, e = cli.choose("Auth method", []string{claudeSignInAuth, "api-key-or-cloud"}, []string{"background Claude Code with its own login and tools", "bare mode, Arena-mediated tools, ANTHROPIC_API_KEY or cloud route"}, true)
+			if e != nil {
+				return r, e
+			}
+		}
+		r.Options["authMethod"] = v
 	}
 	if r.Provider == "gemini" {
 		v := o.Get("auth-method")
@@ -343,7 +356,7 @@ func (cli *CLI) init(ctx context.Context, p *Project, o Options) error {
 	if e := Atomic(ignore, b, 0644); e != nil {
 		return e
 	}
-	target := map[string]string{"codex": "codex", "claude-code": "claude", "gemini": "gemini"}[r.Provider]
+	target := map[string]string{"codex": "codex", "claude-code": "claude", "gemini": "gemini", "antigravity": "gemini"}[r.Provider]
 	if target != "" {
 		path, e := p.InstallSkill(target, false, false)
 		if e != nil {

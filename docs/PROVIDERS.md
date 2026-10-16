@@ -9,6 +9,8 @@ opaque in Arena envelopes; adapters translate only supported controls.
 | --- | --- | --- |
 | Codex | Installed CLI, local app-server stdio, provider-owned sign-in | CLI 0.162.0-alpha.17.2 inspected; real `gpt-6.1-sol` / `high` read-only workflow and live Arena MCP context search passed |
 | Claude Code | `--bare -p`, streamed JSON, API-key or supported cloud auth | CLI 2.1.224 and flags inspected; no approved API/cloud credentials available for live inference |
+| Claude Code (sign-in) | `claude -p` with its own tools, stream-json, Claude Code-owned sign-in | CLI 2.1.301: one-turn read-only probe confirmed tool restriction and `structured_output`; Arena workflows not yet run live |
+| Antigravity | `agy` headless stream-json input/output, Antigravity-owned sign-in, Arena write fence | CLI 1.3.6: one-turn probes confirmed stream format and `structured_output`; Arena workflows not yet run live |
 | Gemini | Official Google GenAI Go SDK, AI Studio API-key or Vertex AI ADC | SDK v1.75.0 compiled; live inference requires configured approved credentials |
 | Local | Same-machine Ollama or OpenAI-compatible HTTP server | Contract fixtures; a real backend/model still needs user selection and verification |
 
@@ -50,6 +52,25 @@ mediates file access, commands, packets and questions. Commands require the proj
 policy and a supported OS sandbox. Credentials are never included in those command
 environments. Each command gets private temporary/home/cache directories that are removed after supervision ends; other worktrees and global temporary directories remain unwritable, and only system toolchain roots, the assigned worktree and resolved toolchain directories are readable (no home directories, other worktrees or host processes; see [Architecture](ARCHITECTURE.md#mediated-command-sandbox)). Networking is disabled. Dependency downloads must be prepared outside the run; existing module caches are read-only. Model/effort access stays unverified until actually exercised.
 
+### Claude Code sign-in route
+
+Selecting `options.authMethod: "claude-code-sign-in"` runs Claude Code the way
+Arena runs Codex: a headless background worker under the CLI's own login, with
+Arena never reading its credentials. This is a user choice under the user's own
+plan terms; Anthropic's guidance above still directs third-party products to
+API-key or cloud auth, so Arena never selects it by default. Readiness reads only
+`claude auth status`'s logged-in flag and auth kind.
+
+Workers get `claude -p --output-format stream-json` with `--tools` limited to
+Read/Glob/Grep (plus Edit/Write/NotebookEdit for writers), `--permission-mode
+dontAsk` or `acceptEdits`, `--permission-prompts none`, project settings only,
+no slash commands or subagents, and Arena's worker instructions appended to the
+system prompt. In a run, `--mcp-config --strict-mcp-config` attaches only the
+local Arena bridge and pre-approves its four tools. Agents with `run_commands`
+also get Bash, which Claude Code's own sandbox auto-allows only when sandboxed;
+anything else is refused. Like Codex this requires the `adapter-default` shell
+policy. Text attachments are inlined; images remain Codex-only.
+
 References: [programmatic CLI](https://code.claude.com/docs/en/headless),
 [authentication restrictions](https://code.claude.com/docs/en/legal-and-compliance).
 
@@ -69,6 +90,24 @@ billable continuation is disabled. Arena does not persist model thought content.
 References: [official SDKs](https://ai.google.dev/gemini-api/docs/libraries),
 [Vertex ADC](https://cloud.google.com/vertex-ai/generative-ai/docs/start/gcp-auth),
 [Gemini CLI FAQ boundary](https://geminicli.com/docs/faq/).
+
+## Antigravity
+
+Arena runs the installed Antigravity CLI (`agy`) headless under its own sign-in,
+as a user choice under the user's own plan terms. The prompt is sent as one
+`stream-json` input event and the reply is read from `stream-json` output, with
+`--json-schema` for the result and `--disable-slash-commands`. `agy models` is
+the model catalog and the sign-in check; the CLI's model IDs carry their thinking
+level, and `--effort` is passed only when selected.
+
+Version 1.3.6 headless mode writes files without asking, ignores `--mode plan`
+alongside disabled slash commands, and auto-denies terminal commands. Arena
+therefore wraps it in a write fence (bubblewrap on Linux; `sandbox-exec` on macOS, not yet exercised there):
+the project is read-only and only a writer's own worktree is writable again. The
+fence confines writes, not reads or networking. Agents with `run_commands` are
+refused, and `agy` reads MCP servers only from user-level configuration, so
+Antigravity workers have no live Arena MCP bridge; they still return structured
+results and packets.
 
 ## Local inference
 
