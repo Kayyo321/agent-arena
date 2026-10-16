@@ -223,7 +223,12 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return nil
 		}
 		if args[1] == "answer" && len(args) == 5 {
-			return p.Answer(args[2], args[3], args[4])
+			// Approving an integrate or rollback request executes it here.
+			outcome, e := p.AnswerDecision(args[2], args[3], args[4])
+			if outcome != nil {
+				cli.print(outcome)
+			}
+			return e
 		}
 		return fmt.Errorf("invalid decision command")
 	case "agent":

@@ -12,7 +12,8 @@ import (
 // The control server is a project-scoped MCP server (`arena mcp --control`)
 // that lets another agent or an IDE read Arena state and start runs of saved
 // workflows. It is separate from the per-agent worker bridge in mcp.go and
-// exposes no credential, decision, workflow-edit, integrate or rollback tool.
+// exposes no credential, decision-answering or workflow-edit tool. Its
+// integrate and rollback tools only open a pending decision for a human.
 const (
 	// maxControlTask bounds the task string of arena_run_start, in bytes.
 	maxControlTask = 8 << 10
@@ -81,10 +82,12 @@ func (c *controlServer) tools() []any {
 	return []any{
 		controlTool("arena_status", "Project readiness and run states: the workflows in this project, the provider readiness `arena status --json` reports for them (or for one workflow), and the state of the newest runs. Read-only.", true, nil, map[string]any{"workflowId": id("Limit readiness to this workflow.")}),
 		controlTool("arena_history", "Run history as `arena history RUN --json` reports it: status, pending decisions, usage totals and journaled events. Without runId, lists run IDs. Read-only.", true, nil, map[string]any{"runId": id("Run to read."), "maxEvents": map[string]any{"type": "integer", "minimum": 1, "description": "Return only the newest N events."}}),
-		controlTool("arena_changes", "Change proposals recorded by a run, read-only. Without changeId, lists them as `arena changes RUN` does; with it, returns that change and its redacted patch. Integrating or rolling back is not available here.", true, []string{"runId"}, map[string]any{"runId": id("Run that produced the changes."), "changeId": id("Show one change and its patch.")}),
+		controlTool("arena_changes", "Change proposals recorded by a run, read-only. Without changeId, lists them as `arena changes RUN` does; with it, returns that change and its redacted patch. Integrating or rolling back is only requested, with arena_integrate and arena_rollback.", true, []string{"runId"}, map[string]any{"runId": id("Run that produced the changes."), "changeId": id("Show one change and its patch.")}),
 		controlTool("arena_score", "The scorecard `arena score WORKFLOW --json` reports for a saved workflow. Read-only.", true, []string{"workflowId"}, map[string]any{"workflowId": id("Saved workflow to score.")}),
 		controlTool("arena_workflow_show", "The saved workflow `arena workflow show WORKFLOW --json` reports. Read-only.", true, []string{"workflowId"}, map[string]any{"workflowId": id("Saved workflow to show.")}),
 		controlTool("arena_run_start", fmt.Sprintf("Start a run of an existing saved, validated workflow with a task and return its run ID at once. Provider, model, effort and credentials cannot be chosen: the workflow's own runtime is used, and the run is refused if a provider is not ready or a required sandbox is missing. Arena supervises the run in this server process for as long as this MCP session stays open; if the client disconnects the run is interrupted and a human can continue it with `arena resume RUN`. Approvals and budget questions stay pending for the human (TUI or `arena decision answer`). At most %d runs per session.", maxControlRuns), false, []string{"workflowId", "task"}, map[string]any{"workflowId": id("Saved workflow to run."), "task": map[string]any{"type": "string", "minLength": 1, "maxLength": maxControlTask, "description": "What the workflow should do."}}),
+		controlTool("arena_integrate", "Ask a human to integrate a proposed change. Nothing is integrated: Arena runs the checks `arena integrate` makes (change is proposed, prerequisites integrated, checkout clean, patch applies, run is not retired or imported), then opens a pending decision with the preview and choices approve and reject, and returns its ID at once. Only a human answering it (TUI, or `arena decision answer RUN ID approve`) integrates the change, once; a decision for the same change that is still open is returned instead of a new one. If HEAD moves before the answer, approval is refused and the request must be made again. This server cannot answer decisions.", false, []string{"runId", "changeId"}, map[string]any{"runId": id("Run that produced the change."), "changeId": id("Change to integrate.")}),
+		controlTool("arena_rollback", "Ask a human to roll back a change. Nothing is rolled back: Arena runs the checks `arena rollback` makes (including that the change is not already rolled back), then opens a pending decision carrying the rollback preview with choices approve and reject, and returns its ID at once. Only a human answering it (TUI, or `arena decision answer RUN ID approve`) performs the rollback, once, as a reversible revert commit or isolated recovery worktree that keeps later work; a decision for the same change that is still open is returned instead of a new one. If HEAD moves before the answer, approval is refused and the request must be made again. This server cannot answer decisions.", false, []string{"runId", "changeId"}, map[string]any{"runId": id("Run that produced the change."), "changeId": id("Change to roll back.")}),
 	}
 }
 
@@ -114,6 +117,10 @@ func (c *controlServer) call(name string, args map[string]any) (any, error) {
 		}
 	case "arena_run_start":
 		value, err = c.runStart(args)
+	case "arena_integrate":
+		value, err = c.requestChange("integrate", args)
+	case "arena_rollback":
+		value, err = c.requestChange("rollback", args)
 	default:
 		err = fmt.Errorf("unknown Arena tool")
 	}
@@ -288,4 +295,25 @@ func (c *controlServer) runStart(args map[string]any) (any, error) {
 		}
 	}()
 	return map[string]any{"runId": r.ID, "workflowId": r.Workflow.Id, "state": "started", "supervision": "attached: this MCP session supervises the run; if it ends the run is interrupted and `arena resume " + r.ID + "` continues it", "readiness": readiness}, nil
+}
+
+// requestChange opens a pending decision for a human to integrate or roll back
+// a change. It never executes the action and cannot answer the decision.
+func (c *controlServer) requestChange(action string, args map[string]any) (any, error) {
+	if err := controlOnly(args, "runId", "changeId"); err != nil {
+		return nil, err
+	}
+	runID, err := controlIDValue(args, "runId", true)
+	if err != nil {
+		return nil, err
+	}
+	changeID, err := controlIDValue(args, "changeId", true)
+	if err != nil {
+		return nil, err
+	}
+	d, reused, err := c.p.RequestChangeAction(action, runID, changeID, controlActor)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"decisionId": d.ID, "runId": runID, "changeId": changeID, "action": action, "state": "pending", "reused": reused, "requestedBy": controlActor, "preview": d.Context["preview"], "next": "Nothing has been executed. A human reviews the preview and answers: `arena decision answer " + runID + " " + d.ID + " approve|reject`, or in the TUI."}, nil
 }

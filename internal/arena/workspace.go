@@ -656,6 +656,9 @@ func (p *Project) Rollback(run, id string, approved bool) (Change, error) {
 		return original, e
 	}
 	defer lock.Close()
+	if e := p.rollbackBlocker(run, original); e != nil {
+		return original, e
+	}
 	head, e := Git(p.Root, "rev-parse", "HEAD")
 	if e != nil {
 		return original, e
@@ -762,8 +765,14 @@ func (p *Project) RestoreCheckpoint(id string) (string, error) {
 	return dir, p.Audit("", "checkpoint.restored", map[string]any{"checkpointId": id, "recoveryWorkspace": dir, "userCheckoutUnchanged": true})
 }
 func (p *Project) RollbackPreview(run, id string) (map[string]any, error) {
+	if _, e := p.requireLiveRun(run); e != nil {
+		return nil, e
+	}
 	change, e := p.Change(run, id)
 	if e != nil {
+		return nil, e
+	}
+	if e := p.rollbackBlocker(run, change); e != nil {
 		return nil, e
 	}
 	head, e := Git(p.Root, "rev-parse", "HEAD")

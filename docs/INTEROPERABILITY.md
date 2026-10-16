@@ -385,8 +385,10 @@ not widened by it. A control session serves exactly these tools:
 | `arena_score` | `workflowId` | `score WORKFLOW --json` |
 | `arena_workflow_show` | `workflowId` | `workflow show WORKFLOW --json` |
 | `arena_run_start` | `workflowId`, `task` | `{runId, workflowId, state: "started", supervision, readiness}` |
+| `arena_integrate` | `runId`, `changeId` | `{decisionId, state: "pending", reused, requestedBy, preview, next}`; nothing is integrated (see [Integrate and rollback requests](#integrate-and-rollback-requests)) |
+| `arena_rollback` | `runId`, `changeId` | The same shape for a rollback request, with the `RollbackPreview` |
 
-Results are the CLI's JSON text, byte for byte for every tool but `arena_status` (which wraps the `status --json` array with workflow and run state) and the `changeId` form of `arena_changes`.
+Results are the CLI's JSON text, byte for byte for every tool but `arena_status` (which wraps the `status --json` array with workflow and run state), the `changeId` form of `arena_changes`, and the two request tools.
 IDs must match the usual ID pattern, unknown arguments are rejected, a task is at
 most 8 KiB, a result larger than 1 MiB is refused instead of truncated, and a
 session accepts at most 1000 tool calls and starts at most 3 runs.
@@ -397,9 +399,9 @@ session accepts at most 1000 tool calls and starts at most 3 runs.
   readers, they take short-lived read locks, and `arena_status` runs the same
   provider probes as `arena status`.
 - There is no tool for credentials or provider configuration, for answering
-  decisions, for editing or deleting workflows, or for integrating or rolling back
-  changes. Those stay with the human, in the TUI or the CLI. A later version may
-  let an agent *request* an integration as a pending decision; it will not act.
+  decisions, or for editing or deleting workflows. Those stay with the human, in
+  the TUI or the CLI. `arena_integrate` and `arena_rollback` can only *request*
+  an integration or rollback as a pending decision; they never act.
 - `arena_run_start` takes only a saved workflow ID and a task. It has no provider,
   model, effort, endpoint or credential parameter, so the runtime is always the
   one the validated workflow already names, and a client cannot choose one.
@@ -412,6 +414,59 @@ session accepts at most 1000 tool calls and starts at most 3 runs.
 - Everything returned, including errors, passes through the same redaction as the
   journal. The control server does not read credential files or print
   environment variables.
+
+### Integrate and rollback requests
+
+Integration stays human-reviewed. `arena_integrate` and `arena_rollback` validate
+the request exactly as `arena integrate RUN CHANGE` and `arena rollback RUN CHANGE`
+would, change nothing, and open a pending decision (kind `integrate-change` or
+`rollback-change`, choices `approve` and `reject`) that carries the preview and
+the requesting actor (`control-mcp`). They return the decision ID at once; the
+client does not wait. The control server has no tool that answers a decision, and
+the decision kinds are not among those the orchestrator may answer.
+
+Checks made when the request is opened (a failed check is an error and opens no
+decision):
+
+- Integrate: the run has history here (it is not retired) and was not imported
+  from an audit bundle; the change is `proposed` (not `conflicted`, `integrated`
+  and so on); the changes it depends on are integrated; the checkout has no
+  uncommitted changes; and the patch applies to the current `HEAD`. The apply
+  check uses a throwaway index, so the checkout is untouched. The preview holds
+  the change, `currentHead`, and the patch `diffstat`.
+- Rollback: the same run checks, then `RollbackPreview` (the change, `currentHead`,
+  later commits to the affected paths) and a refusal if the change is already
+  rolled back by an integrated rollback that has not itself been rolled back.
+- Asking again for a change that already has an open decision of the same kind
+  returns that decision (`reused: true`). If `HEAD` has moved since that decision
+  was opened, it is withdrawn (`decision.superseded`) and a new one is opened.
+
+**Who executes.** There is no supervisor to rely on, so the answer path does it:
+the person who answers runs the action. `arena decision answer RUN DECISION approve`
+(or the TUI's `/answer`) re-runs the checks above, and then performs the same
+operation as `arena integrate` or `arena rollback --yes`, in the process that
+answers. `reject` records the answer and does nothing. The decision is stored as
+answered before anything runs, so an action executes at most once: answering
+again fails with `decision already answered`, and a decision that fails or is
+refused is not retried. There is no way to approve once and have it run later.
+
+If anything differs from what the human reviewed, nothing runs. In particular,
+if `HEAD` is not the `currentHead` in the preview (a stale request), or the
+change was integrated, conflicted or rolled back in the meantime, the answer
+fails with `approved, but integrate of CHANGE was not executed: ...` and a
+`decision.refused` event; request it again to get a fresh preview. A rollback
+or integration that starts and then conflicts keeps its existing behavior: the
+conflict is journaled and the work is preserved in its worktree.
+
+The journal records the whole path: `decision.requested` (requesting actor),
+`decision.answered` (the human), and then either `decision.executed` or
+`decision.refused`, each with `decisionId`, `action`, `changeId`, `requestedBy`
+and `approvedBy`, alongside the usual `change.integrated` or
+`rollback.created`/`rollback.completed` events. Integration policy is not
+weakened: a request is always a human decision, whatever
+`approvalPolicies.changeIntegration` says, and `auto-if-clean` is unchanged
+(it applies only inside a run's own engine, not to these tools). Rollback still
+creates a revert commit or a recovery worktree and preserves later work.
 
 ### Run supervision
 
