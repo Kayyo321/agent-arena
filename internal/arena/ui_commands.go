@@ -151,11 +151,24 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				m.Error = "No run is loaded: nothing to total yet"
 				break
 			}
-			ids := []string{}
-			for _, a := range m.Run.Workflow.Agents {
-				ids = append(ids, a.Id)
+			usage := SumUsage(m.Events)
+			ids, listed := []string{}, map[string]bool{}
+			// A fan-out worker is only a template: its children (<id>.<n>) run
+			// and report instead, and are not in the workflow's agent list.
+			for _, f := range m.Run.Workflow.FanOuts {
+				listed[f.Worker] = true
 			}
-			m.Panel, m.PanelText = "Usage · "+m.Run.ID, SumUsage(m.Events).Report(ids)
+			for _, a := range m.Run.Workflow.Agents {
+				if !listed[a.Id] {
+					ids, listed[a.Id] = append(ids, a.Id), true
+				}
+			}
+			for id := range usage.Agents {
+				if !listed[id] {
+					ids, listed[id] = append(ids, id), true
+				}
+			}
+			m.Panel, m.PanelText = "Usage · "+m.Run.ID, usage.Report(ids)
 		case "agents":
 			m.Panel, m.PanelText = "Agents", []string{"arena-orchestrator | permanent project control | " + m.Run.Settings.DefaultModel.Provider + " / " + m.Run.Settings.DefaultModel.Model}
 			for _, a := range m.Run.Workflow.Agents {

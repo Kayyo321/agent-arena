@@ -153,7 +153,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		if err := cli.confirm("Integrate this reviewed change", o); err != nil {
 			return err
 		}
-		change, err = p.Integrate(args[1], args[2], true)
+		change, err = p.IntegrateBy(args[1], args[2], cli.cliApproval())
 		cli.print(change)
 		return err
 	case "rollback":
@@ -173,7 +173,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			fmt.Fprintln(cli.Out, "Preview only. Use --yes after reviewing affected paths and later commits.")
 			return nil
 		}
-		change, err = p.Rollback(args[1], args[2], true)
+		change, err = p.RollbackBy(args[1], args[2], cli.cliApproval())
 		cli.print(change)
 		return err
 	case "on-call":
@@ -254,8 +254,13 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return nil
 		}
 		if args[1] == "answer" && len(args) == 5 {
-			// Approving an integrate or rollback request executes it here.
-			outcome, e := p.AnswerDecision(args[2], args[3], args[4])
+			// Approving an integrate or rollback request executes it here, so it
+			// takes a person at a terminal: a pipe or an agent's command runner
+			// has none. Rejecting needs no terminal, and the TUI is the other route.
+			if args[4] == "approve" && p.executesOnApproval(args[2], args[3]) && !cli.isTerminal() {
+				return fmt.Errorf("approving an integrate or rollback request needs a person at a terminal; run this command in one, or answer in the TUI")
+			}
+			outcome, e := p.AnswerDecision(args[2], args[3], args[4], cli.cliApproval())
 			if outcome != nil {
 				cli.print(outcome)
 			}

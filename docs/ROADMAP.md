@@ -11,6 +11,14 @@ The last items before release, in order. Item 4 closes the list. Items 1-3 are i
 3. **`/walkthrough` in arena setup.** For users who arrive without a design: the orchestrator asks about the project, its goals and pain points, proposes two or three arena ideas with their roles, providers, rough cost and grade, and lets the user pick or combine one before the normal interview drafts it. Provider, model and effort stay the user's choice unless they delegate it. **Implemented:** see [CLI](CLI.md#setup-and-authoring) and `internal/arena/walkthrough.go`.
 4. **Production readiness sweep, approved by Fable and Astra.** Run a final sweep as an arena whose review team is Claude Fable 5.1 (`claude-code`, `claude-fable-5-1`) and Codex GPT-6-Astra (`codex`, `gpt-6-astra`) with unanimous consensus. Cover security (fences, credentials, share codes, blanket-approval modes), correctness, documentation against behavior, packaging, and the pending M3 and M6 live exits. Release only when both reviewers return `Approved`; `no-consensus` stays unresolved.
 
+## Deferred work
+
+Open findings from the integration-wave review that are not closed. Each says what is left and why.
+
+- **Operator approval boundary (partially mitigated).** Nothing in Arena enforces that a human approved an integrate or rollback request: the CLI requires a terminal, approvals record their entry point with no verified identity, and the executed operation is bound to the reviewed patch, but agents run as the same OS user with no fence around the answer path. The proposed boundary and what it would take are in [ADR 0002](adr/0002-operator-approval-boundary.md).
+- **Incremental journal reading for followers.** `watch --follow` and `view --follow` re-read the whole journal on every 150 ms poll, as the live view does. That is fine for the run sizes tested and gets slower as a journal grows; reading from the last delivered sequence (the journal is append-only and hash-chained) is the fix. Nothing in the documented requirements sets a performance bound, so this is deferred, not closed.
+- **Live usage capture.** Token counting is tested against fixtures built from each provider's documented shapes; a live capture from Claude Code, Codex, Gemini and a local model is still owed, as is confirming where Codex's `cacheWriteInputTokens` lies. See [validation](VALIDATION.md#usage-counting).
+
 ## M0 — Product and protocol foundation
 
 **Status: complete.** Product contracts, schemas, examples and skill entry points are present; generated validators and fixture tests now exercise them. Implementation status is tracked below and in [validation evidence](VALIDATION.md).

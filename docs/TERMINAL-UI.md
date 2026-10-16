@@ -216,7 +216,9 @@ available as line-oriented text for a pipe, a script or another terminal pane:
 
 - `arena watch RUN --json --follow` is the event feed. It prints one flushed JSON line
   per journal event, in sequence order and never twice, and exits when the run reaches
-  a terminal state or on interrupt. Without `--follow` it prints the journal once.
+  a terminal state, when the run is interrupted while the feed is attached, or on Ctrl+C.
+  A feed that starts on an already interrupted run waits for its resume, which is what
+  the `arena tmux resume` panes rely on. Without `--follow` it prints the journal once.
 - `arena view AGENT --run RUN [--follow]` is the agent activity window (`/view AGENT`)
   as plain text, with the same exit behaviour. It states when raw process output is not
   retained (`audit.processOutput` other than `full`, or reduced run retention) and falls

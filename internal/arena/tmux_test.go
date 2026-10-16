@@ -23,7 +23,7 @@ func fakeTmux(t *testing.T) (calls func() [][]string) {
 func fakeTmuxVersion(t *testing.T, version string) (calls func() [][]string) {
 	t.Helper()
 	bin, rec := t.TempDir(), filepath.Join(t.TempDir(), "calls")
-	script := "#!/bin/sh\nif [ \"$1\" = -V ]; then printf '%s\\n' '" + version + "'; exit 0; fi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> " + rec + "\nprintf -- '--END--\\n' >> " + rec + "\n"
+	script := "#!/bin/sh\nif [ \"$1\" = -V ]; then printf '%s\\n' '" + version + "'; exit 0; fi\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done >> " + rec + "\nprintf -- '--END--\\n' >> " + rec + "\nif [ -n \"$FAKE_TMUX_FAIL\" ] && [ \"$1\" = \"$FAKE_TMUX_FAIL\" ]; then exit 1; fi\n"
 	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +138,37 @@ func TestTmuxInsideTmuxSwitchesClientInsteadOfNesting(t *testing.T) {
 	}
 }
 
+func TestTmuxObserverLayoutFailureNeverKillsTheLiveRun(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	calls := fakeTmux(t)
+	t.Setenv("TMUX", "")
+	t.Setenv("FAKE_TMUX_FAIL", "split-window")
+	var out bytes.Buffer
+	if err := NewCLI(strings.NewReader(""), &out, &out).Run(context.Background(), []string{"tmux", "resume", r.ID, "--project", p.Root}); err != nil {
+		t.Fatalf("a failed observer pane must not fail the command: %v", err)
+	}
+	for _, c := range calls() {
+		if c[0] == "kill-session" {
+			t.Fatalf("the supervisor was already running; the session must survive: %q", c)
+		}
+	}
+	if !strings.Contains(out.String(), "Warning: optional tmux step skipped, the run is unaffected: tmux split-window failed") {
+		t.Fatalf("the skipped step must be reported: %s", out.String())
+	}
+}
+
+func TestTmuxNewSessionFailureIsAnError(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	fakeTmux(t)
+	t.Setenv("FAKE_TMUX_FAIL", "new-session")
+	err := NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), []string{"tmux", "resume", r.ID, "--project", p.Root})
+	if err == nil || !strings.Contains(err.Error(), "tmux new-session failed") {
+		t.Fatalf("error: %v", err)
+	}
+}
+
 func TestTmuxMissingIsClearAndNeverInstalls(t *testing.T) {
 	p := committedProject(t)
 	r := testRun(t, p)
@@ -246,5 +277,76 @@ func TestTmuxRefusesUnsupportedVersionBeforeCreatingAnything(t *testing.T) {
 	}
 	if runs, _ := filepath.Glob(p.Path(".state", "run-*")); len(runs) != 0 {
 		t.Fatalf("a run was created: %v", runs)
+	}
+}
+
+// What the run depends on is explicit, not inferred from position: the session
+// whose pane 0 supervises the run and the option that keeps its output on
+// screen are required; everything that only places observers or focus is not.
+func TestTmuxLayoutMarksExactlyWhatTheRunDependsOn(t *testing.T) {
+	required := []string{}
+	for _, step := range tmuxLayout("/bin/arena", "/proj", "arena-run-1", []string{"run", "--run", "run-1", "--", "wf", "task"}, "run-1", []string{"head", "rev"}) {
+		if step.required {
+			required = append(required, step.argv[0])
+		}
+	}
+	if strings.Join(required, ",") != "new-session,set-option" {
+		t.Fatalf("required steps: %v", required)
+	}
+}
+
+// A required step that fails after new-session is an error that says the run is
+// already live. Nothing is killed (that would interrupt the run), no observer
+// layout is attempted, and the user is told how to reach or stop the session.
+func TestTmuxRequiredStepFailingAfterNewSessionIsAnErrorThatLeavesTheRunAlone(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	calls := fakeTmux(t)
+	t.Setenv("TMUX", "")
+	t.Setenv("FAKE_TMUX_FAIL", "set-option")
+	err := NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), []string{"tmux", "resume", r.ID, "--project", p.Root})
+	session := "arena-" + r.ID
+	for _, want := range []string{"required tmux setup step failed", "tmux set-option failed", "already live in tmux session " + session, "tmux attach -t " + session, "tmux kill-session -t " + session, "arena resume " + r.ID} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %v lacks %q", err, want)
+		}
+	}
+	for _, c := range calls() {
+		switch c[0] {
+		case "kill-session", "split-window", "new-window", "attach-session", "switch-client":
+			t.Fatalf("after a required step failed, tmux was asked for %q", c)
+		}
+	}
+}
+
+// Each optional step failing, alone, is a warning on stderr; the run, the rest
+// of the layout and the attach go on.
+func TestTmuxEachOptionalStepFailingIsOnlyAWarning(t *testing.T) {
+	for _, failing := range []string{"split-window", "new-window", "select-layout", "select-window", "select-pane"} {
+		t.Run(failing, func(t *testing.T) {
+			p := committedProject(t)
+			r := testRun(t, p)
+			calls := fakeTmux(t)
+			t.Setenv("TMUX", "")
+			t.Setenv("FAKE_TMUX_FAIL", failing)
+			var stdout, stderr bytes.Buffer
+			if err := NewCLI(strings.NewReader(""), &stdout, &stderr).Run(context.Background(), []string{"tmux", "resume", r.ID, "--project", p.Root}); err != nil {
+				t.Fatalf("a failed optional step must not fail the command: %v", err)
+			}
+			if !strings.Contains(stderr.String(), "Warning: optional tmux step skipped, the run is unaffected: tmux "+failing+" failed") || strings.Contains(stdout.String(), "Warning") {
+				t.Fatalf("warning belongs on stderr.\nstdout: %s\nstderr: %s", stdout.String(), stderr.String())
+			}
+			sawLast, attached := false, false
+			for _, c := range calls() {
+				sawLast = sawLast || c[0] == "select-pane"
+				attached = attached || c[0] == "attach-session"
+				if c[0] == "kill-session" {
+					t.Fatal("the session was killed")
+				}
+			}
+			if !sawLast || !attached {
+				t.Fatalf("the layout stopped at the failed step (reached the last step: %v, attached: %v)", sawLast, attached)
+			}
+		})
 	}
 }

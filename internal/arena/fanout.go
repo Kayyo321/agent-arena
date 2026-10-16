@@ -2,7 +2,6 @@ package arena
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,17 +141,10 @@ func startedFanOutChildren(events []Event) int {
 	return len(seen)
 }
 
+// intValue reads a decoded journal number, 0 when it is not one.
 func intValue(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	case json.Number:
-		i, _ := n.Int64()
-		return int(i)
-	}
-	return 0
+	n, _ := usageCount(v)
+	return int(n)
 }
 
 func fanOutPlanSchema() map[string]any {
@@ -262,7 +254,7 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 			childChanges[child.Id] = stringSlice(outcomes[i].packet["arenaChangeIds"])
 		}
 	}
-	conflicts, err := e.Project.fanOutConflicts(e.Run, order, childChanges)
+	conflicts, err := e.Project.fanOutConflictsWith(e.Run, order, childChanges, e.patchApply)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +267,9 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 				held = append(held, id)
 				heldChanges = append(heldChanges, childChanges[id]...)
 				for _, other := range conflicts[id] {
-					if id < other {
+					// A pair is listed once; a child held only against the
+					// combination of the others has no mirrored entry.
+					if id < other || !Has(conflicts[other], id) {
 						pairs = append(pairs, []string{id, other})
 					}
 				}
@@ -338,68 +332,123 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 	return packet, nil
 }
 
-// fanOutConflicts finds the children whose changes cannot both be applied to
-// the base they share, using the check integrate runs: the first child's
-// patch goes into a scratch index, then git apply --check tries the second's.
-// A child that clashes with any sibling maps to the siblings it clashes with,
-// in order. Nothing is chosen between them and nothing is dropped.
+// fanOutConflicts finds the children whose changes cannot be applied together
+// to the base they share, applying patches the way composeBase builds the next
+// node's workspace (apply --cached --3way), so a child flagged here is one the
+// next node could not have been built with. Each child's result is built once in
+// a scratch index; a pair then costs one apply on a copy of one side.
+//
+// A clashing pair holds out both children: nothing is chosen between them.
+// Children that pass every pair are then applied one after another in order, and
+// one that fails on top of the others (a conflict only the combination shows) is
+// held out alone, mapped to the children it failed against. Nothing is dropped.
 func (p *Project) fanOutConflicts(r Run, order []string, changes map[string][]string) (map[string][]string, error) {
+	return p.fanOutConflictsWith(r, order, changes, nil)
+}
+
+// patchApplier applies one patch to the index file named by index, the way the
+// next node's base is built (apply --cached --3way). Real conflicts come from
+// git; the type exists so a test can stand in for it where a conflict that only
+// the combination of three or more children shows cannot be built from real
+// patches. A nil applier means git.
+type patchApplier func(root, index, patch string) error
+
+func gitApplyCached(root, index, patch string) error {
+	_, err := gitEnv(root, []string{"GIT_INDEX_FILE=" + index}, "apply", "--cached", "--3way", patch)
+	return err
+}
+
+// fanOutConflictsWith is fanOutConflicts with the patch application supplied.
+func (p *Project) fanOutConflictsWith(r Run, order []string, changes map[string][]string, applyPatch patchApplier) (map[string][]string, error) {
+	if applyPatch == nil {
+		applyPatch = gitApplyCached
+	}
 	conflicts := map[string][]string{}
-	for i, a := range order {
-		for _, b := range order[i+1:] {
-			clash, err := p.changesClash(r, changes[a], changes[b])
+	candidates := []string{}
+	for _, id := range order {
+		if len(changes[id]) > 0 {
+			candidates = append(candidates, id)
+		}
+	}
+	if len(candidates) < 2 {
+		return conflicts, nil
+	}
+	indices := p.Path(".state", "indices")
+	if err := os.MkdirAll(indices, 0700); err != nil {
+		return nil, err
+	}
+	scratch, err := os.MkdirTemp(indices, "overlap-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(scratch)
+	n := 0
+	next := func() string {
+		n++
+		return filepath.Join(scratch, fmt.Sprintf("index-%d", n))
+	}
+	copyOf := func(from string) (string, error) {
+		b, err := os.ReadFile(from)
+		if err != nil {
+			return "", err
+		}
+		to := next()
+		return to, os.WriteFile(to, b, 0600)
+	}
+	// apply adds ids' patches to index; false means a patch did not apply.
+	apply := func(index string, ids []string) bool {
+		for _, id := range ids {
+			if err := applyPatch(p.Root, index, filepath.Join(p.RunDir(r.ID), "changes", id+".patch")); err != nil {
+				return false
+			}
+		}
+		return true
+	}
+	own := map[string]string{}
+	for _, id := range candidates {
+		first, err := p.Change(r.ID, changes[id][0])
+		if err != nil {
+			return nil, err
+		}
+		own[id] = next()
+		if _, err := gitEnv(p.Root, []string{"GIT_INDEX_FILE=" + own[id]}, "read-tree", first.Base); err != nil {
+			return nil, err
+		}
+		if !apply(own[id], changes[id]) {
+			return nil, fmt.Errorf("changes of %s do not apply to their own base", id)
+		}
+	}
+	for i, a := range candidates {
+		for _, b := range candidates[i+1:] {
+			trial, err := copyOf(own[a])
 			if err != nil {
 				return nil, err
 			}
-			if clash {
+			if !apply(trial, changes[b]) {
 				conflicts[a], conflicts[b] = append(conflicts[a], b), append(conflicts[b], a)
 			}
 		}
 	}
+	accepted, together := []string{}, ""
+	for _, id := range candidates {
+		if len(conflicts[id]) > 0 {
+			continue
+		}
+		if together == "" {
+			together, accepted = own[id], []string{id}
+			continue
+		}
+		trial, err := copyOf(together)
+		if err != nil {
+			return nil, err
+		}
+		if apply(trial, changes[id]) {
+			together, accepted = trial, append(accepted, id)
+		} else {
+			conflicts[id] = append([]string{}, accepted...)
+		}
+	}
 	return conflicts, nil
-}
-
-func (p *Project) changesClash(r Run, first, second []string) (bool, error) {
-	if len(first) == 0 || len(second) == 0 {
-		return false, nil
-	}
-	base, err := p.Change(r.ID, first[0])
-	if err != nil {
-		return false, err
-	}
-	index := p.Path(".state", "indices", ID("overlap-"))
-	if err := os.MkdirAll(filepath.Dir(index), 0700); err != nil {
-		return false, err
-	}
-	defer os.Remove(index)
-	env := []string{"GIT_INDEX_FILE=" + index}
-	if _, err := gitEnv(p.Root, env, "read-tree", base.Base); err != nil {
-		return false, err
-	}
-	patch := func(id string) (string, error) {
-		path := filepath.Join(p.RunDir(r.ID), "changes", id+".patch")
-		_, err := os.Stat(path)
-		return path, err
-	}
-	for _, id := range first {
-		path, err := patch(id)
-		if err != nil {
-			return false, err
-		}
-		if _, err := gitEnv(p.Root, env, "apply", "--cached", path); err != nil {
-			return false, fmt.Errorf("change %s does not apply to its own base: %w", id, err)
-		}
-	}
-	for _, id := range second {
-		path, err := patch(id)
-		if err != nil {
-			return false, err
-		}
-		if _, err := gitEnv(p.Root, env, "apply", "--cached", "--check", path); err != nil {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // approveFanOut settles how many planned items run: within the cap an

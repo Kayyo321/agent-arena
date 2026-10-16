@@ -21,6 +21,16 @@ func isChangeRequest(d Decision) bool {
 	return d.Kind == decisionIntegrate || d.Kind == decisionRollback
 }
 
+// executesOnApproval reports whether approving the decision runs an integrate
+// or rollback; an unreadable or unknown decision is left to AnswerDecision.
+func (p *Project) executesOnApproval(run, id string) bool {
+	if validID(run) != nil || validID(id) != nil {
+		return false
+	}
+	var d Decision
+	return ReadJSON(filepath.Join(p.RunDir(run), "decisions", id+".json"), &d) == nil && isChangeRequest(d)
+}
+
 // requireLiveRun returns a run whose changes belong to this checkout: not
 // retired (its directory is gone) and not imported from an audit bundle.
 func (p *Project) requireLiveRun(run string) (Run, error) {
@@ -97,7 +107,11 @@ func (p *Project) IntegratePreview(run, id string) (map[string]any, error) {
 	if e != nil {
 		return nil, e
 	}
-	return map[string]any{"change": change, "currentHead": head, "diffstat": Redact(stat), "behavior": "applies the patch in an isolated integration worktree and fast-forwards the checkout; a conflict is journaled and the checkout is left untouched"}, nil
+	body, e := os.ReadFile(patch)
+	if e != nil {
+		return nil, e
+	}
+	return map[string]any{"change": change, "currentHead": head, "diffstat": Redact(stat), "patchSha256": Hash(body), "behavior": "applies the patch in an isolated integration worktree and fast-forwards the checkout; a conflict is journaled and the checkout is left untouched"}, nil
 }
 
 // rollbackBlocker explains why a change cannot be rolled back now.
@@ -192,9 +206,9 @@ func (p *Project) RequestChangeAction(action, run, id, actor string) (d Decision
 // executeChangeRequest performs an approved request once. It re-runs the CLI's
 // checks first and refuses if HEAD is not the one the human reviewed. The
 // outcome, success or refusal, is journaled with both actors.
-func (p *Project) executeChangeRequest(r Run, d Decision) (map[string]any, error) {
+func (p *Project) executeChangeRequest(r Run, d Decision, via Approval) (map[string]any, error) {
 	action, id, head := str(d.Context["action"]), str(d.Context["changeId"]), str(d.Context["head"])
-	record := map[string]any{"decisionId": d.ID, "action": action, "changeId": id, "requestedBy": str(d.Context["requestedBy"]), "approvedBy": "user"}
+	record := map[string]any{"decisionId": d.ID, "action": action, "changeId": id, "requestedBy": str(d.Context["requestedBy"]), "approval": via.Record()}
 	fail := func(reason error) (map[string]any, error) {
 		record["reason"] = Redact(reason.Error())
 		if _, e := p.Append(r.ID, r.Workflow.Id, "user", "decision.refused", record); e != nil {
@@ -215,11 +229,20 @@ func (p *Project) executeChangeRequest(r Run, d Decision) (map[string]any, error
 	if current := str(preview["currentHead"]); current != head {
 		return fail(fmt.Errorf("stale request: HEAD moved from %.12s to %.12s since it was made; request it again", head, current))
 	}
+	// What runs is what was reviewed: a patch or integration commit that
+	// differs from the one in the request's preview is a different operation. A
+	// request without the digests (made before they were recorded) is refused too.
+	reviewed, _ := d.Context["preview"].(map[string]any)
+	for _, key := range []string{"patchSha256", "integrationCommit"} {
+		if str(reviewed[key]) != str(preview[key]) {
+			return fail(fmt.Errorf("%s changed since the request was made; request it again", key))
+		}
+	}
 	var result Change
 	if action == "rollback" {
-		result, e = p.Rollback(r.ID, id, true)
+		result, e = p.RollbackBy(r.ID, id, via)
 	} else {
-		result, e = p.integrate(r.ID, id, "user")
+		result, e = p.IntegrateBy(r.ID, id, via)
 	}
 	record["resultChangeId"], record["resultState"], record["integrationCommit"] = result.ID, result.State, result.IntegrationCommit
 	if e != nil {

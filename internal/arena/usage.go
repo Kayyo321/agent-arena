@@ -30,6 +30,36 @@ var usageFields = [2][]string{
 	{"outputTokens", "output_tokens", "completionTokens", "completion_tokens", "candidatesTokenCount"},
 }
 
+// Some providers report a category beside, not inside, the headline count, so
+// it adds to it; others report a subset of the headline count, which must not
+// be added again. Each provider's cache, tool and thinking tokens fall into one
+// of the two (sources: the Anthropic Messages usage object, the Codex app-server
+// protocol, and the Gemini API's GenerateContentResponseUsageMetadata):
+//
+//	additive to input:  Claude cache_read_input_tokens, cache_creation_input_tokens
+//	                    (input_tokens excludes both); Gemini toolUsePromptTokenCount
+//	                    (tool results fed back, not in promptTokenCount)
+//	additive to output: Gemini thoughtsTokenCount (not in candidatesTokenCount)
+//	subsets, not added: Codex cachedInputTokens, cacheWriteInputTokens and
+//	                    reasoningOutputTokens; Gemini cachedContentTokenCount
+//	                    (promptTokenCount includes the cached content); Claude
+//	                    output_tokens_details.thinking_tokens and the cache_creation
+//	                    ephemeral breakdown; every *TokensDetails modality list
+//
+// The journal keeps each provider's whole usage map, so the categories a price
+// needs stay recoverable from the usage.reported events; the roll-up only sums.
+var (
+	additiveInputFields  = []string{"cache_read_input_tokens", "cache_creation_input_tokens", "cacheReadInputTokens", "cacheCreationInputTokens", "toolUsePromptTokenCount"}
+	additiveOutputFields = []string{"thoughtsTokenCount"}
+)
+
+// turnKey marks a usage map as belonging to one model call of a tool loop. The
+// mediated routes (local models, the Gemini API, Claude through an API key) make
+// up to forty calls for one invocation; each call's counts start over and
+// include the conversation so far, so the calls add up instead of one hiding the
+// others. Arena adds the key; providers do not send it.
+const turnKey = "arenaTurn"
+
 // usageTokens reads the input and output counts a provider reported. Codex
 // nests its running totals under tokenUsage.total.
 func usageTokens(usage map[string]any) (in, out int64, found [2]bool) {
@@ -48,6 +78,18 @@ func usageTokens(usage map[string]any) (in, out int64, found [2]bool) {
 					out = n
 				}
 				break
+			}
+		}
+	}
+	for i, keys := range [2][]string{additiveInputFields, additiveOutputFields} {
+		for _, key := range keys {
+			if n, ok := usageCount(usage[key]); ok {
+				found[i] = true
+				if i == 0 {
+					in += n
+				} else {
+					out += n
+				}
 			}
 		}
 	}
@@ -70,23 +112,26 @@ func usageCount(v any) (int64, bool) {
 }
 
 // SumUsage totals the journal's usage events. A provider may report several
-// times within one invocation with running totals (Codex, Gemini), so each
-// agent.started opens a window and only the highest count per field in that
-// window is kept; the windows then add up across retries and loop passes.
+// times within one model call with running totals (Codex, Gemini), so each
+// agent.started opens a window and, per model call (turnKey), only the highest
+// count per field is kept; the calls of a window add up, and the windows add up
+// across retries and loop passes. A final summary that repeats the streamed
+// totals therefore never counts twice, and separate calls never hide one another.
 func SumUsage(events []Event) RunUsage {
-	type window struct {
+	type counts struct {
 		in, out int64
 		found   [2]bool
 	}
-	open := map[string]*window{}
+	type window map[int]*counts
+	open := map[string]window{}
 	closed := map[string][]window{}
 	for _, e := range events {
 		switch e.Type {
 		case "agent.started":
 			if w := open[e.AgentID]; w != nil {
-				closed[e.AgentID] = append(closed[e.AgentID], *w)
+				closed[e.AgentID] = append(closed[e.AgentID], w)
 			}
-			open[e.AgentID] = &window{}
+			open[e.AgentID] = window{}
 		case "usage.reported":
 			usage, _ := e.Data["usage"].(map[string]any)
 			in, out, found := usageTokens(usage)
@@ -95,24 +140,32 @@ func SumUsage(events []Event) RunUsage {
 			}
 			w := open[e.AgentID]
 			if w == nil {
-				w = &window{}
+				w = window{}
 				open[e.AgentID] = w
 			}
-			w.in, w.out = max(w.in, in), max(w.out, out)
-			w.found[0], w.found[1] = w.found[0] || found[0], w.found[1] || found[1]
+			turn, _ := usageCount(usage[turnKey])
+			c := w[int(turn)]
+			if c == nil {
+				c = &counts{}
+				w[int(turn)] = c
+			}
+			c.in, c.out = max(c.in, in), max(c.out, out)
+			c.found[0], c.found[1] = c.found[0] || found[0], c.found[1] || found[1]
 		}
 	}
 	u := RunUsage{Agents: map[string]UsageTotals{}}
 	for id, w := range open {
-		closed[id] = append(closed[id], *w)
+		closed[id] = append(closed[id], w)
 	}
 	for id, windows := range closed {
 		var t UsageTotals
 		for _, w := range windows {
-			if w.found[0] || w.found[1] {
-				t.Reported = true
-				t.InputTokens += w.in
-				t.OutputTokens += w.out
+			for _, c := range w {
+				if c.found[0] || c.found[1] {
+					t.Reported = true
+					t.InputTokens += c.in
+					t.OutputTokens += c.out
+				}
 			}
 		}
 		if t.Reported {

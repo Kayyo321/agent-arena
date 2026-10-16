@@ -1,6 +1,8 @@
 package arena
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -99,6 +101,19 @@ func mustFail(t *testing.T, c *controlClient, tool, run, change, want string) {
 	}
 }
 
+// requireUnverifiedApproval checks the provenance recorded for an approval: the
+// entry point it came through, and that no identity is claimed as verified.
+func requireUnverifiedApproval(t *testing.T, data map[string]any, channel string) {
+	t.Helper()
+	if claimed, has := data["approvedBy"]; has {
+		t.Fatalf("event still attributes the approval to %v: %+v", claimed, data)
+	}
+	approval, ok := data["approval"].(map[string]any)
+	if !ok || approval["channel"] != channel || approval["identityVerified"] != false || approval["verification"] != "none" {
+		t.Fatalf("approval record = %+v, want channel %q and no verified identity", data["approval"], channel)
+	}
+}
+
 func TestControlIntegrateOnlyRequestsAndTheHumanApprovalExecutesOnce(t *testing.T) {
 	p, r, c := requestFixture(t)
 	change := proposedChange(t, p, r, "one", "one.txt", "one\n")
@@ -124,19 +139,36 @@ func TestControlIntegrateOnlyRequestsAndTheHumanApprovalExecutesOnce(t *testing.
 		t.Fatal("request answered or integrated")
 	}
 
-	out := cliOutput(t, p, "decision", "answer", r.ID, first.DecisionID, "approve")
-	if !strings.Contains(out, `"resultState": "integrated"`) {
-		t.Fatalf("answer printed %s", out)
+	// The CLI refuses to approve without a terminal, so an agent's command
+	// runner cannot approve its own request.
+	refused := NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), []string{"decision", "answer", r.ID, first.DecisionID, "approve", "--project", p.Root})
+	if refused == nil || !strings.Contains(refused.Error(), "needs a person at a terminal") {
+		t.Fatalf("approval without a terminal: %v", refused)
+	}
+	if len(eventsOf(t, p, r.ID, "decision.answered")) != 0 {
+		t.Fatal("a refused approval answered the decision")
+	}
+	outcome, e := p.AnswerDecision(r.ID, first.DecisionID, "approve", Approval{Channel: ApprovalTUI})
+	if e != nil || outcome["resultState"] != "integrated" {
+		t.Fatalf("approval: %v %+v", e, outcome)
 	}
 	if b, e := os.ReadFile(filepath.Join(p.Root, "one.txt")); e != nil || string(b) != "one\n" {
 		t.Fatalf("not integrated: %v", e)
 	}
 	executed := eventsOf(t, p, r.ID, "decision.executed")
-	if len(executed) != 1 || executed[0].Data["requestedBy"] != controlActor || executed[0].Data["approvedBy"] != "user" || executed[0].Data["changeId"] != change.ID {
+	if len(executed) != 1 || executed[0].Data["requestedBy"] != controlActor || executed[0].Data["changeId"] != change.ID {
 		t.Fatalf("journal: %+v", executed)
+	}
+	requireUnverifiedApproval(t, executed[0].Data, ApprovalTUI)
+	if answered := eventsOf(t, p, r.ID, "decision.answered"); len(answered) != 1 {
+		t.Fatalf("answered %d times", len(answered))
+	} else {
+		requireUnverifiedApproval(t, answered[0].Data, ApprovalTUI)
 	}
 	if integrated := eventsOf(t, p, r.ID, "change.integrated"); len(integrated) != 1 {
 		t.Fatalf("integrated %d times", len(integrated))
+	} else {
+		requireUnverifiedApproval(t, integrated[0].Data, ApprovalTUI)
 	}
 
 	if e := p.Answer(r.ID, first.DecisionID, "approve"); e == nil || !strings.Contains(e.Error(), "already answered") {
@@ -204,9 +236,10 @@ func TestControlStaleIntegrateIsRefusedAndRequestAgainMakesAFreshDecision(t *tes
 		t.Fatalf("stale approval changed state to %s", after.State)
 	}
 	refused := eventsOf(t, p, r.ID, "decision.refused")
-	if len(refused) != 1 || refused[0].Data["requestedBy"] != controlActor || refused[0].Data["approvedBy"] != "user" {
+	if len(refused) != 1 || refused[0].Data["requestedBy"] != controlActor {
 		t.Fatalf("refusal journal: %+v", refused)
 	}
+	requireUnverifiedApproval(t, refused[0].Data, ApprovalTUI)
 	if len(eventsOf(t, p, r.ID, "decision.executed")) != 0 {
 		t.Fatal("stale request executed")
 	}
@@ -217,7 +250,7 @@ func TestControlStaleIntegrateIsRefusedAndRequestAgainMakesAFreshDecision(t *tes
 	if again.DecisionID == fresh.DecisionID {
 		t.Fatal("answered decision reused")
 	}
-	if _, e := p.AnswerDecision(r.ID, again.DecisionID, "approve"); e != nil {
+	if _, e := p.AnswerDecision(r.ID, again.DecisionID, "approve", Approval{Channel: ApprovalTUI}); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -283,7 +316,7 @@ func TestControlRollbackRequestApprovalAndAlreadyRolledBack(t *testing.T) {
 		t.Fatal("request created a rollback")
 	}
 
-	if _, e := p.AnswerDecision(r.ID, d.DecisionID, "approve"); e != nil {
+	if _, e := p.AnswerDecision(r.ID, d.DecisionID, "approve", Approval{Channel: ApprovalTUI}); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := os.Stat(filepath.Join(p.Root, "one.txt")); !os.IsNotExist(e) {
@@ -293,8 +326,16 @@ func TestControlRollbackRequestApprovalAndAlreadyRolledBack(t *testing.T) {
 		t.Fatal("later work lost")
 	}
 	executed := eventsOf(t, p, r.ID, "decision.executed")
-	if len(executed) != 1 || executed[0].Data["action"] != "rollback" || executed[0].Data["requestedBy"] != controlActor || executed[0].Data["approvedBy"] != "user" {
+	if len(executed) != 1 || executed[0].Data["action"] != "rollback" || executed[0].Data["requestedBy"] != controlActor {
 		t.Fatalf("journal: %+v", executed)
+	}
+	requireUnverifiedApproval(t, executed[0].Data, ApprovalTUI)
+	for _, kind := range []string{"rollback.created", "rollback.completed"} {
+		if events := eventsOf(t, p, r.ID, kind); len(events) != 1 {
+			t.Fatalf("%s journaled %d times", kind, len(events))
+		} else {
+			requireUnverifiedApproval(t, events[0].Data, ApprovalTUI)
+		}
 	}
 	if e := p.Answer(r.ID, d.DecisionID, "approve"); e == nil || !strings.Contains(e.Error(), "already answered") {
 		t.Fatalf("second approval: %v", e)
@@ -412,11 +453,124 @@ func TestChangeRequestDecisionIsCompactedOnceAnsweredWithoutFullHistory(t *testi
 	}
 	change := proposedChange(t, p, r, "one", "one.txt", "one\n")
 	d := request(t, c, "arena_integrate", r.ID, change.ID)
-	if _, e := p.AnswerDecision(r.ID, d.DecisionID, "approve"); e != nil {
+	if _, e := p.AnswerDecision(r.ID, d.DecisionID, "approve", Approval{Channel: ApprovalTUI}); e != nil {
 		t.Fatal(e)
 	}
 	var stored Decision
 	if e := ReadJSON(filepath.Join(p.RunDir(r.ID), "decisions", d.DecisionID+".json"), &stored); e != nil || stored.ClosedAt == "" || stored.Context != nil {
 		t.Fatalf("not compacted: %+v %v", stored, e)
+	}
+}
+
+// Every way of approving records the entry point it came through, and none
+// records a verified identity: from Arena's side a person at a keyboard and a
+// process driving the same command line look the same.
+func TestApprovalsRecordTheirChannelNotAVerifiedIdentity(t *testing.T) {
+	p, r, c := requestFixture(t)
+	cli := func(args ...string) error {
+		return NewCLI(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}).Run(context.Background(), append(args, "--project", p.Root))
+	}
+	one := proposedChange(t, p, r, "one", "one.txt", "one\n")
+	if e := cli("integrate", r.ID, one.ID, "--yes"); e != nil {
+		t.Fatal(e)
+	}
+	integrated := eventsOf(t, p, r.ID, "change.integrated")
+	if len(integrated) != 1 {
+		t.Fatalf("integrated %d times", len(integrated))
+	}
+	requireUnverifiedApproval(t, integrated[0].Data, ApprovalCLINoTerminal)
+
+	// A reject needs no terminal; it is recorded as coming from a pipe.
+	d := request(t, c, "arena_rollback", r.ID, one.ID)
+	if e := cli("decision", "answer", r.ID, d.DecisionID, "reject"); e != nil {
+		t.Fatal(e)
+	}
+	answered := eventsOf(t, p, r.ID, "decision.answered")
+	if len(answered) != 1 {
+		t.Fatalf("answered %d times", len(answered))
+	}
+	requireUnverifiedApproval(t, answered[0].Data, ApprovalCLINoTerminal)
+
+	if e := cli("rollback", r.ID, one.ID, "--yes"); e != nil {
+		t.Fatal(e)
+	}
+	for _, kind := range []string{"rollback.created", "rollback.completed"} {
+		events := eventsOf(t, p, r.ID, kind)
+		if len(events) != 1 {
+			t.Fatalf("%s journaled %d times", kind, len(events))
+		}
+		requireUnverifiedApproval(t, events[0].Data, ApprovalCLINoTerminal)
+	}
+
+	two := proposedChange(t, p, r, "two", "two.txt", "two\n")
+	if _, e := p.Integrate(r.ID, two.ID, true); e != nil {
+		t.Fatal(e)
+	}
+	integrated = eventsOf(t, p, r.ID, "change.integrated")
+	if len(integrated) != 2 {
+		t.Fatalf("integrated %d times", len(integrated))
+	}
+	requireUnverifiedApproval(t, integrated[1].Data, ApprovalLibrary)
+}
+
+// The operation that runs is the one that was reviewed: a patch that changes
+// after the request is opened is refused, not executed under the old approval.
+func TestControlApprovalRefusesAPatchChangedSinceTheRequest(t *testing.T) {
+	p, r, c := requestFixture(t)
+	change := proposedChange(t, p, r, "one", "one.txt", "one\n")
+	d := request(t, c, "arena_integrate", r.ID, change.ID)
+	if d.Preview["patchSha256"] == nil || d.Preview["patchSha256"] == "" {
+		t.Fatalf("preview carries no patch digest: %+v", d.Preview)
+	}
+	patch := filepath.Join(p.RunDir(r.ID), "changes", change.ID+".patch")
+	body, e := os.ReadFile(patch)
+	if e != nil {
+		t.Fatal(e)
+	}
+	altered := strings.Replace(string(body), "+one", "+ONE", 1)
+	if altered == string(body) {
+		t.Fatalf("test patch has no line to alter:\n%s", body)
+	}
+	if e := os.WriteFile(patch, []byte(altered), 0600); e != nil {
+		t.Fatal(e)
+	}
+	e = p.Answer(r.ID, d.DecisionID, "approve")
+	if e == nil || !strings.Contains(e.Error(), "patchSha256 changed since the request was made") {
+		t.Fatalf("approval of an altered patch: %v", e)
+	}
+	if _, e := os.Stat(filepath.Join(p.Root, "one.txt")); !os.IsNotExist(e) {
+		t.Fatal("the altered patch was integrated")
+	}
+	if after, _ := p.Change(r.ID, change.ID); after.State != "proposed" {
+		t.Fatalf("change is %s after a refused approval", after.State)
+	}
+	if len(eventsOf(t, p, r.ID, "decision.refused")) != 1 || len(eventsOf(t, p, r.ID, "change.integrated")) != 0 {
+		t.Fatal("refusal not journaled, or the change was integrated")
+	}
+}
+
+func TestControlRollbackApprovalRefusesAChangedIntegrationCommit(t *testing.T) {
+	p, r, c := requestFixture(t)
+	change := proposedChange(t, p, r, "one", "one.txt", "one\n")
+	if _, e := p.Integrate(r.ID, change.ID, true); e != nil {
+		t.Fatal(e)
+	}
+	commitFile(t, p, "later.txt", "later\n")
+	d := request(t, c, "arena_rollback", r.ID, change.ID)
+	head, e := Git(p.Root, "rev-parse", "HEAD")
+	if e != nil {
+		t.Fatal(e)
+	}
+	integrated, _ := p.Change(r.ID, change.ID)
+	integrated.IntegrationCommit = head
+	if e := p.saveChange(integrated); e != nil {
+		t.Fatal(e)
+	}
+	e = p.Answer(r.ID, d.DecisionID, "approve")
+	if e == nil || !strings.Contains(e.Error(), "integrationCommit changed since the request was made") {
+		t.Fatalf("approval after the integration commit changed: %v", e)
+	}
+	if len(eventsOf(t, p, r.ID, "rollback.created")) != 0 {
+		t.Fatal("a rollback was created for a different commit")
 	}
 }

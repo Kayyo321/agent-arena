@@ -161,6 +161,25 @@ func TestWatchFollowKeepsEventsRecordedJustAfterTheTerminalEvent(t *testing.T) {
 	}
 }
 
+func TestWatchFollowEndsWhenTheRunIsInterrupted(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	appendEvents(t, p, r, "", "workflow.started")
+	out := &syncBuffer{}
+	done := startCLI(context.Background(), out, "watch", r.ID, "--follow", "--json", "--project", p.Root)
+	waitFor(t, "the backlog", func() bool { return out.lines() == 2 })
+	// The supervisor stopped (a closed tmux pane, a killed process): no one is
+	// left to write events, so the follower must not poll forever.
+	appendEvents(t, p, r, "", "workflow.interrupted")
+	if err := waitDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+	events := streamed(t, out.String())
+	if len(events) != 3 || events[2].Type != "workflow.interrupted" {
+		t.Fatalf("stream:\n%s", out.String())
+	}
+}
+
 func TestWatchJSONOnAFinishedRunPrintsTheJournalOnceAndStops(t *testing.T) {
 	p := committedProject(t)
 	r := testRun(t, p)
@@ -376,5 +395,103 @@ func TestViewRequiresARunAndAKnownAgent(t *testing.T) {
 	}
 	if err := cli.Run(context.Background(), []string{"view", "nobody", "--run", r.ID, "--project", p.Root}); err == nil || !strings.Contains(err.Error(), "agents: head") {
 		t.Fatalf("unknown agent: %v", err)
+	}
+}
+
+// `arena tmux resume` starts its observer panes at the same moment as the
+// supervisor, so they begin on a run whose journal still ends in
+// workflow.interrupted: the supervisor probes providers before it records
+// workflow.resumed. A follower started in that state must wait for the resume,
+// not decide there is no supervisor and quit.
+func TestWatchFollowOfAnAlreadyInterruptedRunWaitsForItToBeResumed(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	appendEvents(t, p, r, "", "workflow.started", "workflow.interrupted")
+	out := &syncBuffer{}
+	done := startCLI(context.Background(), out, "watch", r.ID, "--follow", "--json", "--project", p.Root)
+	waitFor(t, "the backlog", func() bool { return out.lines() == 3 })
+	time.Sleep(5 * followInterval)
+	select {
+	case err := <-done:
+		t.Fatalf("quit while the run could still be resumed: %v", err)
+	default:
+	}
+	appendEvents(t, p, r, "", "workflow.resumed")
+	appendEvents(t, p, r, "head", "agent.progress")
+	appendEvents(t, p, r, "", "workflow.succeeded")
+	if err := waitDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != mirror(t, p, r) || len(streamed(t, out.String())) != 6 {
+		t.Fatalf("the resumed run was not followed to its end:\n%s", out.String())
+	}
+}
+
+// A real run is interrupted under both kinds of follower, then resumed. Followers
+// attached when the supervisor stops exit with nothing missing; one started
+// while the run is interrupted rides through the resume to completion.
+func TestFollowersExitWhenARealRunIsInterruptedAndSurviveItsResume(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	watching, viewing := &syncBuffer{}, &syncBuffer{}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	watchDone := startCLI(ctx, watching, "watch", r.ID, "--follow", "--json", "--project", p.Root)
+	viewDone := startCLI(ctx, viewing, "view", "lead", "--run", r.ID, "--follow", "--project", p.Root)
+	waitFor(t, "the followers to attach", func() bool { return watching.lines() >= 1 && viewing.lines() >= 1 })
+
+	// split.2 is held until the supervisor is stopped.
+	engineCtx, stop := context.WithCancel(ctx)
+	first := newFanOutFixture(2)
+	first.block = func(_ context.Context, id string) bool {
+		if id == "split.2" {
+			stop()
+			return true
+		}
+		return false
+	}
+	if err := <-startFanOut(engineCtx, p, r, first, false); err == nil {
+		t.Fatal("the stopped supervisor reported success")
+	}
+	atInterrupt, err := p.Events(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := atInterrupt[len(atInterrupt)-1]; last.Type != "workflow.interrupted" {
+		t.Fatalf("the journal ends in %s, want workflow.interrupted", last.Type)
+	}
+
+	// Both attached followers end cleanly, having delivered the whole journal.
+	if err := waitDone(t, watchDone); err != nil {
+		t.Fatalf("watch after the interrupt: %v", err)
+	}
+	if err := waitDone(t, viewDone); err != nil {
+		t.Fatalf("view after the interrupt: %v", err)
+	}
+	if streamedEvents := streamed(t, watching.String()); len(streamedEvents) != len(atInterrupt) {
+		t.Fatalf("watch delivered %d of %d events", len(streamedEvents), len(atInterrupt))
+	}
+	if !strings.Contains(viewing.String(), "Run interrupted") {
+		t.Fatalf("view did not end on the interrupted run:\n%s", viewing.String())
+	}
+
+	// A follower started now waits for the resume and follows it to the end.
+	late := &syncBuffer{}
+	lateDone := startCLI(ctx, late, "watch", r.ID, "--follow", "--json", "--project", p.Root)
+	waitFor(t, "the late follower's backlog", func() bool { return late.lines() == len(atInterrupt) })
+	time.Sleep(4 * followInterval)
+	select {
+	case err := <-lateDone:
+		t.Fatalf("a follower of an interrupted run quit before the resume: %v", err)
+	default:
+	}
+	events := finished(t, p, r, startFanOut(ctx, p, r, newFanOutFixture(2), true))
+	if err := waitDone(t, lateDone); err != nil {
+		t.Fatal(err)
+	}
+	if late.String() != mirror(t, p, r) || len(streamed(t, late.String())) != len(events) {
+		t.Fatalf("the late follower missed part of the resumed run: %d of %d events", len(streamed(t, late.String())), len(events))
 	}
 }

@@ -6,17 +6,18 @@ import (
 	"strings"
 )
 
-// HistoryEntry is one run in `arena history --json`.
+// HistoryEntry is one run in `arena history --all`.
 type HistoryEntry struct {
 	ID       string `json:"id"`
 	Imported bool   `json:"imported"`
 }
 
 // historyAudit handles the audit-bundle and purge forms of `arena history`,
-// the JSON run list, and imported runs. done is false for every other form.
+// the `--all` run list, and imported runs. done is false for every other form,
+// including the plain and `--json` lists, which stay the array of local run IDs.
 func (cli *CLI) historyAudit(p *Project, args []string, o Options) (done bool, err error) {
 	switch {
-	case len(args) == 1 && o.Bool("json"):
+	case len(args) == 1 && o.Bool("all"):
 		local, err := p.Runs()
 		if err != nil {
 			return true, err

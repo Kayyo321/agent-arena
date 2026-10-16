@@ -167,7 +167,7 @@ A fan-out node (see [Fan-out nodes](CONFIGURATION.md#fan-out-nodes)) uses the or
 }
 ```
 
-The packet's `arenaChangeIds` pin every successful child's proposal (and the node's input changes), so the next agent's workspace starts from all of them together. Before the node returns, Arena checks every pair of successful children with `git apply --check` (the check integrate runs): one child's patch goes into a scratch index at the shared base and the other's must still apply. A child that clashes with a sibling gets `conflict: true` and `conflictsWith` (the sibling child IDs) in its `results` entry; both fields are optional and absent for a clean child, so existing consumers are unaffected. The packet's `arenaChangeIds` then leave out the changes of conflicting children, so the next node's workspace is built from the non-conflicting children only and the run continues. Arena does not pick a winner between conflicting children and drops nothing: their changes stay `proposed` in the integration queue, listed in the entry's `changeIds`, and integrate one at a time as usual (a later one then reports `conflicted`). The check is pairwise and deterministic, with no new decision. Disjoint items are still best: they keep every child's work in the next node's workspace. `arenaSourceProviders` lists the planner, worker and input providers.
+The packet's `arenaChangeIds` pin every successful child's proposal (and the node's input changes), so the next agent's workspace starts from all of them together. Before the node returns, Arena checks every pair of successful children the way the next node's base is built (`git apply --cached --3way`, as `composeBase` does): one child's patches go into a scratch index at the shared base and the other's must still apply. Children that pass every pair are then applied one after another, and a child that fails on top of the others is held out alone. A child that clashes with a sibling gets `conflict: true` and `conflictsWith` (the sibling child IDs) in its `results` entry; both fields are optional and absent for a clean child, so existing consumers are unaffected. The packet's `arenaChangeIds` then leave out the changes of conflicting children, so the next node's workspace is built from the non-conflicting children only and the run continues. Arena does not pick a winner between conflicting children and drops nothing: their changes stay `proposed` in the integration queue, listed in the entry's `changeIds`, and integrate one at a time as usual (a later one then reports `conflicted`). The check is pairwise and deterministic, with no new decision. Disjoint items are still best: they keep every child's work in the next node's workspace. `arenaSourceProviders` lists the planner, worker and input providers.
 
 The journal records `fanout.started`, `fanout.planned` (plan message ID and item count), `fanout.approved` (`auto`, `user` or `empty`, the count to start and the number dropped), `fanout.stopped`, `fanout.child.started`, `fanout.child.completed` and `fanout.child.failed` (child ID and message or error), `fanout.conflict` (once per pass, before `fanout.completed`: the conflicting `children`, their `pairs`, and the held `changeIds`) and `fanout.completed` (which also counts `conflicting`). Each event carries the node's loop `iteration`. Children's own `agent.*` events use their child IDs. A resumed run reads these events back: it does not run the planner again for a recorded plan, ask again for a recorded approval, or rerun a child that completed or failed. A child that was interrupted runs again. An approval question that an interrupted supervisor left open is awaited again rather than asked anew, and an answer given while no supervisor ran is used as it stands. Resume needs the retained plan and child result packets, so a redacted-retention run cannot resume mid-fan-out.
 
@@ -399,8 +399,8 @@ session accepts at most 1000 tool calls and starts at most 3 runs.
   readers, they take short-lived read locks, and `arena_status` runs the same
   provider probes as `arena status`.
 - There is no tool for credentials or provider configuration, for answering
-  decisions, or for editing or deleting workflows. Those stay with the human, in
-  the TUI or the CLI. `arena_integrate` and `arena_rollback` can only *request*
+  decisions, or for editing or deleting workflows. Those stay with the operator's
+  entry points, the TUI or the CLI. `arena_integrate` and `arena_rollback` can only *request*
   an integration or rollback as a pending decision; they never act.
 - `arena_run_start` takes only a saved workflow ID and a task. It has no provider,
   model, effort, endpoint or credential parameter, so the runtime is always the
@@ -417,7 +417,12 @@ session accepts at most 1000 tool calls and starts at most 3 runs.
 
 ### Integrate and rollback requests
 
-Integration stays human-reviewed. `arena_integrate` and `arena_rollback` validate
+Integration waits for an answer from the operator's entry points, the TUI or
+`arena decision answer`. Arena records which entry point answered, not who: it
+does not verify a person's identity and does not yet keep agent processes away
+from the answer path, so this is a convention agents are told to follow, not an
+enforced human approval ([ADR 0002](adr/0002-operator-approval-boundary.md)
+proposes the boundary that would make it one). `arena_integrate` and `arena_rollback` validate
 the request exactly as `arena integrate RUN CHANGE` and `arena rollback RUN CHANGE`
 would, change nothing, and open a pending decision (kind `integrate-change` or
 `rollback-change`, choices `approve` and `reject`) that carries the preview and
@@ -443,15 +448,17 @@ decision):
 
 **Who executes.** There is no supervisor to rely on, so the answer path does it:
 the person who answers runs the action. `arena decision answer RUN DECISION approve`
-(or the TUI's `/answer`) re-runs the checks above, and then performs the same
+in a terminal (or the TUI's `/answer`; the command refuses to approve from a pipe or an agent's command runner, which a pseudo-terminal defeats) re-runs the checks above, and then performs the same
 operation as `arena integrate` or `arena rollback --yes`, in the process that
 answers. `reject` records the answer and does nothing. The decision is stored as
 answered before anything runs, so an action executes at most once: answering
 again fails with `decision already answered`, and a decision that fails or is
 refused is not retried. There is no way to approve once and have it run later.
 
-If anything differs from what the human reviewed, nothing runs. In particular,
-if `HEAD` is not the `currentHead` in the preview (a stale request), or the
+If anything differs from what was reviewed, nothing runs. In particular,
+if `HEAD` is not the `currentHead` in the preview (a stale request), the
+patch digest (`patchSha256`) or integration commit (`integrationCommit`)
+differs from the preview's, or the
 change was integrated, conflicted or rolled back in the meantime, the answer
 fails with `approved, but integrate of CHANGE was not executed: ...` and a
 `decision.refused` event; request it again to get a fresh preview. A rollback
@@ -459,11 +466,17 @@ or integration that starts and then conflicts keeps its existing behavior: the
 conflict is journaled and the work is preserved in its worktree.
 
 The journal records the whole path: `decision.requested` (requesting actor),
-`decision.answered` (the human), and then either `decision.executed` or
+`decision.answered`, and then either `decision.executed` or
 `decision.refused`, each with `decisionId`, `action`, `changeId`, `requestedBy`
-and `approvedBy`, alongside the usual `change.integrated` or
-`rollback.created`/`rollback.completed` events. Integration policy is not
-weakened: a request is always a human decision, whatever
+and `approval`, alongside the usual `change.integrated` or
+`rollback.created`/`rollback.completed` events, which carry `approval` too.
+`approval` is `{"channel", "identityVerified", "verification"}`: `channel` is
+`cli-terminal`, `cli-no-terminal`, `tui` or `library`, and `identityVerified`
+is `false` with `verification` `none` on every record, because Arena has no way
+to tell a person from a process driving the same entry point. The journal
+`actor` `user` on these events is the legacy label for a human-facing entry
+point, not an identity. Integration policy is not
+weakened: a request always waits for an answer, whatever
 `approvalPolicies.changeIntegration` says, and `auto-if-clean` is unchanged
 (it applies only inside a run's own engine, not to these tools). Rollback still
 creates a revert commit or a recovery worktree and preserves later work.

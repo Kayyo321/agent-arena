@@ -22,6 +22,18 @@ type chatMessage struct {
 }
 type inference func(context.Context, []chatMessage) (string, error)
 
+// turnUsage copies a provider's usage map and tags it with the tool-loop turn
+// it belongs to (see turnKey). The conversation starts with one message and
+// each turn appends two, so the length gives the turn.
+func turnUsage(usage map[string]any, messages []chatMessage) map[string]any {
+	tagged := make(map[string]any, len(usage)+1)
+	for k, v := range usage {
+		tagged[k] = v
+	}
+	tagged[turnKey] = (len(messages) - 1) / 2
+	return tagged
+}
+
 func invokeLocal(ctx context.Context, in Invocation) (map[string]any, error) {
 	endpoint, e := LocalEndpoint(in.Runtime)
 	if e != nil {
@@ -103,7 +115,7 @@ func invokeLocal(ctx context.Context, in Invocation) (map[string]any, error) {
 			if chunk["done"] == true {
 				done = true
 				if in.Usage != nil {
-					if err := in.Usage(map[string]any{"promptTokens": chunk["prompt_eval_count"], "outputTokens": chunk["eval_count"]}); err != nil {
+					if err := in.Usage(turnUsage(map[string]any{"promptTokens": chunk["prompt_eval_count"], "outputTokens": chunk["eval_count"]}, messages)); err != nil {
 						return "", err
 					}
 				}
@@ -194,7 +206,7 @@ func invokeGemini(ctx context.Context, in Invocation) (map[string]any, error) {
 				}
 			}
 			if chunk.UsageMetadata != nil && in.Usage != nil {
-				if err := in.Usage(convert[map[string]any](chunk.UsageMetadata)); err != nil {
+				if err := in.Usage(turnUsage(convert[map[string]any](chunk.UsageMetadata), messages)); err != nil {
 					return "", err
 				}
 			}
@@ -253,7 +265,7 @@ func invokeClaude(ctx context.Context, in Invocation) (map[string]any, error) {
 			}
 			if event["type"] == "result" {
 				if usage, ok := event["usage"].(map[string]any); ok && in.Usage != nil {
-					if err := in.Usage(usage); err != nil {
+					if err := in.Usage(turnUsage(usage, messages)); err != nil {
 						process.Stop()
 						_ = process.Wait()
 						return "", err

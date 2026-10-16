@@ -544,9 +544,19 @@ func (p *Project) Integrate(run, id string, approved bool) (Change, error) {
 	if !approved {
 		return Change{}, fmt.Errorf("integration requires explicit human approval")
 	}
-	return p.integrate(run, id, "user")
+	return p.IntegrateBy(run, id, Approval{Channel: ApprovalLibrary})
 }
-func (p *Project) integrate(run, id, actor string) (Change, error) {
+
+// IntegrateBy integrates a change on an approval received through the given
+// entry point; the journal records the channel, never a verified identity.
+func (p *Project) IntegrateBy(run, id string, by Approval) (Change, error) {
+	return p.integrate(run, id, "", by)
+}
+
+// integrate applies a proposed change. policy names an automatic integration
+// policy that approved it (empty for a human entry point); by records the
+// entry point otherwise.
+func (p *Project) integrate(run, id, policy string, by Approval) (Change, error) {
 	change, e := p.Change(run, id)
 	if e != nil {
 		return change, e
@@ -636,16 +646,29 @@ func (p *Project) integrate(run, id, actor string) (Change, error) {
 	if e := p.saveChange(change); e != nil {
 		return change, e
 	}
-	_, e = p.Append(run, r.Workflow.Id, change.AgentID, "change.integrated", map[string]any{"change": change, "previousHead": head, "approvedBy": actor})
+	data := map[string]any{"change": change, "previousHead": head}
+	if policy != "" {
+		data["approvedBy"] = policy
+	}
+	if by.Channel != "" {
+		data["approval"] = by.Record()
+	}
+	_, e = p.Append(run, r.Workflow.Id, change.AgentID, "change.integrated", data)
 	return change, e
 }
 func (p *Project) Rollback(run, id string, approved bool) (Change, error) {
+	if !approved {
+		return p.Change(run, id)
+	}
+	return p.RollbackBy(run, id, Approval{Channel: ApprovalLibrary})
+}
+
+// RollbackBy rolls a change back on an approval received through the given
+// entry point; the journal records the channel, never a verified identity.
+func (p *Project) RollbackBy(run, id string, by Approval) (Change, error) {
 	original, e := p.Change(run, id)
 	if e != nil {
 		return original, e
-	}
-	if !approved {
-		return original, nil
 	}
 	r, e := p.ReadRun(run)
 	if e != nil {
@@ -679,7 +702,7 @@ func (p *Project) Rollback(run, id string, approved bool) (Change, error) {
 	if _, e = Git(p.Root, "worktree", "add", "-b", "codex/arena/recovery/"+recovery.ID, recovery.Workspace, start); e != nil {
 		return recovery, e
 	}
-	if _, e := p.Append(run, r.Workflow.Id, "user", "rollback.created", map[string]any{"original": id, "recovery": recovery}); e != nil {
+	if _, e := p.Append(run, r.Workflow.Id, "user", "rollback.created", map[string]any{"original": id, "recovery": recovery, "approval": by.Record()}); e != nil {
 		return recovery, e
 	}
 	if original.State == "integrated" {
@@ -715,7 +738,7 @@ func (p *Project) Rollback(run, id string, approved bool) (Change, error) {
 	if e := p.saveChange(recovery); e != nil {
 		return recovery, e
 	}
-	_, e = p.Append(run, r.Workflow.Id, "user", "rollback.completed", map[string]any{"recovery": recovery, "preservedLaterWork": true})
+	_, e = p.Append(run, r.Workflow.Id, "user", "rollback.completed", map[string]any{"recovery": recovery, "preservedLaterWork": true, "approval": by.Record()})
 	return recovery, e
 }
 
@@ -788,7 +811,7 @@ func (p *Project) RollbackPreview(run, id string) (map[string]any, error) {
 			return nil, e
 		}
 	}
-	return map[string]any{"change": change, "currentHead": head, "laterChangesToAffectedPaths": later, "behavior": "creates a revert commit or an isolated recovery worktree; preserves later work"}, nil
+	return map[string]any{"change": change, "currentHead": head, "integrationCommit": change.IntegrationCommit, "laterChangesToAffectedPaths": later, "behavior": "creates a revert commit or an isolated recovery worktree; preserves later work"}, nil
 }
 
 // composeBase builds a review/task snapshot in an alternate index. The user's

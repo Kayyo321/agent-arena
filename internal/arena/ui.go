@@ -705,7 +705,7 @@ func (m LiveModel) command(command string) error {
 		if len(parts) != 2 {
 			return fmt.Errorf("inspect with /integrate, apply with /integrate all [skip CHANGE_ID...], or /integrate CHANGE_ID")
 		}
-		_, err := m.Project.Integrate(m.Run.ID, parts[1], true)
+		_, err := m.Project.IntegrateBy(m.Run.ID, parts[1], Approval{Channel: ApprovalTUI})
 		return err
 	default:
 		return fmt.Errorf("use /help for commands; /view NAME for activity, /context NAME for inputs, /quit to exit")
