@@ -23,6 +23,8 @@ type Engine struct {
 	onCallCounts map[string]int
 	onCallSeen   map[string]bool
 	Observe      func(Event)
+	// Now overrides the clock the minutes budget reads; nil means time.Now.
+	Now func() time.Time
 	// iterations counts how often a node has been restarted by a loop route
 	// (absent means its first pass); loops counts revisions per router/target.
 	iterations map[string]int
@@ -283,6 +285,7 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 	completed := make(chan completion, len(nodes))
 	running := 0
 	failed := false
+scheduling:
 	for {
 		progressed := false
 		held := map[string]bool{}
@@ -351,6 +354,22 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 				}
 				progressed = true
 				continue
+			}
+			launch, err := e.enforceBudget(ctx)
+			if err != nil {
+				cancel()
+				for running > 0 {
+					<-completed
+					running--
+				}
+				if s, _ := e.Project.State(e.Run.ID); s.Status != "cancelled" {
+					_, _ = e.event("", "workflow.interrupted", map[string]any{"reason": "supervisor stopped; worktrees preserved"})
+				}
+				return err
+			}
+			if !launch {
+				// Paused on a budget: wait for scheduling to resume.
+				continue scheduling
 			}
 			nodes[id] = "running"
 			running++
