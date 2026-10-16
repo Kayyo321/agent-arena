@@ -48,7 +48,7 @@ Claude Code cloud route. It uses bare mode and does not rely on subscription OAu
 Provider-native tools are disabled for worker calls; Arena's bounded tool protocol
 mediates file access, commands, packets and questions. Commands require the project's
 policy and a supported OS sandbox. Credentials are never included in those command
-environments. Each command gets private temporary/home/cache directories that are removed after supervision ends; other worktrees and global temporary directories remain unwritable. Networking is disabled. Dependency downloads must be prepared outside the run; existing module caches are read-only. Model/effort access stays unverified until actually exercised.
+environments. Each command gets private temporary/home/cache directories that are removed after supervision ends; other worktrees and global temporary directories remain unwritable, and only system toolchain roots, the assigned worktree and resolved toolchain directories are readable (no home directories, other worktrees or host processes; see [Architecture](ARCHITECTURE.md#mediated-command-sandbox)). Networking is disabled. Dependency downloads must be prepared outside the run; existing module caches are read-only. Model/effort access stays unverified until actually exercised.
 
 References: [programmatic CLI](https://code.claude.com/docs/en/headless),
 [authentication restrictions](https://code.claude.com/docs/en/legal-and-compliance).
