@@ -73,7 +73,7 @@ func TestLiveCodexEmbeddedInterview(t *testing.T) {
 	defer cancel()
 	session := newInterviewSession(ctx, p, s)
 	defer session.close()
-	cmd := session.turn("I want to create a new project. I have not selected any worker roles, models or effort. Ask a concise question for missing required choices. Do not complete or save a draft.")
+	cmd := session.turn("I want to create a new project. I have not selected any worker roles, models or effort. Ask a concise question for missing required choices. Do not complete or save a draft.", setupDesign)
 	for {
 		msg := cmd().(interviewEvent)
 		if msg.Question != nil {

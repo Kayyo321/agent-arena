@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -62,7 +63,10 @@ func (cli *CLI) launch(ctx context.Context, p *Project, o Options) error {
 	}
 	session := newUISession(ctx, p)
 	defer session.close()
-	model := launcherModel{Project: p, IDs: ids, Grades: arenaGrades(p, ids), Session: session, Width: 80, Height: 24, Loading: len(ids) == 1}
+	model := launcherModel{Project: p, IDs: ids, Grades: arenaGrades(p, ids), Session: session, Width: 80, Height: 24, Loading: len(ids) == 1, Animated: true}
+	if s, err := p.Settings(); err == nil {
+		model.Animated = s.Display.Animation != "off"
+	}
 	_, err = tea.NewProgram(model, tea.WithContext(session.ctx), tea.WithInput(cli.input), tea.WithOutput(cli.Out)).Run()
 	return err
 }
@@ -127,6 +131,14 @@ type launcherModel struct {
 	Error         string
 	Notice        string
 	Import        *WorkflowDraft // a pasted arena awaiting Enter
+	Animated      bool           // display.animation allows the spinning title
+	Clock         float64        // seconds of title animation
+}
+
+type launcherTick time.Time
+
+func tickLauncher() tea.Cmd {
+	return tea.Tick(150*time.Millisecond, func(t time.Time) tea.Msg { return launcherTick(t) })
 }
 
 type launcherShared struct {
@@ -206,15 +218,27 @@ func (m launcherModel) load() tea.Cmd {
 }
 
 func (m launcherModel) Init() tea.Cmd {
-	if len(m.IDs) == 1 {
-		return m.load()
+	cmds := []tea.Cmd{}
+	if m.Animated {
+		cmds = append(cmds, tickLauncher())
 	}
-	return nil
+	if len(m.IDs) == 1 {
+		cmds = append(cmds, m.load())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.Width, m.Height = size.Width, size.Height
+	}
+	if _, ok := msg.(launcherTick); ok {
+		// The live view runs its own clock once an arena is open.
+		if m.Live != nil {
+			return m, nil
+		}
+		m.Clock += wordmarkStep
+		return m, tickLauncher()
 	}
 	if m.Live != nil {
 		live, cmd := m.Live.Update(msg)
@@ -330,7 +354,8 @@ func (m launcherModel) View() tea.View {
 	if len(m.IDs) == 0 {
 		left = launcherSetup(m.Project)
 	}
-	lines := brandedHeader(left, width, height, "show", terminalColor("auto"))
+	clock := wordmarkClock(m.Clock, terminalColor("auto"), m.Animated)
+	lines := spinningHeader(left, width, height, "show", terminalColor("auto"), clock)
 	if len(m.IDs) == 0 {
 		footer = "p paste an arena code · q quit · arena --help for commands"
 	} else {
@@ -362,7 +387,7 @@ func (m launcherModel) View() tea.View {
 		// Trust notes and the grade come first so a large graph cannot push
 		// them off a short terminal.
 		preview := append(append([]string{score.Summary()}, m.Import.Notes...), strings.Split(strings.TrimRight(GraphSummary(m.Import.Workflow), "\n"), "\n")...)
-		lines = append(brandedHeader([]string{"Import a pasted arena", "Project: " + m.Project.Root}, width, height, "show", terminalColor("auto")), preview...)
+		lines = append(spinningHeader([]string{"Import a pasted arena", "Project: " + m.Project.Root}, width, height, "show", terminalColor("auto"), clock), preview...)
 		footer = "Enter import " + m.Import.Workflow.Id + " · Esc cancel"
 	}
 	switch {

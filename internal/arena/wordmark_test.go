@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -95,5 +96,79 @@ func TestWordmarkHonorsColorSizeAndTextFallbackPreferences(t *testing.T) {
 	t.Setenv("LC_ALL", "C")
 	if lines := wordmark(140, 40, "show", false); len(lines) != 1 || lines[0] != "A2rena" {
 		t.Fatal("non-Unicode locale lost plain-text title")
+	}
+}
+
+func TestWordmarkSpinsOneLetterAtATimeInPlace(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	static := wordmark(140, 40, "show", false)
+	// Each letter's columns within the 27-column title, in order A2rena.
+	spans := [][2]int{{0, 5}, {6, 11}, {12, 15}, {16, 19}, {20, 23}, {24, 27}}
+	changed := func(rows []string) []int {
+		letters := []int{}
+		for i, span := range spans {
+			for y, row := range rows {
+				if string([]rune(row)[span[0]:span[1]]) != string([]rune(static[y])[span[0]:span[1]]) {
+					letters = append(letters, i)
+					break
+				}
+			}
+		}
+		return letters
+	}
+	order := []int{}
+	for step := range wordmarkTurn * 7 {
+		rows := spinningWordmark(140, 40, "show", false, (float64(step)+.5)*wordmarkStep)
+		for y, row := range rows {
+			if ansi.StringWidth(row) != ansi.StringWidth(static[y]) {
+				t.Fatalf("step %d row %d changed width: %q", step, y, row)
+			}
+			for _, gap := range spans[1:] {
+				if []rune(row)[gap[0]-1] != ' ' {
+					t.Fatalf("step %d spilled into the gap before column %d: %q", step, gap[0], row)
+				}
+			}
+		}
+		letters := changed(rows)
+		if len(letters) > 1 {
+			t.Fatalf("step %d turns several letters at once: %v", step, letters)
+		}
+		if len(letters) == 1 && (len(order) == 0 || order[len(order)-1] != letters[0]) {
+			order = append(order, letters[0])
+		}
+		if step%wordmarkTurn == 0 && len(letters) != 0 {
+			t.Fatalf("step %d does not start the turn facing front", step)
+		}
+	}
+	if fmt.Sprint(order) != "[0 1 2 3 4 5 0]" {
+		t.Fatalf("letters turned in order %v, want A2rena then A again", order)
+	}
+	if strings.Join(spinningWordmark(140, 40, "show", false, -1), "\n") != strings.Join(static, "\n") {
+		t.Fatal("a negative clock is not the static wordmark")
+	}
+	if lines := spinningWordmark(140, 40, "compact", true, 1); len(lines) != 1 || ansi.Strip(lines[0]) != "A2rena" {
+		t.Fatal("the text fallback spun")
+	}
+	if wordmarkClock(3, false, true) >= 0 || wordmarkClock(3, true, false) >= 0 || wordmarkClock(3, true, true) != 3 {
+		t.Fatal("no-color or reduced motion did not keep the static wordmark")
+	}
+}
+
+func TestLiveBandSpinsOnlyWithAnimation(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("NO_COLOR", "")
+	w, profiles, s := fixture(t)
+	m := LiveModel{Run: Run{Workflow: w, Profiles: profiles, Settings: s}, Width: 160, Height: 40, ShaderTime: 2.5 * wordmarkStep}
+	m.State = RunState{Status: "idle", Agents: map[string]string{}}
+	head := func() string { return ansi.Strip(strings.Join(strings.Split(m.View().Content, "\n")[:3], "\n")) }
+	static := ansi.Strip(strings.Join(wordmark(160, 40, "show", false), "\n"))
+	if !strings.Contains(head(), "⣿") || strings.Contains(head(), strings.Split(static, "\n")[0]) {
+		t.Fatal("animated band kept the static wordmark")
+	}
+	m.Run.Settings.Display.Animation = "off"
+	if band := head(); !strings.Contains(band, strings.Split(static, "\n")[0]) {
+		t.Fatalf("reduced motion still spins the wordmark:\n%s", band)
 	}
 }

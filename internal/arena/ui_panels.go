@@ -35,8 +35,20 @@ func (m LiveModel) loadAgentContext(id string) tea.Cmd {
 			lines = append(lines, "ROLE: "+profile.Role, "OBJECTIVE: "+profile.Objective, "INSTRUCTIONS:", profile.Instructions, "CAPABILITIES: "+strings.Join(profile.Capabilities, ", "), "CONSTRAINTS: "+strings.Join(profile.Constraints, "; "))
 		}
 		if id == "arena-orchestrator" {
-			lines = append(lines, "CONTROL CONTEXT: selected default runtime and arena-orchestrator skill; only this setup conversation is sent. No worker context is assumed to be shared.")
-			lines = append(lines, "SETUP INSTRUCTIONS:", interviewInstructions(), "SETUP CONVERSATION:", m.Transcript)
+			if m.Consulting {
+				lines = append(lines, "CONTROL CONTEXT: selected default runtime and arena-orchestrator skill; only this consultation, the saved arena and the live view's run evidence are sent. No worker context is assumed to be shared.")
+				lines = append(lines, "CONSULT INSTRUCTIONS:", consultInstructions(m.Run.Workflow.Id), "CONSULTATION (sent with live run evidence):", m.ConsultLog)
+			} else {
+				lines = append(lines, "CONTROL CONTEXT: selected default runtime and arena-orchestrator skill; only this setup conversation is sent. No worker context is assumed to be shared.")
+				lines = append(lines, "SETUP INSTRUCTIONS:", interviewInstructions())
+				switch m.Walkthrough {
+				case setupWalkthrough:
+					lines = append(lines, walkthroughInstructions)
+				case setupWalkthroughPicked:
+					lines = append(lines, walkthroughPickedInstructions)
+				}
+				lines = append(lines, "SETUP CONVERSATION:", m.Transcript)
+			}
 			events, err := m.Project.Events("project")
 			return agentContextLoaded{Agent: id, Lines: lines, Events: events, Err: err}
 		}
@@ -85,14 +97,14 @@ func visibleActivity(e Event) string {
 		return str(data["summary"])
 	case "agent.plan":
 		return "Plan: " + strings.TrimSpace(string(SafeJSON(data["plan"])))
-	case "agent.started", "agent.queued", "agent.cancelled", "setup.started":
+	case "agent.started", "agent.queued", "agent.cancelled", "setup.started", "consult.started":
 		return e.Type
-	case "agent.failed", "setup.failed":
+	case "agent.failed", "setup.failed", "consult.failed":
 		return e.Type + ": " + str(data["error"])
 	case "agent.succeeded":
 		result, _ := data["result"].(map[string]any)
 		return "Result: " + str(result["summary"])
-	case "setup.replied":
+	case "setup.replied", "consult.replied":
 		return "Orchestrator: " + str(data["text"])
 	case "command.completed":
 		return "Command completed: " + strings.TrimSpace(string(SafeJSON(data)))
@@ -212,7 +224,14 @@ func (m LiveModel) overlay(lines []string, width, height int) []string {
 
 // chatBody is already sanitized and styled; callers must not wrap it again.
 func (m LiveModel) chatBody(width int, color bool) []string {
-	lines := []string{muted(short("Project orchestrator · describe your project · /help commands", width), color), ""}
+	title := "Project orchestrator · describe your project · /help commands"
+	switch {
+	case m.Consulting:
+		title = "Consulting arena-orchestrator about " + m.Run.Workflow.Id + " · advice only · /graph returns"
+	case m.Walkthrough != setupDesign:
+		title = "Project orchestrator · walkthrough · pick or combine an idea · /help commands"
+	}
+	lines := []string{muted(short(title, width), color), ""}
 	lines = append(lines, m.chatTranscript(width, color)...)
 	if m.Draft != nil {
 		lines = append(lines, chatRule("Workflow preview", width, color))

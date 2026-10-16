@@ -103,7 +103,9 @@ worktrees, and the Git tree at the right. Below it are the graph (with distinct 
 worker, team and router cards), packet activity,
 teams and on-call rail, required providers, decisions and the `> memento mori` prompt.
 `/help` lists slash commands. `/view AGENT` opens a live mini-window and `/context AGENT`
-shows its role, task and workflow context. `/chat` talks to the control agent.
+shows its role, task and workflow context. `/chat` talks to the control agent,
+`/walkthrough` has it propose a few arena ideas when you have no design yet, and
+`/consult` asks it about the loaded arena or run (advice only; edits stay drafts until `/save`).
 Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, and
 `/quit` exits. Plain output is available for logs and automation.
 

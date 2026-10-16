@@ -29,7 +29,13 @@ is closed by a hairline that starts in the brand color under the title. The smal
 signs sit beside it in labelled columns, and the Git tree closes the band flush
 right on wide terminals. The wordmark uses dotted Braille lettering with a
 lavender-to-violet gradient and no backdrop or shadow. It is at most 27 columns by
-three rows, leaving the main viewport for the graph. The prompt spans the bottom.
+three rows, leaving the main viewport for the graph. While animation is on, one
+letter at a time spins in place about its vertical axis, `A` first and the final
+`a` last, then `A` again: it narrows to its edge, turns mirrored and returns,
+eight 150 ms frames per letter. Each letter stays in its own columns, so the
+wordmark's position and width never change. The text fallback, `NO_COLOR`,
+`display.animation: off` (reduced motion) and non-TTY output keep the static
+wordmark. The prompt spans the bottom.
 
 ```text
   A2rena    ledger-loop          ACTIVE          NODES         CHANGES             GIT  ca79e2f · 13 worktrees
@@ -124,6 +130,11 @@ branch and Arena applies it (policy `orchestrator-stall-recovery: answer-routing
 the default); the banner counts down so you can answer first. Other decisions,
 or `recommend-only`, get a recommendation that `/accept` applies. Every
 diagnosis and applied answer is journaled as `orchestrator.stall-diagnosed`. The note clears from the banner once the run ends; the journal keeps it. A router waiting on you shows `⚑ waiting for you`.
+
+`/consult QUESTION` asks the same orchestrator about the loaded arena or run at
+any time, in the conversation view; typing there asks a follow-up and `/graph`
+returns. It only advises: an edit it proposes appears as a scored revision
+preview that `/save` applies. See [CLI](CLI.md) for what it is sent.
 
 A line starting with `$` runs that shell command in the project root with your
 environment (two-minute limit, 256 KiB of output) and shows the output in a

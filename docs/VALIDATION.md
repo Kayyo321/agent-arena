@@ -22,6 +22,19 @@ imported affected package; this is not a claim that every dependency is advisory
 The compact dotted purple title is checked for left-margin placement in the status band, gradient colors,
 absence of filled blocks/background/shadows, matching color/monochrome geometry,
 monochrome rendering, size limits, compact/hide preferences and non-Unicode fallback.
+Spin tests step through seven letter turns and check that one letter turns at a
+time in A2rena order, every frame keeps each row's width and the gaps between
+letters, each turn starts facing front, and the text fallback, `NO_COLOR` and
+`display.animation: off` keep the static wordmark.
+
+Final-TODO fixtures (fixture invoker; no inference): `/consult` runs read-only on
+the control runtime with the saved arena, score and run evidence, journals
+`consult.*`, changes nothing and starts no run; a proposed revision is repaired
+when it changes the workflow ID, stays a draft until `/save`, is audited with
+source `consult`, and is refused when the arena changed after it was proposed.
+`/walkthrough` asks about the project first, sends a premature draft back for
+repair, validates two or three ideas, lists their roles, suggested providers,
+rough cost and grade, and drafts only after the user's pick.
 A real PTY test of the new setup entry completed bare `arena` from an empty non-Git
 directory, explicit runtime answers, Git/control/skill creation, an orchestrator
 interview, a CLI-generated workflow, graph entry, resize and clean exit. Subsequent

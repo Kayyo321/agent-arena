@@ -345,7 +345,7 @@ func (m LiveModel) header(width, height int, color bool) []string {
 			b.add(strings.Repeat(glyph("━", "="), cell), sgr)
 		}
 	}
-	logo := wordmark(width, height, mode, color)
+	logo := spinningWordmark(width, height, mode, color, wordmarkClock(m.ShaderTime, color, m.shaderAnimated()))
 	if len(logo) < 3 {
 		// Compact: one row with the title, vitals, activity and change size.
 		var b band
