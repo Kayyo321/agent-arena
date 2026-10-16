@@ -47,13 +47,13 @@ For a common interoperable record, implementations must preserve these fields:
 - Creation time, correlation ID, and optional reply reference.
 - Unique attempt ID, objective, acceptance criteria, context, constraints, file references, expected output, and workspace base/mode.
 - Provider context as an opaque object; adapters may add fields but must not reinterpret another provider's values.
-- Optional `invocation` metadata identifies team-member work (`mode: "team-member"`, `teamId`) or on-call work (`mode: "on-call"`, trigger, trigger event ID, and source ID). Adapters preserve this metadata so agents and audit tools can distinguish how the task was routed.
+- Optional `invocation` metadata identifies team-member work (`mode: "team-member"`, `teamId`), on-call work (`mode: "on-call"`, trigger, trigger event ID, and source ID), or fan-out work (`mode: "fanout-planner"`, `fanOutId`; or `mode: "fanout-child"`, `fanOutId`, 1-based `index` and item count `of`). Adapters preserve this metadata so agents and audit tools can distinguish how the task was routed.
 
-Reviewer result messages, team result messages, coworker requests, and tasks with `invocation` metadata use protocol version `1.1` or newer. Shared-context proposals and results use protocol version `1.2` or newer. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
+Reviewer result messages, team result messages, coworker requests, and tasks with `invocation` metadata use protocol version `1.1` or newer. Shared-context proposals and results use protocol version `1.2` or newer. `fanout-result` packets and fan-out task invocations use protocol version `1.3` or newer; Arena writes `1.3`. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
 
 ## Message kinds and lifecycle
 
-`task`, `question`, `message`, `result`, `review-result`, `team-result`, `coworker-request`, `context-proposal`, `context-result`, `error`, and `cancel` are the initial kinds. The scheduler records state transitions separately from message bodies.
+`task`, `question`, `message`, `result`, `review-result`, `team-result`, `coworker-request`, `context-proposal`, `context-result`, `error`, and `cancel` are the initial kinds; protocol `1.3` adds `fanout-result`. The scheduler records state transitions separately from message bodies.
 
 ```mermaid
 stateDiagram-v2
@@ -142,6 +142,36 @@ Team protocol version `1.1` requires unanimity. Every member must affirm the sam
 The same packet shape is returned when the members cannot agree. In that case `outcome` is `no-consensus`, `verdict` is `null`, and `dissent` explains the unresolved positions. This is not approval and must not be collapsed to a majority verdict. Downstream agents can branch on the stable `format` and `outcome` fields. Arena journals each member position, deliberation round, facilitator synthesis, and final packet; the packet itself does not include hidden chain-of-thought.
 
 Before delivery, Arena checks that every configured member appears once, every verdict is allowed by the team's output contract, and a consensus packet records unanimous final affirmation of the same verdict. A member that cannot return a final position is marked `unavailable`; that prevents consensus and is included in `dissent`. A provider process failure is also recorded as an agent failure and can trigger on-call routing. The JSON Schema describes the packet shape; these workflow-aware checks are enforced by the runtime.
+
+## Fan-out packets
+
+A fan-out node (see [Fan-out nodes](CONFIGURATION.md#fan-out-nodes)) uses the ordinary envelope at every step:
+
+1. The planner receives a `task` with `invocation: { "mode": "fanout-planner", "fanOutId": "split" }`, the node's input packets, and an Arena `message` stating the cap. It runs read-only and returns `{ "items": [{ "title", "instructions" }], "rationale" }`, delivered as a `message` whose `payload.plan` holds that result.
+2. After approval, each child `<fanOutId>.<n>` receives a `task` with `invocation: { "mode": "fanout-child", "fanOutId": "split", "index": 2, "of": 3 }`, the node's input packets, and an Arena `message` carrying its item (`payload.item`). That message lists the planner's provider in `arenaSourceProviders`, so handing a planner's text to a worker on another provider passes the cross-provider sharing policy like any handoff.
+3. Each child returns an ordinary `result` (or `review-result`).
+4. Arena sends one `fanout-result` from the fan-out node to the caller:
+
+```json
+{
+  "format": "arena.fanout-result.v1",
+  "fanOutId": "split",
+  "summary": "Fan-out split: 2 of 3 children succeeded. 1 planned items were dropped at the cap.",
+  "planned": 4,
+  "results": [
+    { "childId": "split.1", "item": { "title": "Parser", "instructions": "..." }, "status": "succeeded", "messageId": "message-...", "changeIds": ["change-..."], "summary": "..." },
+    { "childId": "split.2", "item": { "title": "Lexer", "instructions": "..." }, "status": "failed", "messageId": null, "changeIds": [], "summary": "provider error ..." },
+    { "childId": "split.3", "item": { "title": "Docs", "instructions": "..." }, "status": "succeeded", "messageId": "message-...", "changeIds": ["change-..."], "summary": "..." }
+  ],
+  "dropped": [{ "title": "Benchmarks", "instructions": "..." }]
+}
+```
+
+The packet's `arenaChangeIds` pin every successful child's proposal (and the node's input changes), so the next agent's workspace starts from all of them together. If two children's patches conflict, preparing that workspace fails and names the conflict; Arena never drops one of the changes. Give items disjoint files. `arenaSourceProviders` lists the planner, worker and input providers.
+
+The journal records `fanout.started`, `fanout.planned` (plan message ID and item count), `fanout.approved` (`auto`, `user` or `empty`, the count to start and the number dropped), `fanout.stopped`, `fanout.child.started`, `fanout.child.completed` and `fanout.child.failed` (child ID and message or error), and `fanout.completed`. Each event carries the node's loop `iteration`. Children's own `agent.*` events use their child IDs. A resumed run reads these events back: it does not run the planner again for a recorded plan, ask again for a recorded approval, or rerun a child that completed or failed. A child that was interrupted runs again. An approval question that an interrupted supervisor left open is awaited again rather than asked anew, and an answer given while no supervisor ran is used as it stands. Resume needs the retained plan and child result packets, so a redacted-retention run cannot resume mid-fan-out.
+
+Children are registered in the run's current configuration (`fanOutChildren`) before they start, so each child's MCP bridge resolves its actor. A child gets the worker's tools with no peer links, and a coworker request from a child is refused. In this version an on-call `agent.failed` trigger does not fire for fan-out children, and validation refuses such a trigger on a fan-out worker. A `validation.failed` trigger still fires for them.
 
 ## Decision routers
 
@@ -309,7 +339,7 @@ These links are release-time references, not promises that a command or feature 
 The implementation preserves optional outer-envelope extensions. `arenaChangeIds`
 identifies verified proposal artifacts needed by downstream workers; Arena composes
 their pinned snapshot and records integration prerequisites. `arenaSourceProviders`
-preserves provider provenance for a composite team result, so the synthetic `arena`
+preserves provider provenance for a composite team or fan-out result, so the synthetic `arena`
 sender cannot bypass cross-provider context policy. `arenaRoutingInputs` is a local
 router bundle containing the unchanged inputs selected for each downstream target.
 These fields do not replace the versioned task/result contracts or reinterpret
