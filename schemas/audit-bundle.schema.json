@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Arena audit bundle",
+  "description": "One run's redacted audit trail as written by `arena history RUN export FILE`. The journal events keep their hash chain; every other file is listed in the manifest with its size and SHA-256, and the checksum covers the manifest. Provider credentials, environment values, shared context, project settings and raw process output the run's retention excluded are never included.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "manifest", "checksum", "files"],
+  "properties": {
+    "format": { "const": "arena.audit.v1" },
+    "manifest": { "$ref": "#/$defs/manifest" },
+    "checksum": {
+      "description": "SHA-256 of the text `arena.audit.v1`, `run RUNID`, `retention VALUE`, `events COUNT LASTHASH` and one `SHA256 SIZE PATH` line per manifest file sorted by path, each line ending in a newline.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": { "$ref": "#/$defs/file" }
+    }
+  },
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runId", "workflowId", "exportedAt", "retention", "processOutput", "eventCount", "lastEventHash", "files", "omitted"],
+      "properties": {
+        "runId": { "type": "string", "pattern": "^run-[a-z0-9][a-z0-9._-]{0,59}$" },
+        "workflowId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "exportedAt": { "type": "string", "format": "date-time" },
+        "retention": { "enum": ["full-local", "redacted-local", "metadata-only"] },
+        "processOutput": { "enum": ["full", "summary", "none"] },
+        "eventCount": { "type": "integer", "minimum": 1 },
+        "lastEventHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "files": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "size", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "size": { "type": "integer", "minimum": 0 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        },
+        "omitted": {
+          "description": "Kinds of content left out because the run's retention did not keep them.",
+          "type": "array",
+          "items": { "enum": ["packets", "patches"] },
+          "uniqueItems": true
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "encoding", "content"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "encoding": { "enum": ["utf8", "base64"] },
+        "content": { "type": "string" }
+      }
+    }
+  }
+}

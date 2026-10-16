@@ -21,6 +21,9 @@ type Run struct {
 	BaseCommit  string             `json:"baseCommit"`
 	Retention   string             `json:"retention"`
 	Simulated   bool               `json:"simulated"`
+	// FanOutChildren are the worker instances fan-out nodes started in this
+	// run. They stay out of Workflow, which remains the validated static graph.
+	FanOutChildren []FanOutChild `json:"fanOutChildren,omitempty"`
 	// Score caches the arena's grade for the live view; it is never persisted.
 	Score *Scorecard `json:"-"`
 }
@@ -70,7 +73,7 @@ func (p *Project) ReadRun(id string) (Run, error) {
 		return r, e
 	}
 	var current Run
-	if err := ReadJSON(filepath.Join(p.RunDir(id), "current-config.json"), &current); err == nil {
+	if err := ReadJSON(filepath.Join(p.RunDir(id), currentConfigFile), &current); err == nil {
 		r = current
 	} else if !os.IsNotExist(err) {
 		return r, err
@@ -183,8 +186,14 @@ type RunHistory struct {
 	// PendingDecisions counts open questions that wait on the user.
 	PendingDecisions int `json:"pendingDecisions"`
 	// StateError explains an "invalid" status: the events do not replay.
-	StateError string  `json:"stateError,omitempty"`
-	Events     []Event `json:"events"`
+	StateError string `json:"stateError,omitempty"`
+	// Usage totals the token counts providers reported; reported is false
+	// when none did.
+	Usage  RunUsage `json:"usage"`
+	Events []Event  `json:"events"`
+	// Imported marks a run that came from an audit bundle: read-only history
+	// that cannot be resumed.
+	Imported bool `json:"imported,omitempty"`
 }
 
 // terminalStatuses are the run statuses set by workflow.succeeded,
@@ -196,7 +205,7 @@ func (p *Project) History(id string, events []Event) (RunHistory, error) {
 	if err != nil {
 		return RunHistory{}, err
 	}
-	h := RunHistory{RunID: id, PendingDecisions: len(pending), Events: events}
+	h := RunHistory{RunID: id, PendingDecisions: len(pending), Usage: SumUsage(events), Events: events}
 	// History stays readable when the events do not replay; that is when it
 	// matters most.
 	if state, err := Reduce(events); err != nil {
@@ -286,9 +295,15 @@ type Decision struct {
 	Route string `json:"route,omitempty"`
 }
 
-func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string, choices []string, data map[string]any) (answer string, err error) {
+// newDecision stores an open decision; the caller journals decision.requested.
+func (p *Project) newDecision(r Run, agent, kind, prompt string, choices []string, data map[string]any) (Decision, error) {
 	d := Decision{ID: ID("decision-"), RunID: r.ID, AgentID: agent, Kind: kind, Prompt: prompt, Choices: choices, Context: data, CreatedAt: Now()}
-	if e := Atomic(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), SafeJSON(d), 0600); e != nil {
+	return d, Atomic(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), SafeJSON(d), 0600)
+}
+
+func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string, choices []string, data map[string]any) (answer string, err error) {
+	d, e := p.newDecision(r, agent, kind, prompt, choices, data)
+	if e != nil {
 		return "", e
 	}
 	if r.Retention != "full-local" {
@@ -301,11 +316,28 @@ func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string,
 	if _, e := p.Append(r.ID, r.Workflow.Id, agent, "decision.requested", map[string]any{"decision": d}); e != nil {
 		return "", e
 	}
+	return p.awaitDecision(ctx, r.ID, d.ID)
+}
+
+// awaitOpenDecision waits on a decision an interrupted supervisor left
+// open, so a resumed run answers that question instead of asking again.
+func (p *Project) awaitOpenDecision(ctx context.Context, r Run, id string) (answer string, err error) {
+	if r.Retention != "full-local" {
+		defer func() {
+			if closeErr := p.closeDecision(r.ID, id); closeErr != nil && err == nil {
+				answer, err = "", closeErr
+			}
+		}()
+	}
+	return p.awaitDecision(ctx, r.ID, id)
+}
+
+func (p *Project) awaitDecision(ctx context.Context, run, id string) (string, error) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var current Decision
-		if e := ReadJSON(filepath.Join(p.RunDir(r.ID), "decisions", d.ID+".json"), &current); e != nil {
+		if e := ReadJSON(filepath.Join(p.RunDir(run), "decisions", id+".json"), &current); e != nil {
 			return "", e
 		}
 		if current.Answer != "" {
@@ -318,47 +350,74 @@ func (p *Project) Decide(ctx context.Context, r Run, agent, kind, prompt string,
 		}
 	}
 }
+
+// Answer answers a decision from the live view.
 func (p *Project) Answer(run, id, answer string) error {
+	_, e := p.AnswerDecision(run, id, answer, Approval{Channel: ApprovalTUI})
+	return e
+}
+
+// AnswerDecision answers a decision. An approved integrate or rollback request
+// from the control server runs here, once, and its outcome is returned.
+func (p *Project) AnswerDecision(run, id, answer string, via Approval) (outcome map[string]any, err error) {
 	if e := validID(run); e != nil {
-		return e
+		return nil, e
 	}
 	if e := validID(id); e != nil {
-		return e
+		return nil, e
 	}
 	l, e := p.Lock("decisions-" + run)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	defer l.Close()
 	path := filepath.Join(p.RunDir(run), "decisions", id+".json")
 	var d Decision
 	if e := ReadJSON(path, &d); e != nil {
-		return e
+		return nil, e
 	}
 	if d.Answer != "" || d.ClosedAt != "" {
-		return fmt.Errorf("decision already answered")
+		return nil, fmt.Errorf("decision already answered")
 	}
 	if len(d.Choices) > 0 && !Has(d.Choices, answer) {
-		return fmt.Errorf("answer must be one of %v", d.Choices)
+		return nil, fmt.Errorf("answer must be one of %v", d.Choices)
 	}
 	r, e := p.ReadRun(run)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	d.Answer = answer
-	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer}); e != nil {
-		return e
+	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer, "approval": via.Record()}); e != nil {
+		return nil, e
 	}
 	if d.Route != "" {
 		if e := p.settleRoute(r, d, answer); e != nil {
-			return e
+			return nil, e
 		}
 		// No waiter compacts a route decision: its grant carries the answer.
 		if r.Retention != "full-local" {
 			compactDecision(&d)
 		}
 	}
-	return Atomic(path, SafeJSON(d), 0600)
+	if e := Atomic(path, SafeJSON(d), 0600); e != nil {
+		return nil, e
+	}
+	if !isChangeRequest(d) {
+		return nil, nil
+	}
+	// The answer is stored first, so a crash or a failure below can never run
+	// the action a second time: a new request needs a new decision.
+	if answer == "approve" {
+		outcome, err = p.executeChangeRequest(r, d, via)
+	}
+	// No waiter compacts a change request either.
+	if r.Retention != "full-local" {
+		compactDecision(&d)
+		if e := Atomic(path, SafeJSON(d), 0600); e != nil && err == nil {
+			err = e
+		}
+	}
+	return outcome, err
 }
 func (p *Project) Decisions(id string) ([]Decision, error) {
 	if e := validID(id); e != nil {

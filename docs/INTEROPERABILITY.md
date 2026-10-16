@@ -47,13 +47,13 @@ For a common interoperable record, implementations must preserve these fields:
 - Creation time, correlation ID, and optional reply reference.
 - Unique attempt ID, objective, acceptance criteria, context, constraints, file references, expected output, and workspace base/mode.
 - Provider context as an opaque object; adapters may add fields but must not reinterpret another provider's values.
-- Optional `invocation` metadata identifies team-member work (`mode: "team-member"`, `teamId`) or on-call work (`mode: "on-call"`, trigger, trigger event ID, and source ID). Adapters preserve this metadata so agents and audit tools can distinguish how the task was routed.
+- Optional `invocation` metadata identifies team-member work (`mode: "team-member"`, `teamId`), on-call work (`mode: "on-call"`, trigger, trigger event ID, and source ID), or fan-out work (`mode: "fanout-planner"`, `fanOutId`; or `mode: "fanout-child"`, `fanOutId`, 1-based `index` and item count `of`). Adapters preserve this metadata so agents and audit tools can distinguish how the task was routed.
 
-Reviewer result messages, team result messages, coworker requests, and tasks with `invocation` metadata use protocol version `1.1` or newer. Shared-context proposals and results use protocol version `1.2` or newer. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
+Reviewer result messages, team result messages, coworker requests, and tasks with `invocation` metadata use protocol version `1.1` or newer. Shared-context proposals and results use protocol version `1.2` or newer. `fanout-result` packets and fan-out task invocations use protocol version `1.3` or newer; Arena writes `1.3`. Unknown fields are preserved when forwarding. A reader that cannot understand a required protocol version or message kind must stop and report the incompatibility instead of dropping fields silently.
 
 ## Message kinds and lifecycle
 
-`task`, `question`, `message`, `result`, `review-result`, `team-result`, `coworker-request`, `context-proposal`, `context-result`, `error`, and `cancel` are the initial kinds. The scheduler records state transitions separately from message bodies.
+`task`, `question`, `message`, `result`, `review-result`, `team-result`, `coworker-request`, `context-proposal`, `context-result`, `error`, and `cancel` are the initial kinds; protocol `1.3` adds `fanout-result`. The scheduler records state transitions separately from message bodies.
 
 ```mermaid
 stateDiagram-v2
@@ -142,6 +142,36 @@ Team protocol version `1.1` requires unanimity. Every member must affirm the sam
 The same packet shape is returned when the members cannot agree. In that case `outcome` is `no-consensus`, `verdict` is `null`, and `dissent` explains the unresolved positions. This is not approval and must not be collapsed to a majority verdict. Downstream agents can branch on the stable `format` and `outcome` fields. Arena journals each member position, deliberation round, facilitator synthesis, and final packet; the packet itself does not include hidden chain-of-thought.
 
 Before delivery, Arena checks that every configured member appears once, every verdict is allowed by the team's output contract, and a consensus packet records unanimous final affirmation of the same verdict. A member that cannot return a final position is marked `unavailable`; that prevents consensus and is included in `dissent`. A provider process failure is also recorded as an agent failure and can trigger on-call routing. The JSON Schema describes the packet shape; these workflow-aware checks are enforced by the runtime.
+
+## Fan-out packets
+
+A fan-out node (see [Fan-out nodes](CONFIGURATION.md#fan-out-nodes)) uses the ordinary envelope at every step:
+
+1. The planner receives a `task` with `invocation: { "mode": "fanout-planner", "fanOutId": "split" }`, the node's input packets, and an Arena `message` stating the cap. It runs read-only and returns `{ "items": [{ "title", "instructions" }], "rationale" }`, delivered as a `message` whose `payload.plan` holds that result.
+2. After approval, each child `<fanOutId>.<n>` receives a `task` with `invocation: { "mode": "fanout-child", "fanOutId": "split", "index": 2, "of": 3 }`, the node's input packets, and an Arena `message` carrying its item (`payload.item`). That message lists the planner's provider in `arenaSourceProviders`, so handing a planner's text to a worker on another provider passes the cross-provider sharing policy like any handoff.
+3. Each child returns an ordinary `result` (or `review-result`).
+4. Arena sends one `fanout-result` from the fan-out node to the caller:
+
+```json
+{
+  "format": "arena.fanout-result.v1",
+  "fanOutId": "split",
+  "summary": "Fan-out split: 2 of 3 children succeeded. 1 planned items were dropped at the cap.",
+  "planned": 4,
+  "results": [
+    { "childId": "split.1", "item": { "title": "Parser", "instructions": "..." }, "status": "succeeded", "messageId": "message-...", "changeIds": ["change-..."], "summary": "..." },
+    { "childId": "split.2", "item": { "title": "Lexer", "instructions": "..." }, "status": "failed", "messageId": null, "changeIds": [], "summary": "provider error ..." },
+    { "childId": "split.3", "item": { "title": "Docs", "instructions": "..." }, "status": "succeeded", "messageId": "message-...", "changeIds": ["change-..."], "summary": "..." }
+  ],
+  "dropped": [{ "title": "Benchmarks", "instructions": "..." }]
+}
+```
+
+The packet's `arenaChangeIds` pin every successful child's proposal (and the node's input changes), so the next agent's workspace starts from all of them together. Before the node returns, Arena checks every pair of successful children the way the next node's base is built (`git apply --cached --3way`, as `composeBase` does): one child's patches go into a scratch index at the shared base and the other's must still apply. Children that pass every pair are then applied one after another, and a child that fails on top of the others is held out alone. A child that clashes with a sibling gets `conflict: true` and `conflictsWith` (the sibling child IDs) in its `results` entry; both fields are optional and absent for a clean child, so existing consumers are unaffected. The packet's `arenaChangeIds` then leave out the changes of conflicting children, so the next node's workspace is built from the non-conflicting children only and the run continues. Arena does not pick a winner between conflicting children and drops nothing: their changes stay `proposed` in the integration queue, listed in the entry's `changeIds`, and integrate one at a time as usual (a later one then reports `conflicted`). The check is pairwise and deterministic, with no new decision. Disjoint items are still best: they keep every child's work in the next node's workspace. `arenaSourceProviders` lists the planner, worker and input providers.
+
+The journal records `fanout.started`, `fanout.planned` (plan message ID and item count), `fanout.approved` (`auto`, `user` or `empty`, the count to start and the number dropped), `fanout.stopped`, `fanout.child.started`, `fanout.child.completed` and `fanout.child.failed` (child ID and message or error), `fanout.conflict` (once per pass, before `fanout.completed`: the conflicting `children`, their `pairs`, and the held `changeIds`) and `fanout.completed` (which also counts `conflicting`). Each event carries the node's loop `iteration`. Children's own `agent.*` events use their child IDs. A resumed run reads these events back: it does not run the planner again for a recorded plan, ask again for a recorded approval, or rerun a child that completed or failed. A child that was interrupted runs again. An approval question that an interrupted supervisor left open is awaited again rather than asked anew, and an answer given while no supervisor ran is used as it stands. Resume needs the retained plan and child result packets, so a redacted-retention run cannot resume mid-fan-out.
+
+Children are registered in the run's current configuration (`fanOutChildren`) before they start, so each child's MCP bridge resolves its actor. A child gets the worker's tools with no peer links, and a coworker request from a child is refused. In this version an on-call `agent.failed` trigger does not fire for fan-out children, and validation refuses such a trigger on a fan-out worker. A `validation.failed` trigger still fires for them.
 
 ## Decision routers
 
@@ -309,7 +339,7 @@ These links are release-time references, not promises that a command or feature 
 The implementation preserves optional outer-envelope extensions. `arenaChangeIds`
 identifies verified proposal artifacts needed by downstream workers; Arena composes
 their pinned snapshot and records integration prerequisites. `arenaSourceProviders`
-preserves provider provenance for a composite team result, so the synthetic `arena`
+preserves provider provenance for a composite team or fan-out result, so the synthetic `arena`
 sender cannot bypass cross-provider context policy. `arenaRoutingInputs` is a local
 router bundle containing the unchanged inputs selected for each downstream target.
 These fields do not replace the versioned task/result contracts or reinterpret
@@ -336,3 +366,143 @@ with an exact manifest `path`; it cannot open arbitrary paths. Unsupported image
 adapters fail explicitly. The common envelope preserves metadata independently
 of these provider-specific translations. Attachments follow the workflow's existing
 handoff and cross-provider sharing policies.
+
+## Project control MCP server
+
+`arena mcp --control` is a stdio MCP server for one project, for another agent or
+an IDE that wants to look at Arena and start work. It speaks the same MCP framing
+as the worker bridge (protocol versions 2025-06-18 and 2025-11-25, line-delimited
+JSON-RPC, tools only) but is a different server: the worker bridge
+(`arena mcp --run RUN --actor AGENT`) serves one agent's `arena_send`,
+`arena_inbox`, `arena_context_search` and `arena_ask_user` inside one run, and is
+not widened by it. A control session serves exactly these tools:
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `arena_status` | `workflowId?` | Workflow IDs, provider readiness (the `status --json` array, for one workflow or all), and the state of the 20 newest runs |
+| `arena_history` | `runId?`, `maxEvents?` | With `runId`, `history RUN --json`: status, `terminal`, `pendingDecisions`, usage totals and events (`maxEvents` keeps the newest N). Without it, the run IDs |
+| `arena_changes` | `runId`, `changeId?` | The change records `changes RUN` prints; with `changeId`, that change plus its redacted patch (cut at 256 KiB, flagged `patchTruncated`) |
+| `arena_score` | `workflowId` | `score WORKFLOW --json` |
+| `arena_workflow_show` | `workflowId` | `workflow show WORKFLOW --json` |
+| `arena_run_start` | `workflowId`, `task` | `{runId, workflowId, state: "started", supervision, readiness}` |
+| `arena_integrate` | `runId`, `changeId` | `{decisionId, state: "pending", reused, requestedBy, preview, next}`; nothing is integrated (see [Integrate and rollback requests](#integrate-and-rollback-requests)) |
+| `arena_rollback` | `runId`, `changeId` | The same shape for a rollback request, with the `RollbackPreview` |
+
+Results are the CLI's JSON text, byte for byte for every tool but `arena_status` (which wraps the `status --json` array with workflow and run state), the `changeId` form of `arena_changes`, and the two request tools.
+IDs must match the usual ID pattern, unknown arguments are rejected, a task is at
+most 8 KiB, a result larger than 1 MiB is refused instead of truncated, and a
+session accepts at most 1000 tool calls and starts at most 3 runs.
+
+### Scope and safety
+
+- The read tools write no workflow, run or journal data. Like the CLI's own
+  readers, they take short-lived read locks, and `arena_status` runs the same
+  provider probes as `arena status`.
+- There is no tool for credentials or provider configuration, for answering
+  decisions, or for editing or deleting workflows. Those stay with the operator's
+  entry points, the TUI or the CLI. `arena_integrate` and `arena_rollback` can only *request*
+  an integration or rollback as a pending decision; they never act.
+- `arena_run_start` takes only a saved workflow ID and a task. It has no provider,
+  model, effort, endpoint or credential parameter, so the runtime is always the
+  one the validated workflow already names, and a client cannot choose one.
+  Arguments outside the schema are an error, not ignored.
+- It uses the code path of `arena run` and the launcher: the workflow must load
+  and validate, the repository must have an initial commit, every required
+  provider must report it can start, a missing command sandbox or an unenforceable
+  shell policy refuses the run, and approval policies, run budgets and limits
+  apply as in any run. A refused start creates no run.
+- Everything returned, including errors, passes through the same redaction as the
+  journal. The control server does not read credential files or print
+  environment variables.
+
+### Integrate and rollback requests
+
+Integration waits for an answer from the operator's entry points, the TUI or
+`arena decision answer`. Arena records which entry point answered, not who: it
+does not verify a person's identity and does not yet keep agent processes away
+from the answer path, so this is a convention agents are told to follow, not an
+enforced human approval ([ADR 0002](adr/0002-operator-approval-boundary.md)
+proposes the boundary that would make it one). `arena_integrate` and `arena_rollback` validate
+the request exactly as `arena integrate RUN CHANGE` and `arena rollback RUN CHANGE`
+would, change nothing, and open a pending decision (kind `integrate-change` or
+`rollback-change`, choices `approve` and `reject`) that carries the preview and
+the requesting actor (`control-mcp`). They return the decision ID at once; the
+client does not wait. The control server has no tool that answers a decision, and
+the decision kinds are not among those the orchestrator may answer.
+
+Checks made when the request is opened (a failed check is an error and opens no
+decision):
+
+- Integrate: the run has history here (it is not retired) and was not imported
+  from an audit bundle; the change is `proposed` (not `conflicted`, `integrated`
+  and so on); the changes it depends on are integrated; the checkout has no
+  uncommitted changes; and the patch applies to the current `HEAD`. The apply
+  check uses a throwaway index, so the checkout is untouched. The preview holds
+  the change, `currentHead`, and the patch `diffstat`.
+- Rollback: the same run checks, then `RollbackPreview` (the change, `currentHead`,
+  later commits to the affected paths) and a refusal if the change is already
+  rolled back by an integrated rollback that has not itself been rolled back.
+- Asking again for a change that already has an open decision of the same kind
+  returns that decision (`reused: true`). If `HEAD` has moved since that decision
+  was opened, it is withdrawn (`decision.superseded`) and a new one is opened.
+
+**Who executes.** There is no supervisor to rely on, so the answer path does it:
+the person who answers runs the action. `arena decision answer RUN DECISION approve`
+in a terminal (or the TUI's `/answer`; the command refuses to approve from a pipe or an agent's command runner, which a pseudo-terminal defeats) re-runs the checks above, and then performs the same
+operation as `arena integrate` or `arena rollback --yes`, in the process that
+answers. `reject` records the answer and does nothing. The decision is stored as
+answered before anything runs, so an action executes at most once: answering
+again fails with `decision already answered`, and a decision that fails or is
+refused is not retried. There is no way to approve once and have it run later.
+
+If anything differs from what was reviewed, nothing runs. In particular,
+if `HEAD` is not the `currentHead` in the preview (a stale request), the
+patch digest (`patchSha256`) or integration commit (`integrationCommit`)
+differs from the preview's, or the
+change was integrated, conflicted or rolled back in the meantime, the answer
+fails with `approved, but integrate of CHANGE was not executed: ...` and a
+`decision.refused` event; request it again to get a fresh preview. A rollback
+or integration that starts and then conflicts keeps its existing behavior: the
+conflict is journaled and the work is preserved in its worktree.
+
+The journal records the whole path: `decision.requested` (requesting actor),
+`decision.answered`, and then either `decision.executed` or
+`decision.refused`, each with `decisionId`, `action`, `changeId`, `requestedBy`
+and `approval`, alongside the usual `change.integrated` or
+`rollback.created`/`rollback.completed` events, which carry `approval` too.
+`approval` is `{"channel", "identityVerified", "verification"}`: `channel` is
+`cli-terminal`, `cli-no-terminal`, `tui` or `library`, and `identityVerified`
+is `false` with `verification` `none` on every record, because Arena has no way
+to tell a person from a process driving the same entry point. The journal
+`actor` `user` on these events is the legacy label for a human-facing entry
+point, not an identity. Integration policy is not
+weakened: a request always waits for an answer, whatever
+`approvalPolicies.changeIntegration` says, and `auto-if-clean` is unchanged
+(it applies only inside a run's own engine, not to these tools). Rollback still
+creates a revert commit or a recovery worktree and preserves later work.
+
+### Run supervision
+
+Arena has no daemon (see the [decision record](adr/0001-implementation-foundation.md)),
+and the control server does not create one. `arena_run_start` prepares the run,
+returns its ID immediately, and then runs the engine in a goroutine of the server
+process, tied to the lifetime of the MCP session:
+
+- While the client stays connected the run proceeds like an attached
+  `arena run`. Its progress is in `arena_history`, `arena watch RUN`, or the TUI.
+- If the client disconnects (stdin closes), the server shuts down, or it receives
+  Ctrl+C or SIGTERM, the server cancels its runs and waits for them to stop. Each
+  run journals `workflow.interrupted`, keeps its worktrees and history, releases its
+  run lock, and can be continued by a person with `arena resume RUN`. Nothing keeps
+  running in the background, and no detached process is spawned.
+- Approvals, budget questions and other decisions are never answered by the control
+  server. They stay pending for a human (the TUI or `arena decision answer`); a
+  run that waits on one is still interrupted if the session ends first. An agent
+  that starts runs should check `pendingDecisions` in `arena_history`.
+- Another process, such as a TUI or `arena watch`, can observe the run, but only
+  the server that started it supervises it.
+
+Like the worker bridge, the server is local: the client launches it as a child
+process and talks over its stdio, so it adds no network listener. Using it does
+not make a provider "verified"; readiness still comes from `arena status` and the
+validation record in [VALIDATION.md](VALIDATION.md).

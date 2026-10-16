@@ -66,7 +66,13 @@ removed worktree falls back to its recorded change patch. Worktrees are scanned
 off the UI loop at most every two seconds. The Git column shows the run base,
 the worktree count and the agents with the most churn.
 
-Columns join by priority while they fit: identity, changes, activity, nodes, Git.
+The TOKENS column totals the input and output tokens providers reported in
+`usage.reported` events, and says `unreported` while none has reported. Arena sums
+only the token fields a provider actually reports, derives no cost, and keeps each
+provider's own usage map opaque in the journal. `/usage` opens the same totals per
+agent; the compact one-row band appends a short `N tok` total.
+
+Columns join by priority while they fit: identity, changes, activity, nodes, tokens, Git.
 Without the Git column the worktree count joins the change size, and without the
 changes column the change size sits beside the workflow ID, so it is never
 dropped. Narrow or short terminals use a single row led by the compact title.
@@ -197,6 +203,32 @@ The tree box may shrink or scroll when there are many worktrees. It must not hid
 The bottom bar shows only `/help`. The graph reports the loaded arena and run state; `/decisions` lists pending questions, and `/status` reports readiness only for providers required by that arena. The required set is the union of providers used by its configured agents plus the permanent project orchestrator when its provider is distinct. Unused installed adapters are not probed or displayed in this view. Missing or unverifiable capabilities use explicit states such as `missing`, `signed out`, `unsupported authentication`, or `unknown`; `good` means the selected provider CLI or integration is ready for the configured model and options, not that every model in a subscription is available.
 
 `arena status` without a selected workflow shows the union required by configured workflows plus the permanent orchestrator. A workflow-specific status view shows only that workflow and its required control agent. Readiness distinguishes missing CLI, signed-out account, unsupported authentication mode, incompatible version, and unavailable model; `good` requires a compatible auth path for Arena's integration. The live view updates readiness when provider processes or configuration change.
+
+## Plain streams for terminal panes
+
+The live view is the only interactive surface, but its two read-only projections are
+available as line-oriented text for a pipe, a script or another terminal pane:
+
+- `arena watch RUN --json --follow` is the event feed. It prints one flushed JSON line
+  per journal event, in sequence order and never twice, and exits when the run reaches
+  a terminal state, when the run is interrupted while the feed is attached, or on Ctrl+C.
+  A feed that starts on an already interrupted run waits for its resume, which is what
+  the `arena tmux resume` panes rely on. Without `--follow` it prints the journal once.
+- `arena view AGENT --run RUN [--follow]` is the agent activity window (`/view AGENT`)
+  as plain text, with the same exit behaviour. It states when raw process output is not
+  retained (`audit.processOutput` other than `full`, or reduced run retention) and falls
+  back to the recorded output size, as the window does.
+
+Both poll the run journal on the live view's 150 ms tick and hold no state of their own,
+so what they print always agrees with the audited history. Provider text keeps the live
+view's rules: redacted, and without escape or control sequences. Their output is the
+building block for panes that mirror a run; see [CLI](CLI.md#structured-terminal-streams)
+for flags and exit behaviour.
+
+`arena tmux run WORKFLOW TASK` arranges these streams in tmux: the supervisor in pane 0
+(ending it interrupts the run), an event feed beside it, and one agent view per agent in
+a second tiled window. Every observer pane is a journal projection and can be closed
+freely; see [CLI](CLI.md#running-a-run-in-tmux).
 
 ## Fit and accessibility
 

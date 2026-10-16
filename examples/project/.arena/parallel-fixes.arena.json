@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "parallel-fixes",
+  "name": "Planned parallel fixes",
+  "description": "A coordinator scopes the task, a planner splits it into independent items, up to four fixers work on them in parallel worktrees after the user approves the plan, and a reviewer examines every proposal together.",
+  "headAgent": "coordinator",
+  "agents": [
+    {
+      "id": "coordinator",
+      "profile": ".agents/parallel-fixes/coordinator.agent.json",
+      "activation": "path",
+      "level": 0,
+      "runtime": {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "planner",
+      "profile": ".agents/parallel-fixes/planner.agent.json",
+      "activation": "path",
+      "level": 1,
+      "runtime": {
+        "provider": "claude-code",
+        "model": "sonnet",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "fixer",
+      "profile": ".agents/parallel-fixes/fixer.agent.json",
+      "activation": "path",
+      "level": 1,
+      "runtime": {
+        "provider": "claude-code",
+        "model": "sonnet",
+        "reasoningEffort": "medium"
+      }
+    },
+    {
+      "id": "reviewer",
+      "profile": ".agents/parallel-fixes/reviewer.agent.json",
+      "activation": "path",
+      "level": 2,
+      "runtime": {
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoningEffort": "high"
+      }
+    }
+  ],
+  "fanOuts": [
+    {
+      "id": "split",
+      "name": "Parallel fixes",
+      "planner": "planner",
+      "worker": "fixer",
+      "maxChildren": 4,
+      "approval": "required"
+    }
+  ],
+  "relationships": [
+    { "type": "delegates", "from": "coordinator", "to": "split" },
+    { "type": "delegates", "from": "split", "to": "reviewer" }
+  ],
+  "settings": {
+    "maxConcurrentAgents": 4,
+    "workspace": {
+      "writeIsolation": "git-worktree-per-task"
+    },
+    "integration": {
+      "policy": "human-review"
+    },
+    "audit": {
+      "retention": "full-local"
+    }
+  }
+}

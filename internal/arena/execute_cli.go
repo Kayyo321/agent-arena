@@ -32,7 +32,11 @@ func (cli *CLI) execute(ctx context.Context, p *Project, args []string, o Option
 		if len(args) < 3 {
 			return fmt.Errorf("run WORKFLOW TASK is required")
 		}
-		r, readiness, err = prepareNewExecution(ctx, p, args[1], strings.Join(args[2:], " "))
+		if id := o.Get("run"); id != "" {
+			r, readiness, err = adoptReservedRun(ctx, p, id, args[1], strings.Join(args[2:], " "))
+		} else {
+			r, readiness, err = prepareNewExecution(ctx, p, args[1], strings.Join(args[2:], " "))
+		}
 		if err != nil {
 			return err
 		}
@@ -120,6 +124,38 @@ func prepareNewExecution(ctx context.Context, p *Project, workflow, objective st
 		return r, readiness, err
 	}
 	return r, readiness, nil
+}
+
+// adoptReservedRun lets `arena run WORKFLOW TASK --run RUN` supervise a run that
+// `arena tmux` already reserved with prepareNewExecution, so the observer panes
+// can name the run before it starts. The run must be unstarted and for the same
+// workflow; the task comes from the command line because reduced retention does
+// not store it.
+func adoptReservedRun(ctx context.Context, p *Project, id, workflow, objective string) (Run, []Readiness, error) {
+	r, err := p.ReadRun(id)
+	if err != nil {
+		return r, nil, err
+	}
+	events, err := p.Events(id)
+	if err != nil {
+		return r, nil, err
+	}
+	state, err := Reduce(events)
+	if err != nil {
+		return r, nil, err
+	}
+	if state.Status != "created" {
+		return r, nil, fmt.Errorf("run %s is %s; only an unstarted run can be started with --run", id, state.Status)
+	}
+	if r.Workflow.Id != workflow {
+		return r, nil, fmt.Errorf("run %s belongs to workflow %s, not %s", id, r.Workflow.Id, workflow)
+	}
+	if strings.TrimSpace(objective) == "" {
+		return r, nil, fmt.Errorf("task objective is required")
+	}
+	r.Objective = objective
+	readiness, err := executionReadiness(ctx, p, r)
+	return r, readiness, err
 }
 
 func executionReadiness(ctx context.Context, p *Project, r Run) ([]Readiness, error) {

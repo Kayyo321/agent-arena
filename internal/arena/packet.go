@@ -20,7 +20,7 @@ func NewPacket(run, kind, from, fromProvider, to, toProvider, correlation string
 	if runtime.Options == nil {
 		runtime.Options = map[string]any{}
 	}
-	return Packet{"protocolVersion": "1.2", "messageId": ID("message-"), "runId": run, "kind": kind, "from": map[string]any{"agentId": from, "provider": fromProvider}, "to": map[string]any{"agentId": to, "provider": toProvider}, "createdAt": Now(), "correlationId": correlation, "attemptId": ID("attempt-"), "replyTo": nil, "payload": payload, "providerContext": map[string]any{"model": runtime.Model, "reasoningEffort": runtime.ReasoningEffort, "options": runtime.Options}}
+	return Packet{"protocolVersion": "1.3", "messageId": ID("message-"), "runId": run, "kind": kind, "from": map[string]any{"agentId": from, "provider": fromProvider}, "to": map[string]any{"agentId": to, "provider": toProvider}, "createdAt": Now(), "correlationId": correlation, "attemptId": ID("attempt-"), "replyTo": nil, "payload": payload, "providerContext": map[string]any{"model": runtime.Model, "reasoningEffort": runtime.ReasoningEffort, "options": runtime.Options}}
 }
 func ValidatePacket(packet Packet, w Workflow) error {
 	if e := c.ValidateEnvelope(JSON(packet)); e != nil {
@@ -139,7 +139,7 @@ func taskPayload(objective, dir, base string, context []string, write bool) map[
 	return map[string]any{"objective": objective, "acceptanceCriteria": []string{"Return the requested structured result and report actual validation and limitations."}, "context": context, "constraints": []string{"Use only the assigned workspace. Do not merge branches or access provider credentials."}, "files": []string{}, "expectedOutput": []string{"structured result"}, "workspace": map[string]any{"mode": mode, "baseCommit": base}}
 }
 func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map[string]any) (any, error) {
-	a, ok := agentByID(r.Workflow, from)
+	a, ok := r.agent(from)
 	if !ok {
 		return nil, fmt.Errorf("unknown source agent")
 	}

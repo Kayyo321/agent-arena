@@ -216,3 +216,43 @@ func probeLocal(ctx context.Context, r Runtime, result Readiness) Readiness {
 	result.Detail = "model discovered; tools/reasoning capabilities are verified separately"
 	return result
 }
+
+// readiness probes the runtimes the named workflow, or every workflow in the
+// project when id is empty, requires: the data behind `arena status --json`.
+func (p *Project) readiness(ctx context.Context, id string) ([]Readiness, error) {
+	s, e := p.Settings()
+	if e != nil {
+		return nil, e
+	}
+	workflows := []Workflow{}
+	if id != "" {
+		w, _, e := p.Load(id)
+		if e != nil {
+			return nil, e
+		}
+		workflows = append(workflows, w)
+	} else {
+		ids, e := p.List()
+		if e != nil {
+			return nil, e
+		}
+		for _, id := range ids {
+			w, _, e := p.Load(id)
+			if e != nil {
+				return nil, e
+			}
+			workflows = append(workflows, w)
+		}
+	}
+	results := []Readiness{}
+	seen := map[string]bool{}
+	for _, r := range Required(workflows, s) {
+		key := string(JSON(r))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		results = append(results, Probe(ctx, p.Root, r))
+	}
+	return results, nil
+}

@@ -12,7 +12,8 @@ with Codex and Antigravity (each under its own sign-in) in the production-readin
 sweep. Claude Code, Gemini and local adapters have contract or probe coverage only;
 that coverage does not establish live readiness.
 See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
-and [validation evidence](docs/VALIDATION.md).
+and [validation evidence](docs/VALIDATION.md). To keep runs going over SSH, see
+[running on a devbox](docs/DEVBOX.md).
 
 ## Build and install
 
@@ -85,6 +86,8 @@ recovery procedures are in the [CLI guide](docs/CLI.md).
 
 ```sh
 arena watch RUN_ID
+arena watch RUN_ID --json --follow
+arena view AGENT --run RUN_ID --follow
 arena history RUN_ID --json
 arena changes RUN_ID
 arena changes RUN_ID CHANGE_ID
@@ -109,6 +112,8 @@ shows its role, task and workflow context. `/chat` talks to the control agent,
 `/consult` asks it about the loaded arena or run (advice only; edits stay drafts until `/save`).
 Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, and
 `/quit` exits. Plain output is available for logs and automation.
+
+Concurrency is capped by `maxConcurrentAgents` in `.arena/settings.arena.json`. The default is 4, the allowed range is 1-64, and the cap applies per run and project-wide. See [configuration](docs/CONFIGURATION.md).
 
 ## Providers and credentials
 
@@ -161,8 +166,10 @@ Normal checks use local fixtures and temporary Git repositories, without paid
 inference. Live tests require explicit opt-in runtime choices; see
 [validation evidence](docs/VALIDATION.md). Submodules/nested Git repositories are
 refused rather than incompletely checkpointed. Worktrees and recovery objects are
-retained for inspection; audit export/import and permanent garbage collection are
-not implemented.
+retained for inspection. `arena history RUN export FILE` and `arena history import FILE`
+move a redacted audit bundle between projects, read-only, and `arena history RUN purge --yes`
+permanently deletes a retired run's worktrees, branches and checkpoint refs (Git objects
+are left for `git gc`).
 
 ## License
 
