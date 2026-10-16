@@ -379,7 +379,7 @@ func TestExportRefusesSensitiveFields(t *testing.T) {
 			w, profiles := idealArena()
 			s := &ShareShader{shader.DefaultSource, "."}
 			if tc.edit == nil {
-				instructions("Note: " + tc.secret)(&w, profiles, s)
+				instructions("Note: "+tc.secret)(&w, profiles, s)
 			} else {
 				tc.edit(&w, profiles, s)
 			}
