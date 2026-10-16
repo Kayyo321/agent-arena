@@ -183,8 +183,11 @@ type RunHistory struct {
 	// PendingDecisions counts open questions that wait on the user.
 	PendingDecisions int `json:"pendingDecisions"`
 	// StateError explains an "invalid" status: the events do not replay.
-	StateError string  `json:"stateError,omitempty"`
-	Events     []Event `json:"events"`
+	StateError string `json:"stateError,omitempty"`
+	// Usage totals the token counts providers reported; reported is false
+	// when none did.
+	Usage  RunUsage `json:"usage"`
+	Events []Event  `json:"events"`
 }
 
 // terminalStatuses are the run statuses set by workflow.succeeded,
@@ -196,7 +199,7 @@ func (p *Project) History(id string, events []Event) (RunHistory, error) {
 	if err != nil {
 		return RunHistory{}, err
 	}
-	h := RunHistory{RunID: id, PendingDecisions: len(pending), Events: events}
+	h := RunHistory{RunID: id, PendingDecisions: len(pending), Usage: SumUsage(events), Events: events}
 	// History stays readable when the events do not replay; that is when it
 	// matters most.
 	if state, err := Reduce(events); err != nil {

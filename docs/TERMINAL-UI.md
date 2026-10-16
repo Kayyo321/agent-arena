@@ -66,7 +66,13 @@ removed worktree falls back to its recorded change patch. Worktrees are scanned
 off the UI loop at most every two seconds. The Git column shows the run base,
 the worktree count and the agents with the most churn.
 
-Columns join by priority while they fit: identity, changes, activity, nodes, Git.
+The TOKENS column totals the input and output tokens providers reported in
+`usage.reported` events, and says `unreported` while none has reported. Arena sums
+only the token fields a provider actually reports, derives no cost, and keeps each
+provider's own usage map opaque in the journal. `/usage` opens the same totals per
+agent; the compact one-row band appends a short `N tok` total.
+
+Columns join by priority while they fit: identity, changes, activity, nodes, tokens, Git.
 Without the Git column the worktree count joins the change size, and without the
 changes column the change size sits beside the workflow ID, so it is never
 dropped. Narrow or short terminals use a single row led by the compact title.

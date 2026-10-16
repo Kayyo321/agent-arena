@@ -144,10 +144,11 @@ type bandSummary struct {
 	perAgent              map[string]diffStat
 	segments              []string // node states in graph order
 	base                  string
+	usage                 RunUsage
 }
 
 func (m LiveModel) bandSummary() bandSummary {
-	s := bandSummary{name: m.Run.Workflow.Id, status: m.State.Status, trees: len(m.Trees), decisions: len(m.Decisions), base: m.Run.BaseCommit[:min(7, len(m.Run.BaseCommit))]}
+	s := bandSummary{name: m.Run.Workflow.Id, status: m.State.Status, trees: len(m.Trees), decisions: len(m.Decisions), usage: SumUsage(m.Events), base: m.Run.BaseCommit[:min(7, len(m.Run.BaseCommit))]}
 	if s.name == "" {
 		s.name = "arena"
 	}
@@ -365,6 +366,9 @@ func (m LiveModel) header(width, height int, color bool) []string {
 		activity(&b, width/2)
 		b.add("   ", "")
 		diff(&b)
+		if s.usage.Reported {
+			b.add("   "+tokenText(s.usage.Total())+" tok", sgrDim)
+		}
 		lines := []string{short(b.String(), width)}
 		if height >= 12 {
 			lines = append(lines, styled(strings.Repeat(glyph("─", "-"), width), sgrHairline, color))
@@ -425,6 +429,14 @@ func (m LiveModel) header(width, height int, color bool) []string {
 		nodes.rows[2].add("0 failed", sgrDim)
 	}
 
+	tokens := newColumn("TOKENS", 10)
+	if s.usage.Reported {
+		tokens.rows[1].add(tokenText(s.usage.InputTokens)+" in", sgrSoft)
+		tokens.rows[2].add(tokenText(s.usage.OutputTokens)+" out", sgrDim)
+	} else {
+		tokens.rows[1].add("unreported", sgrDim)
+	}
+
 	changes := newColumn("CHANGES", 14)
 	if s.diffKnown {
 		changes.rows[1].add(fmt.Sprintf("+%d", s.diff.Add), "1;"+sgrAdd).add(" ", "").add(fmt.Sprintf("%s%d", minus, s.diff.Del), "1;"+sgrDel)
@@ -470,7 +482,7 @@ func (m LiveModel) header(width, height int, color bool) []string {
 			}
 		}
 	}
-	for _, c := range []*column{identity, active, nodes, changes, git} {
+	for _, c := range []*column{identity, active, nodes, tokens, changes, git} {
 		if c == nil {
 			continue
 		}
@@ -482,7 +494,7 @@ func (m LiveModel) header(width, height int, color bool) []string {
 	room := width - 2*margin - logoWidth - gap
 	chosen := map[*column]bool{}
 	used := 0
-	for _, c := range []*column{identity, changes, active, nodes, git} {
+	for _, c := range []*column{identity, changes, active, nodes, tokens, git} {
 		if c == nil {
 			continue
 		}
@@ -505,7 +517,7 @@ func (m LiveModel) header(width, height int, color bool) []string {
 		diff(&identity.rows[0])
 	}
 	order := []*column{}
-	for _, c := range []*column{identity, active, nodes, changes} {
+	for _, c := range []*column{identity, active, nodes, tokens, changes} {
 		if chosen[c] {
 			order = append(order, c)
 		}
