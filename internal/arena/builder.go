@@ -353,6 +353,13 @@ func GraphSummary(w Workflow) string {
 	for _, t := range w.Teams {
 		fmt.Fprintf(&b, "  [team %s] members %s; unanimous, max %d rounds; verdicts %s\n", t.Id, strings.Join(t.Members, ", "), t.Consensus.MaxRounds, strings.Join(t.OutputContract.Verdicts, ", "))
 	}
+	for _, f := range w.FanOuts {
+		approval := f.Approval
+		if approval == "" {
+			approval = "required"
+		}
+		fmt.Fprintf(&b, "  [fan-out %s] planner %s, worker %s, max %d children; approval %s\n", f.Id, f.Planner, f.Worker, f.MaxChildren, approval)
+	}
 	for _, r := range w.Relationships {
 		arrow := "--delegates-->"
 		if r.Type == "communicates" {
