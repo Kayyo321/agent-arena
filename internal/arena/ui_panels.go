@@ -125,7 +125,17 @@ func visibleActivity(e Event) string {
 	return ""
 }
 
-func (m LiveModel) agentActivity(id string) []string {
+// activityLine is one row of an agent's activity: the event time and what it
+// made visible, or "" for an event that is not public activity.
+func activityLine(e Event) string {
+	if text := visibleActivity(e); text != "" {
+		return e.At + "  " + text
+	}
+	return ""
+}
+
+// agentHeader names the agent, its state and its selected runtime.
+func (m LiveModel) agentHeader(id string) []string {
 	state := m.State.Agents[id]
 	if state == "" {
 		state = "idle"
@@ -137,7 +147,19 @@ func (m LiveModel) agentActivity(id string) []string {
 	if id == "arena-orchestrator" && m.ChatBusy {
 		state = "responding"
 	}
-	lines := []string{id + " | " + state, runtime.Provider + " / " + runtime.Model + " / " + runtime.ReasoningEffort, "Public progress, tools and results · Tab: context", ""}
+	return []string{id + " | " + state, runtime.Provider + " / " + runtime.Model + " / " + runtime.ReasoningEffort}
+}
+
+// structuredResult is the agent's validated result once it has one.
+func (m LiveModel) structuredResult(id string) []string {
+	if result := m.State.Completed[id]; result != nil {
+		return []string{"STRUCTURED RESULT:", string(SafeJSON(result))}
+	}
+	return nil
+}
+
+func (m LiveModel) agentActivity(id string) []string {
+	lines := append(m.agentHeader(id), "Public progress, tools and results · Tab: context", "")
 	events := m.Events
 	if id == "arena-orchestrator" {
 		events = m.ControlEvents
@@ -147,18 +169,15 @@ func (m LiveModel) agentActivity(id string) []string {
 		if e.AgentID != id {
 			continue
 		}
-		if text := visibleActivity(e); text != "" {
-			lines = append(lines, e.At+"  "+text)
+		if line := activityLine(e); line != "" {
+			lines = append(lines, line)
 			count++
 		}
 	}
 	if count == 0 {
 		lines = append(lines, "No recorded activity yet")
 	}
-	if result := m.State.Completed[id]; result != nil {
-		lines = append(lines, "STRUCTURED RESULT:", string(SafeJSON(result)))
-	}
-	return lines
+	return append(lines, m.structuredResult(id)...)
 }
 
 func plainUILines(lines []string, width int) []string {

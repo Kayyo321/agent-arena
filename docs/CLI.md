@@ -130,6 +130,8 @@ arena
 arena --workflow development
 arena run development 'Describe the task and acceptance criteria'
 arena watch RUN_ID
+arena watch RUN_ID --json --follow
+arena view AGENT --run RUN_ID --follow
 arena history RUN_ID --json
 arena decision list RUN_ID
 arena decision answer RUN_ID DECISION_ID yes
@@ -242,6 +244,40 @@ Router branches compare structured JSON Pointer values exactly. A missing field
 never matches an explicit null branch. Unmatched packets follow the configured
 fallback. On-call invocations use durable reservations and invocation caps, including
 when called from another CLI process.
+
+### Structured terminal streams
+
+Two commands project a run's journal as plain streams for a pipe, a script or a
+terminal pane. Both are read-only: they re-read the journal every 150 ms, as the
+live view does, and keep nothing but the newest event sequence they have printed.
+
+`watch RUN --json` prints each journal event as one JSON line, exactly as
+`.state/RUN/events.ndjson` records it, so the hash chain (`previousHash`, `hash`)
+can still be verified. Without `--follow` it prints the journal once and exits.
+`--follow` keeps tailing: each line is flushed as it is written, every event
+appears once in `sequence` order, and the command exits 0 when the run is
+terminal (`succeeded`, `failed` or `cancelled`, the `terminal` flag of
+`history --json`) and a poll finds nothing new. That last poll lets
+`agent.cancelled` events that follow `workflow.cancelled` still arrive; an event
+recorded later than one poll after the run ended is only in `history`. An
+interrupt (Ctrl+C or SIGTERM) also exits 0. If the events stop replaying or the
+history is retired while following, it exits non-zero with the reason. `--follow`
+requires `--json`; `watch --plain` and the interactive `watch` are unchanged.
+
+```sh
+arena watch run-… --json --follow | jq -c 'select(.type == "agent.failed")'
+```
+
+`view AGENT --run RUN` prints what the live view's activity window shows for one
+agent, as plain text: its state and runtime, then one line per public event
+(progress, plan, tool activity, results, failures) with its time, and the
+structured result once the agent has one. `--follow` appends new activity as it
+is recorded and ends the way `watch --follow` does, closing with the structured
+result and the run's final status (`Run succeeded`). `AGENT` must be an agent of the run's workflow or one that has events in
+the run. Provider text is redacted and stripped of escape and control sequences.
+Raw process output is journaled only when the run keeps full local history and
+`audit.processOutput` is `full`; otherwise `view` says so under the header and
+shows `Output recorded: N bytes` where the text would be.
 
 ## Code review, recovery, and context
 

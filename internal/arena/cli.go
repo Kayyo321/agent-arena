@@ -37,7 +37,7 @@ func (o Options) Bool(k string) bool { return o.Get(k) == "true" }
 func parseArgs(args []string) ([]string, Options, error) {
 	o := Options{}
 	pos := []string{}
-	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard"}
+	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip,follow")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -971,6 +971,8 @@ arena agent resolve REQUEST --approve
 arena history [RUN] [--json] | arena history repair RUN
 arena run WORKFLOW TASK [--plain]
 arena watch RUN [--plain]
+arena watch RUN --json [--follow]   One journal event per line; --follow tails until the run ends
+arena view AGENT --run RUN [--follow]   One agent's activity as plain text
 arena resume RUN [--retry-interrupted] [--plain]
 arena pause|cancel RUN
 arena checkpoint list|show|restore [ID] [--yes]
