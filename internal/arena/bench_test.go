@@ -455,6 +455,7 @@ func TestBenchConflictAndRollback(t *testing.T) {
 	}{
 		{"disjoint-writers", benchDisjointWriters},
 		{"overlapping-hunks", benchOverlappingHunks},
+		{"fan-out-overlapping-children", benchFanOutOverlap},
 		{"user-edit-before-integrate", benchUserEditBeforeIntegrate},
 		{"rollback-then-disjoint-edit", benchRollbackDisjointEdit},
 		{"rollback-then-overlapping-edit", benchRollbackOverlappingEdit},
@@ -552,6 +553,51 @@ func benchOverlappingHunks(t *testing.T) benchRow {
 	}
 	concurrent := scoreNaive(naiveCheckout(t, writers, nil, true), writes)
 	return benchRow{scenario: "Overlapping hunks", arena: arena, serial: scoreNaive(naiveCheckout(t, writers, nil, false), writes), concurrent: &concurrent}
+}
+
+// The overlapping writers again, as the children of a fan-out. Arena finds the
+// overlap before the next node starts, so the reviewer gets a snapshot of the
+// clean child instead of a refusal, and both overlapping proposals stay
+// reviewable. Integration then behaves as in the overlapping-hunks scenario.
+func benchFanOutOverlap(t *testing.T) benchRow {
+	writers := []benchWriter{
+		{"writer-a", []benchEdit{{"notes.txt", 10, "A: cache size 64"}, {"a.txt", 0, "A: new module"}}},
+		{"writer-b", []benchEdit{{"notes.txt", 10, "B: cache size 128"}, {"b.txt", 0, "B: new module"}}},
+		{"writer-c", []benchEdit{{"notes.txt", 22, "C: pool size 8"}}},
+	}
+	writes := benchWrites(writers...)
+	p, r := benchRun(t, benchIDs(writers), benchBackends[0].runtime)
+	changes := benchExecute(t, p, r, benchBackends[0].invoker(t, writers))
+	order := benchIDs(writers)
+	byChild := map[string][]string{}
+	for _, id := range order {
+		byChild[id] = []string{changes[id].ID}
+	}
+	conflicts, err := p.fanOutConflicts(r, order, byChild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(conflicts["writer-a"], ",") != "writer-b" || strings.Join(conflicts["writer-b"], ",") != "writer-a" || len(conflicts) != 2 {
+		t.Fatalf("the overlap was not found, or too much was held: %v", conflicts)
+	}
+	reader, err := p.Workspace(r, "reviewer", "reviewer", false, changes["writer-c"].ID)
+	if err != nil {
+		t.Fatalf("the snapshot without the held changes failed: %v", err)
+	}
+	if !(benchEdit{"notes.txt", 22, "C: pool size 8"}).presentIn(readBench(reader.Path, "notes.txt")) {
+		t.Fatal("the downstream snapshot lost the clean child's edit")
+	}
+	benchIntegrate(t, p, r, changes["writer-a"])
+	if _, state := benchRefused(t, p, r, changes["writer-b"]); state != "conflicted" {
+		t.Fatalf("the second overlapping change ended %q", state)
+	}
+	benchIntegrate(t, p, r, changes["writer-c"])
+	arena := scoreArena(t, p, r, writes)
+	if arena.preserved != 2 {
+		t.Fatalf("writer-b's whole change should be preserved, not dropped: %+v", arena)
+	}
+	concurrent := scoreNaive(naiveCheckout(t, writers, nil, true), writes)
+	return benchRow{scenario: "Overlapping fan-out children", arena: arena, serial: scoreNaive(naiveCheckout(t, writers, nil, false), writes), concurrent: &concurrent}
 }
 
 // The user edits the checkout after the proposals exist. Integration must

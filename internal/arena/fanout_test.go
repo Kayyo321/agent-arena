@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -350,6 +351,10 @@ type fanOutFixture struct {
 	// block, when set, may hold a child until the test interrupts the run.
 	block   func(ctx context.Context, id string) bool
 	verdict func(pass int) string
+	// edit, when set, replaces the default file a child writes in its worktree.
+	edit func(id, dir string) error
+	// base is what the reviewer saw in base.txt.
+	base string
 }
 
 func newFanOutFixture(n int) *fanOutFixture {
@@ -387,7 +392,11 @@ func (f *fanOutFixture) invoke(ctx context.Context, in Invocation) (map[string]a
 		if f.fail != nil && f.fail(in.AgentID) {
 			return nil, fmt.Errorf("fixture failure for %s", in.AgentID)
 		}
-		if err := os.WriteFile(filepath.Join(in.Dir, in.AgentID+".txt"), []byte("child output\n"), 0644); err != nil {
+		if f.edit != nil {
+			if err := f.edit(in.AgentID, in.Dir); err != nil {
+				return nil, err
+			}
+		} else if err := os.WriteFile(filepath.Join(in.Dir, in.AgentID+".txt"), []byte("child output\n"), 0644); err != nil {
 			return nil, err
 		}
 	case in.AgentID == "reviewer":
@@ -395,6 +404,9 @@ func (f *fanOutFixture) invoke(ctx context.Context, in Invocation) (map[string]a
 		f.mu.Lock()
 		for _, m := range matches {
 			f.saw = append(f.saw, filepath.Base(m))
+		}
+		if b, err := os.ReadFile(filepath.Join(in.Dir, "base.txt")); err == nil {
+			f.base = string(b)
 		}
 		f.mu.Unlock()
 		if props["outcome"] != nil {
@@ -483,12 +495,15 @@ func TestFanOutApprovalRequiredGatesChildrenAndPinsTheirChanges(t *testing.T) {
 	if strings.Join(f.saw, ",") != "split.1.txt,split.2.txt,split.3.txt" {
 		t.Fatalf("reviewer must start from every child's change: %v", f.saw)
 	}
+	if countEvents(events, "fanout.conflict", "") != 0 {
+		t.Fatal("disjoint children journaled a conflict")
+	}
 	result := fanOutResult(t, p, r, events, "split")
 	if len(anySlice(result["results"])) != 3 || len(anySlice(result["dropped"])) != 0 || intValue(result["planned"]) != 3 {
 		t.Fatalf("fan-out result %v", result)
 	}
 	for _, v := range anySlice(result["results"]) {
-		if m := v.(map[string]any); m["status"] != "succeeded" || len(anySlice(m["changeIds"])) != 1 {
+		if m := v.(map[string]any); m["status"] != "succeeded" || len(anySlice(m["changeIds"])) != 1 || m["conflict"] != nil || m["conflictsWith"] != nil {
 			t.Fatalf("child result %v", m)
 		}
 	}
@@ -858,5 +873,214 @@ func TestFanOutIsCreatableWithoutHandEditing(t *testing.T) {
 	saved, _, err := p.Load(full.Id)
 	if err != nil || len(saved.FanOuts) != 1 || saved.FanOuts[0].MaxChildren != 4 {
 		t.Fatalf("saved %+v %v", saved.FanOuts, err)
+	}
+}
+
+// sameLine makes the listed children replace base.txt's only line with their
+// own text, so any two of them conflict; the others write their own file.
+func sameLine(clashing ...string) func(id, dir string) error {
+	return func(id, dir string) error {
+		if Has(clashing, id) {
+			return os.WriteFile(filepath.Join(dir, "base.txt"), []byte("edited by "+id+"\n"), 0644)
+		}
+		return os.WriteFile(filepath.Join(dir, id+".txt"), []byte("child output\n"), 0644)
+	}
+}
+
+// changeStates maps each of the run's change IDs to its state.
+func changeStates(t *testing.T, p *Project, r Run) map[string]string {
+	t.Helper()
+	changes, err := p.Changes(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, c := range changes {
+		states[c.ID] = c.State
+	}
+	return states
+}
+
+func TestFanOutConflictIsSurfacedNotFatal(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	before := ScoreArena(w, profiles)
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(3)
+	f.edit = sameLine("split.1", "split.2")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	result := fanOutResult(t, p, r, events, "split")
+	results := anySlice(result["results"])
+	if len(results) != 3 {
+		t.Fatalf("results %v", results)
+	}
+	held := []string{}
+	changeIDs := []string{}
+	for i, v := range results {
+		m := v.(map[string]any)
+		changeIDs = append(changeIDs, stringSlice(m["changeIds"])...)
+		switch i {
+		case 0, 1:
+			other := fmt.Sprintf("split.%d", 3-(i+1))
+			if m["conflict"] != true || strings.Join(stringSlice(m["conflictsWith"]), ",") != other || m["status"] != "succeeded" {
+				t.Fatalf("child %d: %v", i+1, m)
+			}
+			held = append(held, stringSlice(m["changeIds"])...)
+		case 2:
+			if m["conflict"] != nil || m["conflictsWith"] != nil {
+				t.Fatalf("the clean child was marked: %v", m)
+			}
+		}
+	}
+	if !strings.Contains(str(result["summary"]), "2 children conflict") || !strings.Contains(str(result["summary"]), "3 of 3 children succeeded") {
+		t.Fatalf("summary %q", result["summary"])
+	}
+	// The reviewer's workspace holds the clean child's file and the untouched line.
+	if strings.Join(f.saw, ",") != "split.3.txt" || f.base != "baseline\n" {
+		t.Fatalf("reviewer saw %v, base.txt %q", f.saw, f.base)
+	}
+	// The node's packet pins only the clean change; the held ones are still proposals.
+	var packet Packet
+	for _, v := range events {
+		if v.Type == "node.completed" && str(v.Data["nodeId"]) == "split" {
+			packet, _ = p.ReadPacket(r.ID, str(v.Data["messageId"]))
+		}
+	}
+	if pinned := stringSlice(packet["arenaChangeIds"]); len(pinned) != 1 || Has(held, pinned[0]) {
+		t.Fatalf("pinned %v, held %v", pinned, held)
+	}
+	states := changeStates(t, p, r)
+	if len(held) != 2 || len(states) != 3 {
+		t.Fatalf("held %v states %v", held, states)
+	}
+	for _, id := range changeIDs {
+		if states[id] != "proposed" {
+			t.Fatalf("change %s is %q; nothing may be dropped", id, states[id])
+		}
+	}
+	// One journaled conflict names the pair and the held changes.
+	var conflict Event
+	for _, v := range events {
+		if v.Type == "fanout.conflict" {
+			conflict = v
+		}
+	}
+	if countEvents(events, "fanout.conflict", "split") != 1 || strings.Join(stringSlice(conflict.Data["children"]), ",") != "split.1,split.2" || len(stringSlice(conflict.Data["changeIds"])) != 2 || len(anySlice(conflict.Data["pairs"])) != 1 {
+		t.Fatalf("conflict events %+v", conflict)
+	}
+	if countEvents(events, "fanout.completed", "split") != 1 || countEvents(events, "node.failed", "") != 0 {
+		t.Fatal("the node must complete")
+	}
+	// The held changes can still be integrated one at a time; the second one
+	// then reports its conflict instead of overwriting the first.
+	if _, err := Git(p.Root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Git(p.Root, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "workflow files"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Integrate(r.ID, held[0], true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Integrate(r.ID, held[1], true); err == nil {
+		t.Fatal("the second conflicting change integrated")
+	}
+	if after := ScoreArena(w, profiles); !reflect.DeepEqual(before, after) {
+		t.Fatalf("the grade moved: %+v -> %+v", before, after)
+	}
+	// The graph card and the event list both show it.
+	view := strings.Join(wideGraph(w, RunState{Agents: map[string]string{}}, events, 140, false, ""), "\n")
+	if !strings.Contains(view, "3/3 done · 2 conflicting") {
+		t.Fatalf("card:\n%s", view)
+	}
+}
+
+func TestFanOutTwoChildrenOnTheSameLineStillFinish(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(2)
+	f.edit = sameLine("split.1", "split.2")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	if f.ran["reviewer"] != 1 || len(f.saw) != 0 || f.base != "baseline\n" {
+		t.Fatalf("reviewer ran %d times and saw %v", f.ran["reviewer"], f.saw)
+	}
+	for _, state := range changeStates(t, p, r) {
+		if state != "proposed" {
+			t.Fatalf("state %s", state)
+		}
+	}
+	if countEvents(events, "fanout.conflict", "split") != 1 {
+		t.Fatal("conflict not journaled")
+	}
+}
+
+func TestFanOutResumeAfterAConflictJournalsItOnce(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	first := newFanOutFixture(3)
+	first.edit = sameLine("split.1", "split.2")
+	// split.3 waits until both conflicting children are journaled, then the
+	// supervisor stops.
+	first.block = func(_ context.Context, id string) bool {
+		if id != "split.3" {
+			return false
+		}
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if events, err := p.Events(r.ID); err == nil && countEvents(events, "fanout.child.completed", "split") == 2 {
+				break
+			}
+		}
+		cancel()
+		return true
+	}
+	if err := <-startFanOut(ctx, p, r, first, false); err == nil {
+		t.Fatal("interrupted run reported success")
+	}
+	resumed := newFanOutFixture(3)
+	resumed.edit = sameLine("split.1", "split.2")
+	ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, resumed, true))
+	if resumed.ran["split.1"] != 0 || resumed.ran["split.2"] != 0 || resumed.ran["split.3"] != 1 || resumed.ran["planner"] != 0 {
+		t.Fatalf("resume reran finished work: %v", resumed.ran)
+	}
+	if countEvents(events, "fanout.conflict", "split") != 1 {
+		t.Fatalf("conflict journaled %d times", countEvents(events, "fanout.conflict", "split"))
+	}
+	results := anySlice(fanOutResult(t, p, r, events, "split")["results"])
+	if len(results) != 3 || results[0].(map[string]any)["conflict"] != true || results[1].(map[string]any)["conflict"] != true || results[2].(map[string]any)["conflict"] != nil {
+		t.Fatalf("results after resume %v", results)
+	}
+	if len(changeStates(t, p, r)) != 3 || strings.Join(resumed.saw, ",") != "split.3.txt" {
+		t.Fatalf("changes %v, reviewer saw %v", changeStates(t, p, r), resumed.saw)
+	}
+}
+
+func TestFanOutConflictCheckNeedsNoWorktreeAndLeavesNothingBehind(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(2)
+	f.edit = sameLine("split.1", "split.2")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	if left, _ := filepath.Glob(p.Path(".state", "indices", "*")); len(left) != 0 {
+		t.Fatalf("scratch indexes left behind: %v", left)
+	}
+	if status, err := Git(p.Root, "status", "--porcelain=v1"); err != nil || strings.Contains(status, "base.txt") {
+		t.Fatalf("the user's checkout was touched: %q %v", status, err)
 	}
 }
