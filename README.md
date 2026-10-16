@@ -112,6 +112,8 @@ shows its role, task and workflow context. `/chat` talks to the control agent,
 Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, and
 `/quit` exits. Plain output is available for logs and automation.
 
+Concurrency is capped by `maxConcurrentAgents` in `.arena/settings.arena.json`. The default is 4, the allowed range is 1-64, and the cap applies per run and project-wide. See [configuration](docs/CONFIGURATION.md).
+
 ## Providers and credentials
 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
