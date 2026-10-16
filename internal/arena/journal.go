@@ -25,8 +25,13 @@ type Event struct {
 	Hash         string         `json:"hash"`
 }
 
+// secretPatterns cover the provider and service tokens the share-code check
+// refuses (share_safety.go) plus credential assignments; keep the two in step.
 var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:sk-[a-z0-9_-]{16,}|AIza[a-z0-9_-]{20,}|gh[pousr]_[a-z0-9]{20,})`),
+	regexp.MustCompile(`\b(?:github_pat_[A-Za-z0-9_]{20,}|[rs]k_live_[0-9A-Za-z]{16,}|ya29\.[0-9A-Za-z_-]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16}\b|xox[abposr]-[A-Za-z0-9-]{10,})`),
+	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
+	regexp.MustCompile(`(?i)aws_?secret_?access_?key["']?\s*[=:]\s*["']?[^\s,;"'}]+`),
 	regexp.MustCompile(`(?i)(?:bearer\s+)[a-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|client[_-]?secret)["']?\s*[=:]\s*["']?[^\s,;"'}]+`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----`),

@@ -360,6 +360,7 @@ func TestShaderMidtonesRemainVisibleOnCharcoalBackground(t *testing.T) {
 }
 
 func TestShaderInputsProjectEveryStateChannel(t *testing.T) {
+	unicodeTerminal(t)
 	now := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	restore := shaderClock
 	shaderClock = func() time.Time { return now }

@@ -61,6 +61,10 @@ plan terms; Anthropic's guidance above still directs third-party products to
 API-key or cloud auth, so Arena never selects it by default. Readiness reads only
 `claude auth status`'s logged-in flag and auth kind.
 
+Confinement on this route is Claude Code's own permission model and sandbox, not
+an Arena fence: Arena chooses the tool set and permission mode below, and Claude
+Code refuses anything outside them.
+
 Workers get `claude -p --output-format stream-json` with `--tools` limited to
 Read/Glob/Grep (plus Edit/Write/NotebookEdit for writers), `--permission-mode
 dontAsk` or `acceptEdits`, `--permission-prompts none`, project settings only,
@@ -102,9 +106,14 @@ level, and `--effort` is passed only when selected.
 
 Version 1.3.6 headless mode writes files without asking, ignores `--mode plan`
 alongside disabled slash commands, and auto-denies terminal commands. Arena
-therefore wraps it in a write fence (bubblewrap on Linux; `sandbox-exec` on macOS, not yet exercised there):
-the project is read-only and only a writer's own worktree is writable again. The
-fence confines writes, not reads or networking. Agents with `run_commands` are
+therefore wraps it in a write fence (Linux, bubblewrap 0.11 or newer; Arena refuses Antigravity elsewhere, because it cannot keep agy's own state disposable there):
+the whole filesystem, including the home directory and the project, is read-only;
+a writer's own worktree is writable again, `/tmp` is private, caches go to that
+`/tmp`, and `agy`'s state (`~/.gemini/antigravity-cli`) is writable only through a
+throwaway overlay, so nothing a reader or writer writes there survives the run.
+Without bubblewrap's `--tmp-overlay`, and on macOS, readiness reports Antigravity
+as unsupported rather than mount that state writable. The fence confines writes, not
+reads or networking: `agy` reaches its keyring sign-in and its model as usual. Agents with `run_commands` are
 refused unless the user opts the runtime into `commandApproval: "sandboxed-blanket"`:
 Arena then adds `--sandbox --dangerously-skip-permissions` and swaps the write fence
 for a two-layer command fence (Linux only; see

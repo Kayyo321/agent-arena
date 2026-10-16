@@ -28,7 +28,14 @@ Arena validates and saves it, commits the project scaffold (`git add -A` and
 delegate ("you pick the efforts") are made by the orchestrator from the reported
 catalog and listed in its reply. If a draft fails validation, Arena returns the
 error to the orchestrator for up to two automatic repairs (journaled as
-`setup.repair`) before reporting it. Until saved, bare `arena` re-enters
+`setup.repair`) before reporting it. If you arrive without a design, type
+`/walkthrough` (optionally with a note): the orchestrator asks about the project,
+its goals and pain points, then offers two or three arena ideas. Arena validates
+each and lists its roles, suggested providers, a rough cost (agent turns per run
+weighted by reasoning effort, including capped loop reruns) and its grade. Pick
+or combine ideas in your reply; the orchestrator then asks for every provider,
+model and effort you have not chosen or delegated and drafts the arena as usual.
+It never drafts before you pick. Until saved, bare `arena` re-enters
 setup using the saved control runtime. No worker runtime is inferred from it.
 
 To prepare configuration without starting the conversation:
@@ -164,8 +171,10 @@ Slash commands are available in setup and the graph:
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
+| `/walkthrough [NOTE]` | Compare two or three arena ideas (roles, suggested providers, rough cost, grade) before the interview drafts the one you pick |
+| `/consult [QUESTION]` | Ask the control agent about the loaded arena or run; it only advises, and a proposed edit is a draft until `/save` |
 | `/pan` | Pan the graph with ←↑↓→ and press Space to recenter; Esc, Enter or typing leaves pan mode and keeps the view, and `/graph` recenters |
-| `/save [no-commit]` | Apply an explicitly reviewed setup draft and commit the scaffold; never overwrite another workflow |
+| `/save [no-commit] [allow-blanket]` | Apply an explicitly reviewed setup draft or `/consult` revision and commit the scaffold; never overwrite another workflow or an arena changed since the revision was proposed. A draft written by the orchestrator that turns on Antigravity blanket approval saves only with `allow-blanket`, which is your own choice and is audited |
 | `/run TASK`, `/pause`, `/resume`, `/cancel` | Control attached work |
 | `/events`, `/git`, `/changes`, `/teams` | Inspect audit, worktrees, patches and team members |
 | `/status`, `/refresh` | Inspect required providers or refresh the selected context/status |
@@ -182,7 +191,18 @@ activity/context, PageUp/PageDown scroll, Home/End jump, and Esc closes it. Acti
 shows public progress summaries, tool activity and results; private chain-of-thought
 is not displayed or retained. Context distinguishes the actual retained task from
 shared entries merely available to that workflow. `/chat` creates new workflow
-drafts; editing existing workflows continues to use `arena workflow edit`.
+drafts. `/consult` asks the permanent `arena-orchestrator` about the loaded arena
+or its run, for example why a run stalled, how to raise the grade, or which
+runtime fits a role. It runs read-only on the project default runtime with the
+saved arena, its score, required-runtime readiness and the run's status,
+decisions and recent events, and it cannot start a run, answer decisions or
+change configuration. Plain text in the consultation asks a follow-up; `/graph`
+returns and `/chat` switches to designing a new arena. When the orchestrator
+proposes an edit, Arena validates and scores it and shows it as a revision draft;
+`/save` applies it (audited as `workflow.saved` with source `consult`) and refuses
+when the arena changed after the revision was proposed. Consultations are
+journaled in project history as `consult.started`, `consult.repair`,
+`consult.replied` or `consult.failed`. `arena workflow edit` remains available.
 
 `run --plain` prints events without terminal control sequences. `watch --plain` and
 `history --json` provide non-TUI inspection. `NO_COLOR` disables owner colors.

@@ -23,6 +23,8 @@ var slashHelp = []string{
 	"/view NAME                  Live agent activity mini-window",
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
+	"/walkthrough [NOTE]         No design yet? Compare arena ideas before drafting one",
+	"/consult [QUESTION]         Ask the orchestrator about this arena or run (advice only)",
 	"/graph                      Return to the workflow graph",
 	"/pan                        Pan the graph: ←↑↓→ move, Space recenters, Esc done",
 	"/run TASK                   Start an attached workflow run",
@@ -35,7 +37,7 @@ var slashHelp = []string{
 	"/accept                     Apply the orchestrator's recommended answer",
 	"$ COMMAND                   Run a shell command in the project root",
 	"/integrate CHANGE_ID        Integrate a reviewed change",
-	"/save [no-commit]           Save the previewed draft and commit the scaffold",
+	"/save [no-commit] [allow-blanket]  Save the previewed draft; allow-blanket confirms Antigravity blanket approval",
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
 	"/quit                       Exit; preserve attached run history",
@@ -48,7 +50,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/walkthrough", "/consult", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -194,10 +196,41 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 					m.Session.interviews = append(m.Session.interviews, m.Interview)
 				}
 			}
-			m.ChatMode, m.Panel, m.PopupAgent = true, "", ""
-			if len(m.Chat) == 0 {
-				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", "Describe the new workflow you want to create. I will ask for all required choices."})
+			if len(m.Chat) == 0 || m.Consulting {
+				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", "Describe the new workflow you want to create. I will ask for all required choices. No design yet? /walkthrough compares a few ideas first."})
 			}
+			m.ChatMode, m.Consulting, m.Panel, m.PopupAgent = true, false, "", ""
+		case "walkthrough":
+			if m.ChatBusy {
+				m.Error = "The orchestrator is responding; try /walkthrough again when it finishes"
+				break
+			}
+			if m.runActive() {
+				m.Error = "Finish or cancel the current run before designing another arena"
+				break
+			}
+			m.ensureInterview()
+			m.ChatMode, m.Consulting, m.Panel, m.PopupAgent = true, false, "", ""
+			m.Walkthrough = setupWalkthrough
+			request := "I don't have a design yet. Walk me through a few arena ideas before drafting one."
+			if arg != "" {
+				request += " " + arg
+			}
+			return m.submitInput(request)
+		case "consult":
+			if m.Run.Workflow.HeadAgent == "" || m.Project == nil {
+				m.Error = "Open or /save an arena first; /chat creates one"
+				break
+			}
+			if !m.ChatMode || !m.Consulting {
+				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", "Ask me about " + m.Run.Workflow.Id + ": why a run stalled, how to raise its grade, or which runtime fits a role. I only advise; an edit I propose comes back as a draft for /save. /graph returns."})
+			}
+			m.ChatMode, m.Consulting, m.Panel, m.PopupAgent = true, true, "", ""
+			m.Offset = 1 << 30
+			if arg != "" {
+				return m.consultTurn(arg)
+			}
+			return m, nil
 		case "accept":
 			if m.Stall == nil || m.Stall.DecisionID == "" || m.pendingDecision(m.Stall.DecisionID) == nil {
 				m.Error = "no orchestrator recommendation is waiting; use /answer ID TEXT"
@@ -210,9 +243,19 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			}
 			return m, operation
 		case "save":
-			commit := arg != "no-commit"
-			if arg != "" && arg != "no-commit" {
-				m.Error = "usage: /save [no-commit]"
+			commit, allowBlanket, usage := true, false, false
+			for _, option := range strings.Fields(arg) {
+				switch option {
+				case "no-commit":
+					commit = false
+				case "allow-blanket":
+					allowBlanket = true
+				default:
+					usage = true
+				}
+			}
+			if usage {
+				m.Error = "usage: /save [no-commit] [allow-blanket]"
 				break
 			}
 			if m.ChatBusy || m.Draft == nil {
@@ -227,6 +270,13 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				m.Error = "project workflow-edit policy refuses agent proposals"
 				break
 			}
+			// The orchestrator never chooses blanket approval; the user does,
+			// here, after seeing what it allows.
+			blanket := m.Draft.modelBlanket()
+			if len(blanket) > 0 && !allowBlanket {
+				m.Error = "This draft turns on Antigravity blanket command approval for " + strings.Join(blanket, ", ") + ": agy auto-approves every tool request and keeps the network for inference. Only you can choose it: /save allow-blanket, or ask the orchestrator to remove it"
+				break
+			}
 			draft := *m.Draft
 			m.ChatBusy = true
 			operation := func() tea.Msg {
@@ -238,12 +288,16 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				if source == "" {
 					source = "tui-setup"
 				}
-				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": source, "approvedBy": "user"})
+				audit := map[string]any{"source": source, "approvedBy": "user"}
+				if len(blanket) > 0 {
+					audit["blanketApprovalChosenBy"], audit["blanketApprovalAgents"] = "user", blanket
+				}
+				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", audit)
 				if err != nil {
 					return draftSaved{Err: fmt.Errorf("workflow saved, audit failed: %w", err)}
 				}
 				r, err := loadWorkflowView(m.Project, draft.Workflow.Id)
-				saved := draftSaved{Run: r, Err: err}
+				saved := draftSaved{Run: r, Err: err, Revised: draft.Expected != ""}
 				if err == nil && commit {
 					saved.Commit, saved.CommitErr = commitScaffold(m.Project)
 				}
@@ -313,6 +367,9 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			m.Transcript += "\nUser answer: " + Redact(text)
 			return m, nil
 		}
+		if m.Consulting {
+			return m.consultTurn(text)
+		}
 		if m.ChatBusy {
 			m.Prompt = input
 			m.Error = "The orchestrator is responding; your input is preserved"
@@ -345,7 +402,7 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 		m.ChatTurns++
 		m.ChatBusy, m.Draft = true, nil
 		m.Offset = 1 << 30 // Follow the newest messages.
-		return m, m.Interview.turn(m.Transcript, m.ChatAttachments...)
+		return m, m.Interview.turn(m.Transcript, m.Walkthrough, m.ChatAttachments...)
 	}
 	if answer, ok := m.decisionShortcut(text); ok {
 		text = answer

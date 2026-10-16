@@ -10,6 +10,7 @@ import (
 const sampleMarkdown = "# Plan\n## Agents\nUse **bold**, *italic*, ~~old~~ and `inline code` with [docs](https://example.com).\n- builder writes the `ledger` package and keeps going on a long line that must wrap neatly under the bullet\n  - nested item\n1. first step\n> quoted reviewer note\n---\n```python\nprint(\"hi\")\n```\n| agent | effort |\n|---|---|\n| lead | low |\nMath like 2 * 3 * 4 stays literal."
 
 func TestMarkdownRendersStylesWithinWidth(t *testing.T) {
+	unicodeTerminal(t)
 	for _, width := range []int{20, 44, 100} {
 		lines := renderMarkdown(sampleMarkdown, width, true)
 		for _, line := range lines {
@@ -34,6 +35,7 @@ func TestMarkdownRendersStylesWithinWidth(t *testing.T) {
 }
 
 func TestTranscriptStripsProviderEscapesAndSeparatesTurns(t *testing.T) {
+	unicodeTerminal(t)
 	m := LiveModel{Chat: []chatLine{{"you", "build it"}, {"arena-orchestrator", "\x1b[31mred\x1b[0m **ok**"}, {"Arena", "Request failed: boom"}}}
 	lines := m.chatTranscript(40, true)
 	text := strings.Join(lines, "\n")

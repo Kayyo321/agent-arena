@@ -343,6 +343,12 @@ func TestNestedCommandArgsIsolatesTheNetworkAndBus(t *testing.T) {
 	if argRun(ro, "--tmpfs", "/run/user/7") < 0 {
 		t.Error("nested fence must hide the keyring relay socket")
 	}
+	if info, err := os.Stat("/run/user"); err == nil && info.IsDir() {
+		// Every user's runtime directory, whatever XDG_RUNTIME_DIR says.
+		if argRun(ro, "--tmpfs", "/run/user") < 0 || argRun(f.bwrapArgs("bwrap"), "--tmpfs", "/run/user") < 0 {
+			t.Error("fences must empty /run/user: a read-only socket is still connectable")
+		}
+	}
 	if argRun(ro, "--tmpfs", "/home/u/.gemini/antigravity-cli") < 0 {
 		t.Error("nested fence must hide agy's sign-in-bearing state")
 	}
@@ -502,4 +508,16 @@ func resolveForTest(p string) string {
 		return r
 	}
 	return p
+}
+
+func TestBlanketApprovalRefusesAnUnknownRuntimeDir(t *testing.T) {
+	if err := commandFenceAvailable(); err != nil {
+		t.Skip(err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	cmd := exec.Command("true")
+	if _, cleanup, err := commandFenceCommand(cmd, "", t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "XDG_RUNTIME_DIR") {
+		cleanup()
+		t.Fatalf("fence ran without a runtime dir: %v", err)
+	}
 }

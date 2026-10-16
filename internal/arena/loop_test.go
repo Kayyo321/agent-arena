@@ -175,6 +175,7 @@ func countEvents(events []Event, kind, agent string) int {
 }
 
 func TestChangesRequestedLoopsBackToBuilderThenSucceeds(t *testing.T) {
+	unicodeTerminal(t)
 	p, r, f, events := runLoop(t, 2, func(pass int) string {
 		if pass == 1 {
 			return "ChangesRequested"
@@ -246,6 +247,7 @@ func TestLoopCapFallsThroughToRouterFallback(t *testing.T) {
 }
 
 func TestGraphDrawsLoopRouteAsCountedReturnEdge(t *testing.T) {
+	unicodeTerminal(t)
 	s := DefaultSettings(Runtime{Provider: "codex", Model: "m", ReasoningEffort: "high"})
 	w, _ := loopWorkflow(s, 2)
 	events := []Event{{Type: "loop.iteration", AgentID: "review-gate", Data: map[string]any{"routerId": "review-gate", "target": "builder"}}}

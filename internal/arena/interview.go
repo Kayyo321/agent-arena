@@ -10,6 +10,16 @@ import (
 	assets "github.com/Kayyo321/agent-arena"
 )
 
+// modelBlanket lists the agents an orchestrator-written draft opts into
+// Antigravity's blanket approval; /save needs the user's own allow-blanket
+// for them. A pasted arena carries its author's consent note instead.
+func (d WorkflowDraft) modelBlanket() []string {
+	if d.Source == "share-import" {
+		return nil
+	}
+	return newBlanketApproval(d.Workflow, Workflow{})
+}
+
 type WorkflowDraft struct {
 	Workflow Workflow           `json:"workflow"`
 	Profiles map[string]Profile `json:"profiles"`
@@ -19,15 +29,17 @@ type WorkflowDraft struct {
 	Shader *ShaderDraft `json:"-"`
 	Notes  []string     `json:"-"`
 	Source string       `json:"-"`
+	// Expected is the configuration version a revision of a saved arena
+	// replaces; it is empty for a new arena.
+	Expected string `json:"-"`
 }
 
-func interviewInstructions() string {
-	text := `You are the permanent arena-orchestrator. Interview the user about what to build and its acceptance criteria, then propose a NEW workflow.
-
-Choices and delegation:
+// arenaDesignRules are the choices, graph rules and scoring guidance every
+// orchestrator conversation that drafts or revises an arena follows.
+const arenaDesignRules = `Choices and delegation:
 - Each worker's provider, model and supported reasoning effort is the user's choice. The user can make it by delegating explicitly ("you pick", "come up with the efforts for me", "whatever fits"). When they do, choose concrete values yourself from the supplied model catalog and supported efforts, apply them, and list each value you chose in your reply. Never ask again about a delegated choice.
 - Apply shorthand as the user wrote it: "all", "every agent" or "same as 1" applies that value to every matching agent. If a list could be read more than one way, pick the most reasonable reading, say which you used, and continue.
-- Antigravity agents cannot run commands unless the user explicitly chooses runtime.options.commandApproval "sandboxed-blanket": agy then auto-approves every tool request inside Arena's command fence, which hides credentials and keeps the home directory read-only but leaves the network open. It is the user's choice alone, like the claude-code-sign-in route. Never set it yourself, not even when other choices are delegated; if an Antigravity agent needs run_commands, ask whether the user chooses this mode or another provider, and name the network risk when you ask.
+- Antigravity agents cannot run commands unless the user explicitly chooses runtime.options.commandApproval "sandboxed-blanket": agy then auto-approves every tool request inside Arena's command fence. Each command runs with an emptied home, no credentials and no network, but agy itself keeps the network for inference, so a prompt-injected agent can still pass on what it reads in a model turn. It is the user's choice alone, like the claude-code-sign-in route. Never set it yourself, not even when other choices are delegated; if an Antigravity agent needs run_commands, ask whether the user chooses this mode or another provider, and name the network risk when you ask. Set it only after the user chooses it in their own words; Arena then still saves the draft only when the user types /save allow-blanket.
 - Your own control runtime belongs only to you. Assign it to a worker only when the user names it or says to reuse yours.
 - For everything else (roles, profiles, verdict labels, edges, teams, router fallback, on-call limits, workflow policies) propose sensible values that satisfy the request instead of asking. Ask only when a choice depends on intent you cannot infer, and ask every open question together in one message.
 - Do not ask about worker readiness; Arena checks each runtime when the graph opens and before every run.
@@ -44,9 +56,20 @@ Graph rules (Arena rejects drafts that break any of them):
 Example: lead(0) delegates builder(1) and tester(1); builder and tester each delegate review-board (members at level 2); review-board delegates review-gate (router: inputKind team-result, payloadPointer /verdict, routes Approved->docs(3), ChangesRequested->builder with "loop": true and "maxIterations": 2, fallback {"action":"ask-user"}); builder communicates two-way with tester. Without the loop, ChangesRequested would need a separate forward target such as fixer(3).
 
 Arena score: Arena grades every draft S+ to F with the score sheet below and shows the grade to the user before /save. Design toward a high grade from the start: no agent both coordinates and does the work, every writer has a reviewer downstream of it on a different provider or model, reviewers cannot write, ChangesRequested loops back to the writer with a small cap, and an on-call agent catches failures. Proportionality is part of the grade: never add an agent only to gain points, and keep the arena as small as the task allows; one agent is right for one-agent work. When an explicit user choice costs points (for example one provider for every agent), keep the choice and name the deduction in one sentence. When the user asks about or wants to improve the score, use the findings Arena reports for your previous draft.
+`
 
+func interviewInstructions() string {
+	return `You are the permanent arena-orchestrator. Interview the user about what to build and its acceptance criteria, then propose a NEW workflow.
+
+` + arenaDesignRules + `
 Output: return question, complete and builderRequestJson. Set complete=true once every required choice is supplied or delegated; builderRequestJson must then contain workflow and profiles objects following the schemas. If Arena reports a validation error for your draft, fix the draft and return it complete again without asking the user. In this embedded interview, the Arena host performs skill installation, runtime readiness checks and configuration authoring on your behalf. Do not run CLI/status commands or use tools to edit configuration or run workers. Use only the supplied readiness evidence; never invent failures or access claims. Arena previews, validates and saves the draft after explicit /save. Provide concise public progress summaries, never private reasoning. Apply the skill below within this host-owned interview flow.
-` + string(assets.Skill())
+` + arenaReference()
+}
+
+// arenaReference is the skill, score sheet and schemas appended to every
+// prompt that drafts an arena.
+func arenaReference() string {
+	text := string(assets.Skill())
 	if sheet, err := assets.Files.ReadFile("docs/ARENA-SCORING.md"); err == nil {
 		text += "\nScore sheet:\n" + string(sheet)
 	}
@@ -98,8 +121,10 @@ func decodeWorkflowDraft(p *Project, s Settings, text string) (*WorkflowDraft, e
 
 type chatLine struct{ Role, Text string }
 type interviewResult struct {
+	Kind     string // setup or consult
 	Question string
 	Draft    *WorkflowDraft
+	Ideas    []walkthroughIdea
 	Err      error
 }
 type interviewEvent struct {
@@ -114,6 +139,7 @@ type interviewQuestion struct {
 }
 type draftSaved struct {
 	Run       Run
+	Revised   bool // the draft replaced a saved arena
 	Err       error
 	Commit    string
 	CommitErr error
@@ -146,7 +172,82 @@ func (s *interviewSession) close() { s.cancel(); s.workers.Wait() }
 func waitInterview(ch <-chan interviewEvent) tea.Cmd {
 	return func() tea.Msg { v := <-ch; v.Next = ch; return v }
 }
-func (s *interviewSession) turn(transcript string, attachments ...Attachment) tea.Cmd {
+
+// Setup modes: the design interview, a walkthrough that proposes arena ideas
+// before anything is drafted, and the interview that drafts the user's pick.
+const (
+	setupDesign            = ""
+	setupWalkthrough       = "walkthrough"
+	setupWalkthroughPicked = "walkthrough-picked"
+)
+
+// turn sends one setup message. mode selects the walkthrough instructions.
+func (s *interviewSession) turn(transcript, mode string, attachments ...Attachment) tea.Cmd {
+	return s.run(orchestratorTurn{
+		kind: "setup",
+		build: func() (Invocation, Packet, error) {
+			in, packet, err := setupInvocation(s.project, s.settings, transcript)
+			if err != nil {
+				return in, packet, err
+			}
+			switch mode {
+			case setupWalkthrough:
+				in.Prompt += "\n" + walkthroughInstructions
+				in.Schema["properties"].(map[string]any)["ideasJson"] = map[string]any{"type": "string"}
+				in.Schema = objectSchema(in.Schema["properties"].(map[string]any))
+			case setupWalkthroughPicked:
+				in.Prompt += "\n" + walkthroughPickedInstructions
+			}
+			return in, packet, err
+		},
+		context: func() string {
+			if s.lastScore == nil {
+				return ""
+			}
+			return "\nArena's score of your previous draft (rubric v" + fmt.Sprint(s.lastScore.Rubric) + "):\n" + strings.Join(s.lastScore.Report(), "\n")
+		},
+		decode: func(out map[string]any) (interviewResult, string) {
+			result := interviewResult{Question: strings.TrimSpace(str(out["question"]))}
+			if mode == setupWalkthrough {
+				if out["complete"] == true {
+					result.Err = fmt.Errorf("orchestrator drafted an arena before the user picked a walkthrough idea")
+					return result, "The user has not picked a walkthrough idea yet. Return complete=false and either ask about the project or propose two or three ideas in ideasJson. Do not ask the user about this."
+				}
+				if raw := strings.TrimSpace(str(out["ideasJson"])); raw != "" {
+					result.Ideas, result.Err = decodeIdeas(s.project, s.settings, raw)
+					if result.Err != nil {
+						return result, "Your walkthrough ideas failed Arena validation: " + Redact(result.Err.Error()) + "\nPrevious ideas:\n" + Redact(raw) + "\nFix every rule they break and return two or three valid ideas. Do not ask the user about this."
+					}
+				}
+			}
+			switch {
+			case out["complete"] == true:
+				result.Draft, result.Err = decodeWorkflowDraft(s.project, s.settings, str(out["builderRequestJson"]))
+				if result.Err != nil {
+					return result, "Your previous draft failed Arena validation: " + Redact(result.Err.Error()) + "\nPrevious draft:\n" + Redact(str(out["builderRequestJson"])) + "\nFix every graph rule it breaks and return the corrected draft with complete=true. Do not ask the user about this."
+				}
+			case result.Question == "" && len(result.Ideas) == 0:
+				result.Err = fmt.Errorf("orchestrator returned no question or complete workflow")
+			}
+			return result, ""
+		},
+	}, attachments...)
+}
+
+// orchestratorTurn is one structured call to the permanent orchestrator.
+// Setup interviews, walkthroughs and consultations share its readiness check,
+// envelope, lock, repair loop and journal; they differ in the invocation, the
+// context added after the model catalog, and how a reply is decoded.
+type orchestratorTurn struct {
+	kind    string // journal event prefix: setup or consult
+	build   func() (Invocation, Packet, error)
+	context func() string
+	// decode turns a reply into a result. A non-empty repair is sent back to
+	// the orchestrator, with the result's error, for another attempt.
+	decode func(out map[string]any) (result interviewResult, repair string)
+}
+
+func (s *interviewSession) run(t orchestratorTurn, attachments ...Attachment) tea.Cmd {
 	ch := make(chan interviewEvent, 32)
 	s.workers.Add(1)
 	go func() {
@@ -154,6 +255,7 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 		defer close(ch)
 		result := interviewResult{}
 		defer func() {
+			result.Kind = t.kind
 			select {
 			case ch <- interviewEvent{Result: &result}:
 			case <-s.ctx.Done():
@@ -171,7 +273,7 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 				return s.ctx.Err()
 			}
 		}
-		in, packet, err := setupInvocation(s.project, s.settings, transcript)
+		in, packet, err := t.build()
 		if err != nil {
 			result.Err = err
 			return
@@ -214,8 +316,8 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 		if len(s.catalog) > 0 {
 			in.Prompt += "\nModel catalog reported by " + s.settings.DefaultModel.Provider + " (exact IDs and supported efforts; listing is not proof of access). Use these IDs when the user delegates a " + s.settings.DefaultModel.Provider + " model or effort:\n" + string(SafeJSON(s.catalog))
 		}
-		if s.lastScore != nil {
-			in.Prompt += "\nArena's score of your previous draft (rubric v" + fmt.Sprint(s.lastScore.Rubric) + "):\n" + strings.Join(s.lastScore.Report(), "\n")
+		if t.context != nil {
+			in.Prompt += t.context()
 		}
 		run := Run{ID: "project", Settings: s.settings, Retention: s.settings.Audit.Retention}
 		if _, err := s.project.Send(run, packet); err != nil {
@@ -244,7 +346,7 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 			}
 		}
 		in.Usage = func(data map[string]any) error { return emit("usage.reported", map[string]any{"usage": data}) }
-		if err := emit("setup.started", map[string]any{"model": in.Runtime.Model}); err != nil {
+		if err := emit(t.kind+".started", map[string]any{"model": in.Runtime.Model}); err != nil {
 			result.Err = err
 			return
 		}
@@ -252,36 +354,38 @@ func (s *interviewSession) turn(transcript string, attachments ...Attachment) te
 		for attempt := 0; ; attempt++ {
 			out, err := s.invoker.Invoke(bounded, in)
 			if err != nil {
-				result.Err = err
-				_ = emit("setup.failed", map[string]any{"error": err.Error()})
+				result = interviewResult{Err: err}
+				_ = emit(t.kind+".failed", map[string]any{"error": err.Error()})
 				return
 			}
-			result.Question = strings.TrimSpace(str(out["question"]))
-			result.Draft, result.Err = nil, nil
-			if out["complete"] == true {
-				result.Draft, result.Err = decodeWorkflowDraft(s.project, s.settings, str(out["builderRequestJson"]))
-			} else if result.Question == "" {
-				result.Err = fmt.Errorf("orchestrator returned no question or complete workflow")
-			}
-			if out["complete"] != true || result.Err == nil || attempt >= setupRepairAttempts {
+			var repair string
+			result, repair = t.decode(out)
+			if repair == "" {
 				break
 			}
-			if err := emit("setup.repair", map[string]any{"attempt": attempt + 1, "error": Redact(result.Err.Error())}); err != nil {
+			if attempt >= setupRepairAttempts {
+				result.Draft, result.Ideas = nil, nil
+				result.Err = fmt.Errorf("draft still invalid after %d automatic repairs: %w", setupRepairAttempts, result.Err)
+				break
+			}
+			if err := emit(t.kind+".repair", map[string]any{"attempt": attempt + 1, "error": Redact(result.Err.Error())}); err != nil {
 				result.Err = err
 				return
 			}
-			in.Prompt = prompt + "\nYour previous draft failed Arena validation: " + Redact(result.Err.Error()) + "\nPrevious draft:\n" + Redact(str(out["builderRequestJson"])) + "\nFix every graph rule it breaks and return the corrected draft with complete=true. Do not ask the user about this."
-		}
-		if result.Err != nil && result.Draft == nil && strings.Contains(in.Prompt, "failed Arena validation") {
-			result.Err = fmt.Errorf("draft still invalid after %d automatic repairs: %w", setupRepairAttempts, result.Err)
+			in.Prompt = prompt + "\n" + repair
 		}
 		replied := map[string]any{"text": result.Question, "draftReady": result.Draft != nil}
+		if len(result.Ideas) > 0 {
+			replied["ideas"] = len(result.Ideas)
+		}
 		if result.Draft != nil {
 			score := ScoreArena(result.Draft.Workflow, result.Draft.Profiles)
-			s.lastScore = &score
+			if t.kind == "setup" {
+				s.lastScore = &score
+			}
 			replied["grade"], replied["points"] = score.Grade, score.Points
 		}
-		_ = emit("setup.replied", replied)
+		_ = emit(t.kind+".replied", replied)
 	}()
 	return waitInterview(ch)
 }
@@ -298,7 +402,7 @@ func (cli *CLI) setupUI(ctx context.Context, p *Project, s Settings) error {
 	}
 	profiles["arena-orchestrator"] = control
 	r := Run{Workflow: NewWorkflow("setup", "Project setup"), Profiles: profiles, Settings: s, BaseCommit: "unborn"}
-	m := LiveModel{Project: p, Run: r, State: RunState{Status: "setup"}, Readiness: unknownReadiness(r), Session: session, Interview: interview, ChatMode: true, Chat: []chatLine{{"arena-orchestrator", "What would you like to build? Describe the goal and acceptance criteria. I’ll ask for the workflow choices, then show a draft for /save."}}, Width: 80, Height: 24, Context: session.ctx}
+	m := LiveModel{Project: p, Run: r, State: RunState{Status: "setup"}, Readiness: unknownReadiness(r), Session: session, Interview: interview, ChatMode: true, Chat: []chatLine{{"arena-orchestrator", "What would you like to build? Describe the goal and acceptance criteria. I’ll ask for the workflow choices, then show a draft for /save. No design yet? Type /walkthrough and I’ll propose a few ideas first."}}, Width: 80, Height: 24, Context: session.ctx}
 	_, err := tea.NewProgram(m, tea.WithContext(session.ctx), tea.WithInput(cli.input), tea.WithOutput(cli.Out)).Run()
 	return err
 }

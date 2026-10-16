@@ -238,7 +238,15 @@ func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, erro
 		if in.Write {
 			writable = append(writable, in.Dir)
 		}
-		if err := writeFence(cmd, []string{in.ProjectRoot, in.Dir}, writable); err != nil {
+		state := ""
+		if home, err := os.UserHomeDir(); err == nil {
+			// agy creates its state on first use; the fence needs it to exist.
+			state = antigravityStateDir(home)
+			if err := os.MkdirAll(state, 0o700); err != nil {
+				return nil, err
+			}
+		}
+		if err := writeFence(cmd, []string{in.ProjectRoot, in.Dir}, writable, state); err != nil {
 			return nil, err
 		}
 	}
@@ -394,91 +402,117 @@ func nativeActivity(in Invocation, tool, status, id, command string) error {
 	return in.Diagnostic("provider.activity", data)
 }
 
-// writeFence leaves the filesystem as the CLI expects (its own sign-in state,
-// caches and network) except that readOnly roots refuse writes, with writable
-// roots reopened inside them. It confines writes only; it is not the mediated
-// command sandbox.
-func writeFence(cmd *exec.Cmd, readOnly, writable []string) error {
-	resolve := func(paths []string) ([]string, error) {
-		out := []string{}
-		for _, path := range paths {
-			if path == "" {
-				continue
-			}
-			resolved, err := filepath.EvalSymlinks(path)
-			if err != nil {
-				return nil, err
-			}
-			if !Has(out, resolved) {
-				out = append(out, resolved)
-			}
+// writeFence makes the whole filesystem read-only for the CLI except its
+// writable roots (the worktree, for writers), a private /tmp, and its own
+// state directory through a throwaway overlay. It runs on Linux only, with
+// bubblewrap 0.11 or newer: without a disposable state directory it refuses,
+// rather than let a reader write state that outlives the run. The CLI keeps
+// its network, so it can reach its sign-in (the
+// system keyring over the session bus) and its model. It confines writes only;
+// it is not the mediated command sandbox, and a writable root may not contain
+// the home directory. Readable roots (the project) stay visible even when they
+// live under /tmp.
+func writeFence(cmd *exec.Cmd, readable, writable []string, state string) error {
+	resolve := func(path string) (string, error) {
+		return filepath.EvalSymlinks(path)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("write fence needs the home directory: %w", err)
+	}
+	if resolved, err := resolve(home); err == nil {
+		home = resolved
+	}
+	ro := []string{}
+	for _, path := range readable {
+		if path == "" {
+			continue
 		}
-		return out, nil
+		resolved, err := resolve(path)
+		if err != nil {
+			return err
+		}
+		ro = append(ro, resolved)
 	}
-	ro, err := resolve(readOnly)
-	if err != nil {
-		return err
+	rw := []string{}
+	for _, path := range writable {
+		if path == "" {
+			continue
+		}
+		resolved, err := resolve(path)
+		if err != nil {
+			return err
+		}
+		if within(home, resolved) {
+			return fmt.Errorf("write fence refuses a writable worktree that contains the home directory")
+		}
+		if !Has(rw, resolved) {
+			rw = append(rw, resolved)
+		}
 	}
-	rw, err := resolve(writable)
-	if err != nil {
-		return err
-	}
-	if len(ro) == 0 {
-		return fmt.Errorf("write fence needs at least one protected root")
+	if state != "" {
+		if state, err = resolve(state); err != nil {
+			return err
+		}
 	}
 	path, err := exec.LookPath(cmd.Path)
 	if err != nil {
 		return err
+	}
+	if path, err = resolve(path); err != nil {
+		return err
+	}
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
 	}
 	argv := []string{}
 	switch runtime.GOOS {
 	case "linux":
 		wrapper, err := exec.LookPath("bwrap")
 		if err != nil {
-			return fmt.Errorf("bubblewrap is required to keep this provider CLI out of other worktrees")
+			return fmt.Errorf("Antigravity's write fence needs bubblewrap")
 		}
-		argv = append(argv, wrapper, "--die-with-parent", "--bind", "/", "/", "--dev", "/dev")
+		if !tmpOverlay() {
+			return fmt.Errorf("Antigravity's write fence needs bubblewrap 0.11 or newer (--tmp-overlay) to keep agy's state disposable")
+		}
+		// Home stays visible read-only even when it lives under /tmp.
+		argv = append(argv, wrapper, "--die-with-parent", "--ro-bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp", "--ro-bind", home, home)
+		if state != "" {
+			argv = append(argv, "--overlay-src", state, "--tmp-overlay", state)
+		}
 		for _, root := range ro {
 			argv = append(argv, "--ro-bind", root, root)
 		}
 		for _, root := range rw {
 			argv = append(argv, "--bind", root, root)
 		}
-		argv = append(argv, "--")
-	case "darwin":
-		wrapper, err := exec.LookPath("sandbox-exec")
-		if err != nil {
-			return fmt.Errorf("sandbox-exec is required to keep this provider CLI out of other worktrees")
-		}
-		profile := "(version 1)(allow default)"
-		for _, root := range ro {
-			profile += fmt.Sprintf("(deny file-write* (subpath %q))", root)
-		}
-		for _, root := range rw {
-			profile += fmt.Sprintf("(allow file-write* (subpath %q))", root)
-		}
-		argv = append(argv, wrapper, "-p", profile)
+		argv = append(argv, "--ro-bind", path, path, "--")
+		// Caches move to the private /tmp; the home directory is read-only.
+		env = append(env, "TMPDIR=/tmp", "XDG_CACHE_HOME=/tmp/.cache")
 	default:
-		return fmt.Errorf("no write fence on %s", runtime.GOOS)
+		return fmt.Errorf("Antigravity's write fence runs on Linux only: on %s Arena cannot keep agy's own state disposable", runtime.GOOS)
 	}
+	cmd.Env = env
 	cmd.Args = append(append(argv, path), cmd.Args[1:]...)
 	cmd.Path = argv[0]
 	return nil
 }
 
-func writeFenceAvailable() bool {
-	dir, err := os.MkdirTemp("", "arena-fence-")
-	if err != nil {
-		return false
-	}
-	defer os.RemoveAll(dir)
+// writeFenceError reports why the write fence cannot run here, or nil.
+func writeFenceError() error {
 	cmd := exec.Command("true")
-	if writeFence(cmd, []string{dir}, nil) != nil {
-		return false
+	if err := writeFence(cmd, nil, nil, ""); err != nil {
+		return err
 	}
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	return cmd.Run() == nil
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("Antigravity's write fence could not start bubblewrap: %w", err)
+	}
+	return nil
 }
+
+func writeFenceAvailable() bool { return writeFenceError() == nil }
 
 // helpEfforts reads the effort scale an installed CLI documents for --effort.
 func helpEfforts(help string) []string {
@@ -533,9 +567,9 @@ func probeAntigravity(ctx context.Context, r Runtime, result Readiness) Readines
 		result.Detail = "effort not accepted by installed agy"
 		return result
 	}
-	if !writeFenceAvailable() {
+	if err := writeFenceError(); err != nil {
 		result.State = "unsupported"
-		result.Detail = "Antigravity workers need bubblewrap (Linux) or sandbox-exec (macOS) for Arena's write fence"
+		result.Detail = err.Error()
 		return result
 	}
 	if str(r.Options["commandApproval"]) == antigravityBlanketApproval {
@@ -592,7 +626,7 @@ func probeClaudeSignIn(ctx context.Context, result Readiness) Readiness {
 	}
 	result.Auth = "Claude Code-owned sign-in ready (" + Redact(status.AuthMethod) + ")"
 	result.ModelState = "accepted by the CLI at run time; inference access unverified"
-	result.Detail = "Claude Code runs headless with its own tools, limited to the assigned worktree"
+	result.Detail = "Claude Code runs headless with its own tools; its permission mode, not an Arena fence, keeps edits to the assigned worktree"
 	result.CanStart = true
 	return result
 }

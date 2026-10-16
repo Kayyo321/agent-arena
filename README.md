@@ -7,9 +7,10 @@ and keeps a local history with reviewable integration and reversible rollback.
 
 The Go implementation includes workflow authoring, the permanent project control
 agent, teams, reviewers, deterministic routers, on-call agents, workflow context,
-and a Bubble Tea terminal interface. A real Codex read-only workflow has passed.
-**Live multi-provider verification is pending a second approved route.** Other
-adapters have contract coverage; that coverage does not establish live readiness.
+and a Bubble Tea terminal interface. A real Codex read-only workflow has passed, and the live multi-provider exit passed
+with Codex and Antigravity (each under its own sign-in) in the production-readiness
+sweep. Claude Code, Gemini and local adapters have contract or probe coverage only;
+that coverage does not establish live readiness.
 See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
 and [validation evidence](docs/VALIDATION.md).
 
@@ -103,7 +104,9 @@ worktrees, and the Git tree at the right. Below it are the graph (with distinct 
 worker, team and router cards), packet activity,
 teams and on-call rail, required providers, decisions and the `> memento mori` prompt.
 `/help` lists slash commands. `/view AGENT` opens a live mini-window and `/context AGENT`
-shows its role, task and workflow context. `/chat` talks to the control agent.
+shows its role, task and workflow context. `/chat` talks to the control agent,
+`/walkthrough` has it propose a few arena ideas when you have no design yet, and
+`/consult` asks it about the loaded arena or run (advice only; edits stay drafts until `/save`).
 Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, and
 `/quit` exits. Plain output is available for logs and automation.
 
@@ -111,7 +114,7 @@ Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, 
 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
 - Claude Code uses bare programmatic mode with API-key or supported cloud authentication, or, when you select `claude-code-sign-in`, runs in the background under its own sign-in like Codex.
-- Antigravity (`agy`) runs in the background under its own sign-in, inside a write fence that keeps it in its worktree. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
+- Antigravity (`agy`, Linux with bubblewrap 0.11+) runs in the background under its own sign-in, inside a write fence: the filesystem is read-only except a writer's own worktree, a private `/tmp` and a throwaway copy of agy's own state. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
 - Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
 - Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
 

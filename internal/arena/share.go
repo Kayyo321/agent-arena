@@ -442,9 +442,9 @@ func importNotes(ctx context.Context, p *Project, w Workflow, profiles map[strin
 // shared shader when it brought one.
 func (p *Project) SaveDraft(d WorkflowDraft) (string, error) {
 	if d.Shader != nil {
-		return p.saveWithShader(d.Workflow, d.Profiles, "", &d.Shader.Source)
+		return p.saveWithShader(d.Workflow, d.Profiles, d.Expected, &d.Shader.Source)
 	}
-	return p.Save(d.Workflow, d.Profiles, "")
+	return p.Save(d.Workflow, d.Profiles, d.Expected)
 }
 
 func (cli *CLI) share(ctx context.Context, p *Project, args []string, o Options) error {

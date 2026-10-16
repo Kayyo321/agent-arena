@@ -98,7 +98,9 @@ func (m LiveModel) chatTranscript(width int, color bool) []string {
 		case role == "Arena" && strings.HasPrefix(text, "Request failed"):
 			lines = append(lines, wrapSpans([]mdSpan{{text, "38;5;203"}}, width, nil, nil, color)...)
 		case role == "Arena":
-			lines = append(lines, wrapSpans([]mdSpan{{text, "38;5;223"}}, width, nil, nil, color)...)
+			for _, row := range strings.Split(text, "\n") {
+				lines = append(lines, wrapSpans([]mdSpan{{row, "38;5;223"}}, width, nil, nil, color)...)
+			}
 		case role == "You":
 			for _, row := range strings.Split(text, "\n") {
 				lines = append(lines, wrapSpans([]mdSpan{{row, ""}}, width, nil, nil, color)...)

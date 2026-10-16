@@ -4,11 +4,11 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 
 ## Final TODOs
 
-The last items before release, in order. Item 4 closes the list.
+The last items before release, in order. Item 4 closes the list. Items 1-3 are implemented with fixture coverage; their live behavior is part of item 4's sweep.
 
-1. **`/consult` the orchestrator from the live view.** Ask the permanent `arena-orchestrator` about the loaded arena or run, for example why a run stalled, how to raise the grade, or which runtime fits a role. It runs on the project default runtime, does not start a run or change configuration, and any edit it proposes goes through the normal draft preview and `/save`.
-2. **Spinning wordmark.** Each character of the `A2rena` wordmark spins in place, one at a time: `A`, then `2`, `r`, `e`, `n`, and the final `a`, then restarting at `A`. The wordmark's position and width never change, only the spinning glyph's frames. Keep the static wordmark for the text fallback, no-color, reduced-motion and non-TTY output (`internal/arena/wordmark.go`).
-3. **`/walkthrough` in arena setup.** For users who arrive without a design: the orchestrator asks about the project, its goals and pain points, proposes two or three arena ideas with their roles, providers, rough cost and grade, and lets the user pick or combine one before the normal interview drafts it. Provider, model and effort stay the user's choice unless they delegate it.
+1. **`/consult` the orchestrator from the live view.** Ask the permanent `arena-orchestrator` about the loaded arena or run, for example why a run stalled, how to raise the grade, or which runtime fits a role. It runs on the project default runtime, does not start a run or change configuration, and any edit it proposes goes through the normal draft preview and `/save`. **Implemented:** see [CLI](CLI.md#running-and-inspecting) and `internal/arena/consult.go`.
+2. **Spinning wordmark.** Each character of the `A2rena` wordmark spins in place, one at a time: `A`, then `2`, `r`, `e`, `n`, and the final `a`, then restarting at `A`. The wordmark's position and width never change, only the spinning glyph's frames. Keep the static wordmark for the text fallback, no-color, reduced-motion and non-TTY output (`internal/arena/wordmark.go`). **Implemented** in the status band and the arena chooser.
+3. **`/walkthrough` in arena setup.** For users who arrive without a design: the orchestrator asks about the project, its goals and pain points, proposes two or three arena ideas with their roles, providers, rough cost and grade, and lets the user pick or combine one before the normal interview drafts it. Provider, model and effort stay the user's choice unless they delegate it. **Implemented:** see [CLI](CLI.md#setup-and-authoring) and `internal/arena/walkthrough.go`.
 4. **Production readiness sweep, approved by Fable and Astra.** Run a final sweep as an arena whose review team is Claude Fable 5.1 (`claude-code`, `claude-fable-5-1`) and Codex GPT-6-Astra (`codex`, `gpt-6-astra`) with unanimous consensus. Cover security (fences, credentials, share codes, blanket-approval modes), correctness, documentation against behavior, packaging, and the pending M3 and M6 live exits. Release only when both reviewers return `Approved`; `no-consensus` stays unresolved.
 
 ## M0 — Product and protocol foundation
@@ -57,7 +57,7 @@ The last items before release, in order. Item 4 closes the list.
 
 ## M3 — Provider adapters and handoffs
 
-**Status: implementation present; live multi-provider exit check PENDING.** Real Codex `gpt-6.1-sol` / `high` read-only inference passed. Claude API/cloud, Gemini API-key/Vertex and local contracts are implemented with fixture/interface coverage. The owner will supply a second approved route; do not mark this milestone complete before it is exercised. An opt-in multi-provider team workflow test is prepared.
+**Status: implementation present; live multi-provider exit passed (2026-10-16).** Real Codex `gpt-6.1-sol` / `high` read-only inference passed, and in the production-readiness sweep a Codex plus Antigravity (`gemini-3.8-flash-medium`, the owner's chosen second route) team workflow passed live for both reviewers; see [validation evidence](VALIDATION.md#production-readiness-sweep-2026-10-16). Claude API/cloud, Gemini API-key/Vertex and local contracts are implemented with fixture/interface coverage. The opt-in multi-provider team workflow test is the exit check; Claude Code, Gemini and local routes still need their own live runs before they are called verified.
 
 - Implement capability-based adapter interface and readiness checks.
 - Add Codex CLI and Claude Code adapters through their current supported local interfaces.
@@ -97,7 +97,7 @@ The last items before release, in order. Item 4 closes the list.
 
 ## M6 — Skill distribution and additional adapters
 
-**Status: skill/compatibility implementation complete; adapter portability exit PENDING M3 live verification.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. No unsupported execution adapter is advertised; audit export/import and expanded team policies remain deferred considerations.
+**Status: skill/compatibility implementation complete; adapter portability exit met for Codex and Antigravity with the M3 live run; other adapters remain fixture-covered.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. No unsupported execution adapter is advertised; audit export/import and expanded team policies remain deferred considerations.
 
 - Extend the bootstrap/skill installer to more supported project/user skill locations beyond the initial Codex, Claude Code, and Gemini CLI targets.
 - Add adapter compatibility manifests and version drift reporting.

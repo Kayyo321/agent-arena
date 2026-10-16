@@ -184,9 +184,7 @@ func homeBindBacks(home string) []string {
 // depth under the tmpfs home.
 func (f commandFence) bwrapArgs(wrapper string) []string {
 	argv := []string{wrapper, "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
-	if f.RuntimeDir != "" {
-		argv = append(argv, "--tmpfs", f.RuntimeDir)
-	}
+	argv = append(argv, hideRuntimeDirs(f.RuntimeDir)...)
 	hide := func(path string) {
 		info, err := os.Lstat(path)
 		if err != nil {
@@ -257,9 +255,7 @@ func (f commandFence) bwrapArgs(wrapper string) []string {
 // trailing `-- <shell> "$@"`, which each wrapper adds.
 func (f commandFence) nestedCommandArgs() []string {
 	argv := []string{"--die-with-parent", "--new-session", "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"}
-	if f.RuntimeDir != "" {
-		argv = append(argv, "--tmpfs", f.RuntimeDir) // the relay bus socket
-	}
+	argv = append(argv, hideRuntimeDirs(f.RuntimeDir)...) // and the relay bus socket
 	if f.State != "" {
 		argv = append(argv, "--tmpfs", f.State) // agy's sign-in-bearing state
 	}
@@ -269,6 +265,20 @@ func (f commandFence) nestedCommandArgs() []string {
 		argv = append(argv, "--ro-bind", f.Dir, f.Dir)
 	}
 	return append(argv, "--chdir", f.Dir)
+}
+
+// hideRuntimeDirs empties every user's runtime directory (/run/user, where the
+// real session bus and other sockets live) and the fence's own one: a socket on
+// a read-only bind is still connectable, so read-only is not enough.
+func hideRuntimeDirs(runtimeDir string) []string {
+	argv := []string{}
+	if info, err := os.Stat("/run/user"); err == nil && info.IsDir() {
+		argv = append(argv, "--tmpfs", "/run/user")
+	}
+	if runtimeDir != "" {
+		argv = append(argv, "--tmpfs", runtimeDir)
+	}
+	return argv
 }
 
 // otherHomes lists home roots other than the fence's own that exist on this
@@ -353,6 +363,9 @@ func commandFenceCommand(cmd *exec.Cmd, root, dir string, write bool) (*keyringR
 		f.RealSh = f.RealBash
 	}
 	f.RuntimeDir = resolve(os.Getenv("XDG_RUNTIME_DIR"))
+	if f.RuntimeDir == "" {
+		return nil, noop, fmt.Errorf("Antigravity's sandboxed blanket approval needs XDG_RUNTIME_DIR to hide the session bus and relay the keyring")
+	}
 	var relay *keyringRelay
 	busAddress := ""
 	if upstream := sessionBusSocket(); upstream != "" && f.RuntimeDir != "" {

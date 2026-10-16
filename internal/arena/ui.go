@@ -73,6 +73,10 @@ type LiveModel struct {
 	Interview          *interviewSession
 	ChatMode, ChatBusy bool
 	ChatTurns          int
+	Consulting         bool   // chat messages consult about the loaded arena
+	ConsultLog         string // the consultation so far, sent with each question
+	ConsultTurns       int
+	Walkthrough        string // setup mode while walking the user through ideas
 	Chat               []chatLine
 	Transcript         string
 	Draft              *WorkflowDraft
@@ -291,6 +295,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Chat = append(m.Chat, chatLine{"Arena", "Request failed: " + Redact(m.Error) + ". You can retry your message."})
 				return m, nil
 			}
+			if v.Result.Kind == "consult" {
+				return m.consultReply(*v.Result), nil
+			}
 			m.Draft, m.DraftScore = v.Result.Draft, nil
 			if m.Draft != nil && m.PastedShader != nil {
 				d := *m.Draft
@@ -309,6 +316,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", Redact(v.Result.Question)})
 				m.Transcript += "\nAssistant: " + Redact(v.Result.Question)
 			}
+			if len(v.Result.Ideas) > 0 {
+				m.showIdeas(v.Result.Ideas)
+			}
 			if m.Draft != nil {
 				m.Chat = append(m.Chat, chatLine{"Arena", "Draft ready · " + m.DraftScore.Summary() + ". /score for the breakdown. Review the graph below, then /save to create it. Continue typing to revise."})
 			}
@@ -322,6 +332,10 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Run, m.Draft, m.DraftScore, m.PastedShader, m.ChatMode = v.Run, nil, nil, nil, false
 		saved := "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."
+		if v.Revised {
+			saved = "Applied the revision to " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."
+		}
+		m.Walkthrough = setupDesign
 		switch {
 		case v.CommitErr != nil:
 			saved += " Scaffold not committed: " + Redact(v.CommitErr.Error()) + " — commit before running writing agents."

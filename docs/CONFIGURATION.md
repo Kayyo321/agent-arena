@@ -147,7 +147,9 @@ name every agent that uses it.
 
 With the option set and `run_commands` granted, Arena runs
 `agy --sandbox --dangerously-skip-permissions` inside its *command fence*, which
-is Linux only (bubblewrap 0.11 or newer). On macOS Arena refuses the mode: agy
+is Linux only (bubblewrap 0.11 or newer). The orchestrator never chooses it: a
+setup draft that sets it saves only when you type `/save allow-blanket`, and
+walkthrough ideas and `/consult` revisions that add it are refused. On macOS Arena refuses the mode: agy
 keeps its sign-in in the Keychain, and `sandbox-exec` cannot let it reach that
 item while keeping commands away from every other Keychain item.
 
@@ -167,7 +169,7 @@ first hop uses `PATH` (it does, and its own prepended `bin` holds no shell).
 | Home directory | emptied: a tmpfs over `$HOME`, every other user's home, `/root`, `/mnt`, `/media`, `/srv`, with only an allowlist bound back read-only — agy's `~/.gemini` config, the `PATH` and toolchain directories under home (e.g. `~/.local/bin`, `GOPATH`), and `ARENA_ANTIGRAVITY_EXTRA_READS` | inherited empty home |
 | Writable | the assigned worktree (writers only); a private `/tmp`; agy's state (`~/.gemini/antigravity-cli`) through a throwaway overlay, so nothing written there survives | **only** the assigned worktree (writers only) and a private `/tmp`; agy's state is hidden |
 | Network | **open**: agy needs it for inference | **none** (`--unshare-net`): a fresh, empty network namespace, which also cuts off abstract Unix sockets (X11, the bus) |
-| Session bus / keyring | a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused | hidden: the relay socket (`$XDG_RUNTIME_DIR`) is tmpfs'd and the netns has no abstract bus socket, so a command cannot reach the keyring at all |
+| Session bus / keyring | the real bus is hidden (`/run/user` and `$XDG_RUNTIME_DIR` are tmpfs'd, because a socket on a read-only bind is still connectable; the mode refuses to start without `XDG_RUNTIME_DIR`); a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused | hidden: `/run/user` and the relay socket (`$XDG_RUNTIME_DIR`) are tmpfs'd and the netns has no abstract bus socket, so a command cannot reach the keyring at all |
 | Also hidden | the reviewed credential table `hiddenCredentialPaths` in `internal/arena/antigravity_sandbox.go` (`~/.codex`, `~/.claude`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.docker`, `~/.kube`, browser profiles, shell history …) as defense in depth under the tmpfs home; sensitive `/etc` files; the project's `.arena/.state` except the agent's own worktree | all of the outer fence's, plus agy's state and the relay |
 | Environment | locale, terminal, `PATH`, home and toolchain locations, `AGY_*`/`ANTIGRAVITY_*`; credentials, agent sockets and display variables are dropped | inherited, minus the (now unreachable) bus address |
 | Processes | new PID and IPC namespaces, a new session, killed with Arena | its own new PID, IPC, UTS and network namespaces |

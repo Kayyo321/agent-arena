@@ -73,7 +73,7 @@ func TestLiveCodexEmbeddedInterview(t *testing.T) {
 	defer cancel()
 	session := newInterviewSession(ctx, p, s)
 	defer session.close()
-	cmd := session.turn("I want to create a new project. I have not selected any worker roles, models or effort. Ask a concise question for missing required choices. Do not complete or save a draft.")
+	cmd := session.turn("I want to create a new project. I have not selected any worker roles, models or effort. Ask a concise question for missing required choices. Do not complete or save a draft.", setupDesign)
 	for {
 		msg := cmd().(interviewEvent)
 		if msg.Question != nil {
@@ -256,8 +256,10 @@ func TestLiveMultiProviderTeamWorkflow(t *testing.T) {
 			t.Fatal(err)
 		}
 		payload, _ := packet["payload"].(map[string]any)
+		t.Logf("team packet: %s outcome=%v verdict=%v", event.Type, payload["outcome"], payload["verdict"])
 		for _, position := range anySlice(payload["memberPositions"]) {
 			entry, _ := position.(map[string]any)
+			t.Logf("member %v (%v, verdict %v): %v", entry["agentId"], entry["status"], entry["verdict"], Redact(short(str(entry["summary"]), 200)))
 			if entry["status"] == "unavailable" {
 				t.Fatalf("a real adapter did not return a position: %v", entry)
 			}
