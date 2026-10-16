@@ -10,7 +10,8 @@ agent, teams, reviewers, deterministic routers, on-call agents, workflow context
 and a Bubble Tea terminal interface. A real Codex read-only workflow has passed.
 **Live multi-provider verification is pending a second approved route.** Other
 adapters have contract coverage; that coverage does not establish live readiness.
-See [roadmap and exit checks](docs/ROADMAP.md) and [validation evidence](docs/VALIDATION.md).
+See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
+and [validation evidence](docs/VALIDATION.md).
 
 ## Build and install
 
