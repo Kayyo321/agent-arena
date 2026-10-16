@@ -417,8 +417,43 @@ transaction if its paths still match the recorded before/after versions.
 
 `arena history RUN retire --including-checkpoints --yes` moves run history and its
 checkpoints to recoverable local retired storage. This is retirement, not secure
-erasure or Git-object garbage collection. Review retention before exporting source
-or prompts. Automatic permanent deletion is not implemented.
+erasure or Git-object garbage collection; `purge` below is the permanent step. Review
+retention before exporting source or prompts.
+
+### Permanent purge
+
+```sh
+arena history RUN purge                              # list what would be deleted
+arena history RUN purge --yes                        # delete it
+arena history RUN purge --yes --discard-unintegrated # also delete unintegrated work
+```
+
+`purge` works only on a run already retired with `arena history RUN retire`; a live
+run, an imported run or an unknown ID is refused. It always prints the plan first:
+the retired history directories, the git worktree registrations the run created
+(`trees/`, `integrations/` and `recoveries/` under its own state directory), its
+branches (`codex/arena/RUN/*`, `codex/arena/integrate/CHANGE`,
+`codex/arena/recovery/ROLLBACK`) and its checkpoints (the
+`refs/arena/checkpoints/ID` refs and `.arena/.state/checkpoints/ID.json` records).
+Nothing is deleted without `--yes`.
+
+Unintegrated work blocks the purge: changes still `proposed`, `conflicted`,
+`integration-prepared` or in `recovery`, and writer worktrees holding files beyond their
+last proposal (or that cannot be inspected). They are listed, and the purge runs only
+if the same command is repeated with `--discard-unintegrated`. Integrated work is
+already in the user's Git history and is not affected.
+
+Before deleting, `history.purge.started` is journaled in the project history with
+the plan; afterwards `history.purged` records what was removed, the time, whether
+unintegrated work was discarded, the retired journal's event count and head hash,
+and any failures. If something fails (for example git refuses to delete a branch still
+checked out elsewhere) the retired history is kept, the failure is recorded and the
+command can be run again. A purge removes only paths under Arena's own state
+directory, branches under Arena's naming and refs under `refs/arena/checkpoints`;
+it never touches the user's checkout, other runs, or worktrees made by
+`arena checkpoint restore`. Git objects are not collected: unreachable proposal and
+checkpoint commits stay in the object database until the user runs `git gc`, and a
+purge is not secure erasure.
 
 ### Audit export and import
 

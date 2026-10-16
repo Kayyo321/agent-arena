@@ -213,8 +213,8 @@ sandbox and supports the adapter-default shell policy, with stricter unsupported
 policies refused before launch.
 
 Submodules/nested repositories and network filesystems are refused/unsupported.
-Ignored files are excluded from checkpoints. Retained worktrees/refs need owner
-cleanup; retirement is recoverable local storage, not secure deletion. Reduced
+Ignored files are excluded from checkpoints. Retirement is recoverable local
+storage, not secure deletion; `arena history RUN purge` removes a retired run's worktrees, branches and checkpoint refs (tested against a user checkout and a second run, never `git gc`, so unreachable Git objects remain). Reduced
 retention cannot replay omitted packets; pending operational decision text can
 remain after a crash. Audit export/import is covered by local tests only (round trip, tampered event and manifest, ID collision, reduced retention, oversized and malformed bundles); bundles are not signed. Native Windows and skill-only host
 execution adapters are not implemented.

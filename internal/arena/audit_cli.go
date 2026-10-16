@@ -12,7 +12,7 @@ type HistoryEntry struct {
 	Imported bool   `json:"imported"`
 }
 
-// historyAudit handles the audit-bundle forms of `arena history`,
+// historyAudit handles the audit-bundle and purge forms of `arena history`,
 // the JSON run list, and imported runs. done is false for every other form.
 func (cli *CLI) historyAudit(p *Project, args []string, o Options) (done bool, err error) {
 	switch {
@@ -52,6 +52,8 @@ func (cli *CLI) historyAudit(p *Project, args []string, o Options) (done bool, e
 		}
 		fmt.Fprintln(cli.Out, "). Review it before sharing; secret scanning is best-effort.")
 		return true, nil
+	case len(args) == 3 && args[2] == "purge":
+		return true, cli.purge(p, args[1], o)
 	case len(args) == 2:
 		if _, err := os.Lstat(p.RunDir(args[1])); err == nil || validRunID(args[1]) != nil {
 			return false, nil
@@ -75,4 +77,24 @@ func (cli *CLI) historyAudit(p *Project, args []string, o Options) (done bool, e
 		return true, err
 	}
 	return false, nil
+}
+
+func (cli *CLI) purge(p *Project, id string, o Options) error {
+	plan, err := p.PlanPurge(id)
+	if err != nil {
+		return err
+	}
+	cli.print(plan)
+	fmt.Fprintln(cli.Out)
+	if len(plan.Unintegrated) > 0 {
+		fmt.Fprintf(cli.Out, "Unintegrated work that purging would lose:\n  %s\n", strings.Join(plan.Unintegrated, "\n  "))
+	}
+	if !o.Bool("yes") {
+		return fmt.Errorf("purge permanently deletes the items above and cannot be undone; review them, then add --yes")
+	}
+	if _, err := p.PurgeRun(id, o.Bool("discard-unintegrated")); err != nil {
+		return err
+	}
+	fmt.Fprintf(cli.Out, "Purged %s; a tombstone is in the project journal. Git objects are left for git gc.\n", id)
+	return nil
 }
