@@ -93,6 +93,25 @@ normalized result and failure mapping
 
 The scheduler may only request capabilities the adapter declares. If an adapter cannot enforce a required workspace or permission policy, Arena must refuse that workflow configuration or explain the limitation before launch.
 
+### Mediated command sandbox
+
+Adapters that use Arena's mediated tool protocol (Claude, Gemini and local models) run `run_command` inside an OS sandbox: bubblewrap on Linux and `sandbox-exec` on macOS. There is no unsandboxed fallback. Codex uses its own native sandbox instead. Command output goes back to the model and so to its provider, so the sandbox limits what a command can read as well as what it can write.
+
+- **Reads** are limited to an allowlist:
+  - system toolchain roots: `/usr`, `/bin`, `/sbin`, `/lib*`, `/etc`, `/opt` and `/nix/store` on Linux; `/usr`, `/bin`, `/sbin`, `/System`, `/Library`, `/opt`, `/private/etc`, Xcode and a few `/private/var/db` system databases on macOS;
+  - the assigned worktree;
+  - the command's private scratch directory;
+  - read-only toolchain directories: the requested executable's directory, GOROOT, the Go module cache, and absolute `PATH` entries outside the home directory.
+
+  A toolchain directory is dropped if it is `/`, contains or equals the home directory, is an ancestor of the worktree (which would expose sibling worktrees and `.arena/.state`), or has an Arena control or credential component such as `.arena`, `.git`, `.ssh` or `.aws`. On Linux, sensitive `/etc` entries (`shadow`, `sudoers`, `ssh`, `ssl/private` and network secrets) are masked. On macOS, `/Library/Keychains` and similar files are denied. File metadata (`stat`) stays allowed on macOS so paths can be resolved.
+- **Not readable:** host home directories (dotfiles, provider auth files, SSH and cloud credentials), other worktrees and Arena state, the global temporary directory, `/run`, and the repository's Git directory. Because the Git directory is hidden, Git commands inside the sandbox fail, and Go builds run with `GOFLAGS=-buildvcs=false`.
+- **Processes:** On Linux, commands run in a new PID namespace with a fresh `/proc`, so other processes' command lines and environments are not visible.
+- **Writes** are limited to the worktree (only for writing agents), the private scratch directory and `/dev/null`.
+- **Network:** All networking is denied.
+- **Environment:** Commands receive only `PATH`, locale and `TERM` from the host. `HOME`, `TMPDIR`, XDG cache and Go build caches point into the scratch directory, which is removed after the command finishes. Each command times out after two minutes.
+
+Toolchains installed under the home directory (for example rustup or nvm) are not readable unless invoked directly by absolute path, and then only their own directory is exposed. Dependencies must be prepared outside the run. The macOS profile mirrors the Linux boundary but has not been exercised on a macOS host in this change.
+
 ## State and storage
 
 ```text
