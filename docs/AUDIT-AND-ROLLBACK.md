@@ -4,7 +4,7 @@
 
 Each run has a local ordered event journal under `.arena/.state/<run-id>/`. Events include a monotonic sequence, unique event ID, timestamp, run/workflow/agent IDs, event type, correlation/message IDs where relevant, and references to any files or Git objects involved.
 
-The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, change proposed/reviewed/integrated, context proposed/accepted/revised/archived/restored, and rollback created/completed. Team events record team start, member positions, each deliberation round, member affirmations, facilitator output, and whether the result reached unanimous consensus. On-call events record trigger matches, invocation start/completion, deduplication or cap decisions, the context sent, and the resulting agent invocation. Coworker requests record the requesting agent, requested role and runtime, policy decision, user response when required, and the resulting config snapshot/change. Reviewer events preserve the standard verdict packet.
+The initial event vocabulary includes workflow started/paused/resumed/cancelled, agent queued/started/waiting/succeeded/failed, message sent/delivered, process output captured, checkpoint created, workspace rejected, change proposed/reviewed/integrated, context proposed/accepted/revised/archived/restored, and rollback created/completed. Team events record team start, member positions, each deliberation round, member affirmations, facilitator output, and whether the result reached unanimous consensus. On-call events record trigger matches, invocation start/completion, deduplication or cap decisions, the context sent, and the resulting agent invocation. Coworker requests record the requesting agent, requested role and runtime, policy decision, user response when required, and the resulting config snapshot/change. Reviewer events preserve the standard verdict packet.
 
 For auditability, the journal records the project settings, default runtime, permanent orchestrator profile, workflow definition, and effective policy snapshot or content hash used by the run, along with the initial repository HEAD, each agent's worktree and branch, base commits, process identity and exit status, handoff links, diffs/commit IDs, review decisions, integration/rollback operations, and context entry IDs/versions read or proposed. Context mutations record actor, source task, policy decision, and before/after hashes. An event chain may include hashes to detect accidental edits, but local hashes are not a security guarantee against an owner who can rewrite the entire state directory.
 
@@ -26,6 +26,15 @@ The default should be full local retention with secret redaction. Run data can c
 8. Preserve the original agent branch and checkpoint until the integrated result is accepted or its rollback retention expires.
 
 Workers do not merge each other's branches directly. The integration manager is the sole writer to the selected integration target.
+
+### Host Git on worker worktrees
+
+A writing worker's command sandbox can rewrite anything inside its worktree, including the `.git` pointer file, so Arena treats every worker-writable path as untrusted input to its own unsandboxed Git calls:
+
+- When a worktree is created, before any worker runs, Arena records its gitdir pointer in the workspace manifest (`gitDir`).
+- Before checkpointing or diffing a worker worktree, Arena requires `.git` to still be a regular gitdir pointer file naming the recorded gitdir, and that gitdir to be the main repository's `.git/worktrees/<name>` entry whose back-pointer names this worktree. Git commands then pass that verified `--git-dir` and `--work-tree` explicitly instead of letting Git rediscover the repository from the worktree.
+- Those commands override every config scope with `core.fsmonitor=false`, `core.hooksPath=/dev/null`, `protocol.allow=never`, `submodule.recurse=false`, and `commit.gpgSign=false`, and diffs use `--no-ext-diff --no-textconv`. Filter drivers can then only come from the user's own system, global, or repository config, which the sandbox cannot write; a worker's `.gitattributes` can select such a driver but cannot define one.
+- A worktree that fails these checks fails closed: Arena records `workspace.rejected` with the reason, marks the manifest `rejected`, never checkpoints or proposes it, refuses to reuse it for a retry, and leaves it on disk for inspection.
 
 ## Rollback behavior
 
