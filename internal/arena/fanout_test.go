@@ -1,10 +1,12 @@
 package arena
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
@@ -140,5 +142,147 @@ func TestFanOutValidatorRejections(t *testing.T) {
 	}
 	if fanOutChildOf(w, "split.12") != "split" || fanOutChildOf(w, "split.") != "" || fanOutChildOf(w, "split.1a") != "" || fanOutChildOf(w, "splitx.1") != "" {
 		t.Fatal("child ID recognition")
+	}
+}
+
+// splitRun saves w and creates a run of it in a committed project.
+func splitRun(t *testing.T, p *Project, w Workflow, profiles map[string]Profile) Run {
+	t.Helper()
+	s, err := p.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateWorkflow(w, profiles, s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Save(w, profiles, ""); err != nil {
+		t.Fatal(err)
+	}
+	head, err := Git(p.Root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.CreateRun(w, profiles, s, "Fan-out fixture", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestFanOutChildrenAndCoworkersShareOneConfigWriter(t *testing.T) {
+	p := committedProject(t)
+	s, err := p.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	for _, id := range []string{"planner2", "fixer2"} {
+		w.Agents = append(w.Agents, Agent{Id: id, Level: Int(1), Profile: ".agents/parallel/" + id + ".agent.json", Runtime: s.DefaultModel})
+		profiles[id] = NewProfile(id, "research", "Do the "+id+" work", "Use evidence", []string{"read", "write"})
+	}
+	w.FanOuts = append(w.FanOuts, FanOut{Id: "split2", Name: "Second split", Planner: "planner2", Worker: "fixer2", MaxChildren: 3})
+	w.Relationships = append(w.Relationships, Relationship{Type: "delegates", From: "lead", To: "split2"}, Relationship{Type: "delegates", From: "split2", To: "reviewer"})
+	r := splitRun(t, p, w, profiles)
+	e := NewEngine(p, r, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for i := 0; i < 8; i++ {
+		wg.Add(3)
+		go func(n int) {
+			defer wg.Done()
+			_, err := e.registerChildren(w.FanOuts[0], 1+n%4)
+			errs <- err
+		}(i)
+		go func(n int) {
+			defer wg.Done()
+			_, err := e.registerChildren(w.FanOuts[1], 1+n%3)
+			errs <- err
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = e.profileOf("split.1")
+			_, _ = e.agentByID("split2.1")
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, err := p.ReadRun(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(read.FanOutChildren) != 7 || len(read.Workflow.Agents) != len(w.Agents) {
+		t.Fatalf("children %d, agents %d", len(read.FanOutChildren), len(read.Workflow.Agents))
+	}
+	child, ok := read.agent("split2.3")
+	if !ok || child.Runtime.Model != w.Agents[5].Runtime.Model {
+		t.Fatalf("child not resolvable from the persisted run: %v", child)
+	}
+	if e.profileOf("split.4").Id != "split.4" || !Has(e.profileOf("split.4").Capabilities, "write") {
+		t.Fatal("child profile must copy the worker's under the child ID")
+	}
+	// A coworker approved later goes through the same writer and keeps them.
+	helper := Agent{Id: "helper", Level: Int(2), Profile: ".agents/parallel/helper.agent.json", Runtime: s.DefaultModel}
+	if err := p.QueueCoworker(r.ID, ConfigUpdate{RequestID: "request-1", Parent: "split", Agent: helper, Profile: NewProfile("helper", "research", "Help", "Help", []string{"read"}), Transaction: "tx"}); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := e.applyCoworkers(); err != nil || added["helper"] != "split" {
+		t.Fatalf("coworker not applied: %v %v", added, err)
+	}
+	if read, err = p.ReadRun(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := read.agent("helper"); !ok || len(read.FanOutChildren) != 7 {
+		t.Fatalf("coworker write dropped children or the coworker: %d", len(read.FanOutChildren))
+	}
+	// Each child's MCP bridge resolves its actor from that file.
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}` + "\n")
+	var out strings.Builder
+	if err := ServeMCP(context.Background(), p, read, "split.2", in, &out); err != nil || !strings.Contains(out.String(), "Agent Arena") {
+		t.Fatalf("child MCP actor refused: %v %s", err, out.String())
+	}
+	if err := ServeMCP(context.Background(), p, read, "split.9", strings.NewReader(""), &out); err == nil {
+		t.Fatal("unregistered child ID accepted as an MCP actor")
+	}
+	// Nothing else names the file.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(b), `"current-config.json"`); n > 0 && !strings.HasSuffix(file, "_test.go") && (file != "updates.go" || n != 1) {
+			t.Fatalf("%s names current-config.json directly; use writeConfig", file)
+		}
+	}
+	// A redacted run keeps no objective in the file, as in run.json.
+	redacted := convert[Run](r)
+	redacted.Retention = "redacted-local"
+	if err := NewEngine(p, redacted, nil).writeConfig(redacted); err != nil {
+		t.Fatal(err)
+	}
+	if read, err = p.ReadRun(r.ID); err != nil || read.Objective != "" {
+		t.Fatalf("objective persisted for a redacted run: %q %v", read.Objective, err)
+	}
+}
+
+func TestFanOutChildCannotRequestCoworkers(t *testing.T) {
+	p := committedProject(t)
+	s, err := p.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	splitRun(t, p, w, profiles)
+	_, err = p.RequestCoworker(context.Background(), CoworkerRequest{WorkflowID: w.Id, From: "split.1", AgentID: "extra", Role: "research", Objective: "o", Reason: "r", Capabilities: []string{"read"}, WorkspaceMode: "read-only", Runtime: s.DefaultModel}, true, nil)
+	if err == nil || !strings.Contains(err.Error(), "fan-out children cannot request coworkers") {
+		t.Fatalf("got %v", err)
 	}
 }

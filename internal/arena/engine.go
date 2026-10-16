@@ -29,10 +29,16 @@ type Engine struct {
 	// (absent means its first pass); loops counts revisions per router/target.
 	iterations map[string]int
 	loops      map[string]int
+	// children are the fan-out worker instances registered so far; guarded by mu.
+	children map[string]FanOutChild
 }
 
 func NewEngine(p *Project, r Run, invoker Invoker) *Engine {
-	return &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}}
+	e := &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}, children: map[string]FanOutChild{}}
+	for _, child := range r.FanOutChildren {
+		e.children[child.Agent.Id] = child
+	}
+	return e
 }
 
 // iteration is the 1-based pass a node is on; a loop route starts the next one.
@@ -488,7 +494,7 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 			return nil, err
 		}
 	}
-	profile := e.Run.Profiles[a.Id]
+	profile := e.profileOf(a.Id)
 	if invocation != nil && invocation["mode"] == "team-composition" {
 		profile.Capabilities = []string{"read"}
 	}
@@ -937,7 +943,7 @@ func (e *Engine) onCall(ctx context.Context, id string, trigger Event, manual bo
 	}
 	agent, _ := agentByID(e.Run.Workflow, id)
 	sourceProvider := "arena"
-	if source, ok := agentByID(e.Run.Workflow, sourceID(trigger)); ok {
+	if source, ok := e.agentByID(sourceID(trigger)); ok {
 		sourceProvider = source.Runtime.Provider
 	}
 	contextPacket := NewPacket(e.Run.ID, "message", sourceID(trigger), sourceProvider, id, agent.Runtime.Provider, "", map[string]any{"text": "Configured on-call trigger: " + string(SafeJSON(trigger))}, Runtime{Provider: "arena"})

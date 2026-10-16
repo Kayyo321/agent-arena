@@ -24,6 +24,28 @@ func (p *Project) QueueCoworker(run string, update ConfigUpdate) error {
 	return Atomic(filepath.Join(p.RunDir(run), "config-updates", update.RequestID+".json"), JSON(update), 0600)
 }
 
+// currentConfigFile holds a run's configuration once it has grown past
+// run.json: approved coworkers and fan-out children.
+const currentConfigFile = "current-config.json"
+
+// writeConfig is the only writer of current-config.json. Coworker additions
+// and fan-out child registration both go through it, under one lock, so
+// neither drops the other's agents. The MCP bridge of each agent reads this
+// file to resolve its actor.
+func (e *Engine) writeConfig(next Run) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	next.FanOutChildren = []FanOutChild{}
+	for _, id := range sortedKeys(e.children) {
+		next.FanOutChildren = append(next.FanOutChildren, e.children[id])
+	}
+	if next.Retention != "full-local" {
+		// As in run.json, a redacted run keeps no objective on disk.
+		next.Objective = ""
+	}
+	return Atomic(filepath.Join(e.Project.RunDir(next.ID), currentConfigFile), SafeJSON(next), 0600)
+}
+
 // Apply approved additions only between waves. Existing run roles/settings retain
 // their recorded values; unrelated authoring edits do not mutate an active run.
 func (e *Engine) applyCoworkers() (map[string]string, error) {
@@ -57,7 +79,7 @@ func (e *Engine) applyCoworkers() (map[string]string, error) {
 		if _, err := e.event("arena-orchestrator", "workflow.config-updated", map[string]any{"requestId": update.RequestID, "parent": update.Parent, "agentId": update.Agent.Id, "revision": revision, "configHash": Hash(JSON(next.Workflow)), "transaction": update.Transaction}); err != nil {
 			return nil, err
 		}
-		if err := Atomic(filepath.Join(e.Project.RunDir(e.Run.ID), "current-config.json"), SafeJSON(next), 0600); err != nil {
+		if err := e.writeConfig(next); err != nil {
 			return nil, err
 		}
 		e.Run = next
