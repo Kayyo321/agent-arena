@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -36,7 +35,12 @@ func (Providers) Invoke(ctx context.Context, in Invocation) (map[string]any, err
 	case "codex":
 		return invokeCodex(ctx, in)
 	case "claude-code":
+		if claudeSignIn(in.Runtime) {
+			return invokeClaudeNative(ctx, in)
+		}
 		return invokeClaude(ctx, in)
+	case "antigravity":
+		return invokeAntigravity(ctx, in)
 	case "gemini":
 		return invokeGemini(ctx, in)
 	case "local":
@@ -46,12 +50,7 @@ func (Providers) Invoke(ctx context.Context, in Invocation) (map[string]any, err
 }
 func invokeCodex(ctx context.Context, in Invocation) (map[string]any, error) {
 	overrides := []string{}
-	exe, err := os.Executable()
-	if selected := os.Getenv("ARENA_INTEGRATION_BINARY"); selected != "" {
-		exe = selected
-	}
-	if err == nil && in.ProjectRoot != "" && !strings.HasSuffix(exe, ".test") {
-		argv := []string{"mcp", "--project", in.ProjectRoot, "--run", in.RunID, "--actor", in.AgentID}
+	if exe, argv, ok := arenaMCPCommand(in); ok {
 		b, _ := json.Marshal(argv)
 		overrides = append(overrides, "-c", "mcp_servers.arena.command="+fmt.Sprintf("%q", exe), "-c", "mcp_servers.arena.args="+string(b))
 		in.Prompt += "\nUse Arena MCP tools for live peer messaging, workflow context proposals, coworker requests, and user questions."
@@ -69,7 +68,7 @@ func invokeCodex(ctx context.Context, in Invocation) (map[string]any, error) {
 	if in.Approve == nil {
 		approval = "never"
 	}
-	params := map[string]any{"model": in.Runtime.Model, "cwd": in.Dir, "sandbox": sandbox, "approvalPolicy": approval, "developerInstructions": "You are an Arena worker. Follow the provided role and task envelope. Never change another worktree, merge branches, read credentials, or bypass usage limits. Return only the requested structured output. Do not delegate to provider-native subagents: Arena owns delegation.", "config": map[string]any{"model_reasoning_effort": in.Runtime.ReasoningEffort, "features.multi_agent": false}}
+	params := map[string]any{"model": in.Runtime.Model, "cwd": in.Dir, "sandbox": sandbox, "approvalPolicy": approval, "developerInstructions": nativeWorkerInstructions, "config": map[string]any{"model_reasoning_effort": in.Runtime.ReasoningEffort, "features.multi_agent": false}}
 	// Opaque options are retained in the envelope. Only documented supported options
 	// are translated here; they may never override Arena's workspace/approval policy.
 	if cfg, ok := in.Runtime.Options["config"].(map[string]any); ok {
@@ -211,7 +210,15 @@ func invokeCodex(ctx context.Context, in Invocation) (map[string]any, error) {
 				return nil
 			}
 			if item["type"] == "mcpToolCall" && item["server"] == "arena" && in.Diagnostic != nil {
-				if err := in.Diagnostic("provider.arena-tool-completed", map[string]any{"tool": item["tool"], "status": item["status"], "error": item["error"]}); err != nil {
+				data := map[string]any{"tool": item["tool"], "status": item["status"], "error": item["error"]}
+				if item["status"] == "failed" {
+					// Arena's own refusal text tells the user (and the
+					// stall diagnosis) why the call failed.
+					if message := toolResultText(item["result"]); message != "" {
+						data["message"] = short(Redact(message), 500)
+					}
+				}
+				if err := in.Diagnostic("provider.arena-tool-completed", data); err != nil {
 					return err
 				}
 			}
@@ -338,4 +345,14 @@ func parseOutput(text string) (map[string]any, error) {
 		return nil, fmt.Errorf("provider returned invalid structured output")
 	}
 	return out, nil
+}
+
+func toolResultText(v any) string {
+	result, _ := v.(map[string]any)
+	for _, item := range anySlice(result["content"]) {
+		if content, ok := item.(map[string]any); ok && content["type"] == "text" {
+			return str(content["text"])
+		}
+	}
+	return ""
 }

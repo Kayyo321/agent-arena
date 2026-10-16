@@ -10,7 +10,8 @@ agent, teams, reviewers, deterministic routers, on-call agents, workflow context
 and a Bubble Tea terminal interface. A real Codex read-only workflow has passed.
 **Live multi-provider verification is pending a second approved route.** Other
 adapters have contract coverage; that coverage does not establish live readiness.
-See [roadmap and exit checks](docs/ROADMAP.md) and [validation evidence](docs/VALIDATION.md).
+See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
+and [validation evidence](docs/VALIDATION.md).
 
 ## Build and install
 
@@ -57,6 +58,12 @@ arena status --workflow development
 arena
 ```
 
+Every arena gets a grade from S+ to F for how it spreads trust, verifies work
+and avoids needless agents ([score sheet](docs/ARENA-SCORING.md)); `arena score ID`
+and `/score` explain it. Share an arena with `/copy` (or
+`arena share export ID --copy`) and paste the code into another Arena to import
+it; `/copy-shader` shares only the background shader.
+
 Running `arena` opens the graph TUI. It automatically opens the sole arena in the
 current project, or asks you to choose when several exist. Opening a graph starts
 no task. Enter `run TASK` in its prompt to start an attached run. Use
@@ -90,8 +97,10 @@ of prerequisite proposals. Changes enter an audited review queue. Integration ch
 for conflicts and later user edits. Rollback makes a revert or a separate recovery
 worktree. It never silently resets or discards later work.
 
-The live interface shows the small purple dotted A2rena wordmark at the top right,
-the Git tree at the top left, graph, packet activity,
+The live interface opens with a status band: the small purple dotted A2rena wordmark
+at the left, the run's status, active agents, progress and line changes across
+worktrees, and the Git tree at the right. Below it are the graph (with distinct head,
+worker, team and router cards), packet activity,
 teams and on-call rail, required providers, decisions and the `> memento mori` prompt.
 `/help` lists slash commands. `/view AGENT` opens a live mini-window and `/context AGENT`
 shows its role, task and workflow context. `/chat` talks to the control agent.
@@ -101,13 +110,16 @@ Ctrl+E/G/T/V open events/Git/teams/patches, arrows or PageUp/PageDown navigate, 
 ## Providers and credentials
 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
-- Claude Code uses bare programmatic mode with API-key or supported cloud authentication.
+- Claude Code uses bare programmatic mode with API-key or supported cloud authentication, or, when you select `claude-code-sign-in`, runs in the background under its own sign-in like Codex.
+- Antigravity (`agy`) runs in the background under its own sign-in, inside a write fence that keeps it in its worktree. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
 - Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
 - Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
 
 Arena does not collect passwords, read or copy provider tokens, pool subscriptions,
-or bypass usage limits. Gemini CLI personal OAuth and Claude subscription OAuth
-are not Arena authentication routes. Readiness distinguishes interface, auth,
+or bypass usage limits. Gemini CLI personal OAuth is not an Arena authentication
+route. The Claude Code and Antigravity sign-in routes are explicit user choices:
+Arena starts the official CLI, which keeps its own credentials, and the plan's
+terms are the user's to check. Readiness distinguishes interface, auth,
 advertised models and verified inference. See [provider boundaries and evidence](docs/PROVIDERS.md).
 
 ## Project files and contracts
@@ -130,7 +142,7 @@ Copilot and OpenCode are skill hosts; execution adapters are not advertised for 
 Product contracts: [product](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [interoperability](docs/INTEROPERABILITY.md), [configuration](docs/CONFIGURATION.md),
 [schemas](schemas/), [shared context](docs/SHARED-CONTEXT.md),
-[terminal UI](docs/TERMINAL-UI.md), and [audit/rollback](docs/AUDIT-AND-ROLLBACK.md).
+[terminal UI](docs/TERMINAL-UI.md), [arena scoring](docs/ARENA-SCORING.md), and [audit/rollback](docs/AUDIT-AND-ROLLBACK.md).
 Implementation choices are recorded in [ADR 0001](docs/adr/0001-implementation-foundation.md).
 
 ## Development checks

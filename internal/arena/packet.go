@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"time"
 
 	c "github.com/Kayyo321/agent-arena/internal/contract"
 )
@@ -153,14 +155,45 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 		if !ok {
 			return nil, fmt.Errorf("unknown target agent")
 		}
-		if err := p.ShareContext(ctx, r, from, a.Runtime.Provider, target.Runtime.Provider, "peer message", map[string]any{"payload": payload, "target": to}); err != nil {
-			return nil, err
+		// Check the packet before any sharing prompt: the user should never
+		// approve a packet Arena would then reject.
+		if text, ok := payload["text"].(string); !ok || text == "" {
+			return nil, fmt.Errorf(`kind "message" needs payload.text, a non-empty string; keep structured fields alongside it, e.g. {"text":"<summary>","acceptanceCriteria":[...]}`)
 		}
 		packet := NewPacket(r.ID, kind, from, a.Runtime.Provider, to, target.Runtime.Provider, "", payload, a.Runtime)
+		if err := ValidatePacket(packet, r.Workflow); err != nil {
+			return nil, fmt.Errorf("invalid message packet: %w", err)
+		}
+		id := ""
+		answer, decision, err := p.shareGate(r, from, a.Runtime.Provider, to, target.Runtime.Provider, "peer message", map[string]any{"payload": payload, "target": to}, func(decision string) (err error) {
+			id, err = p.deferPacket(r.ID, decision, packet)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		if answer == "" {
+			// Queued: Answer delivers it, even after this call returns.
+			answer, err = p.awaitRoute(ctx, r.ID, shareRoute(a.Runtime.Provider, to, target.Runtime.Provider), shareAckWait)
+			if err != nil {
+				return nil, err
+			}
+			if answer == "" {
+				return map[string]any{"status": "awaiting-approval", "messageId": id, "decisionId": decision, "note": "The user must approve sharing " + a.Runtime.Provider + " context with " + to + " (" + target.Runtime.Provider + "). Arena delivers this message automatically once approved; do not resend it. Continue your task, or wait for replies with arena_inbox."}, nil
+			}
+			if answer == "yes" {
+				return id, nil
+			}
+		}
+		if answer != "yes" {
+			return nil, errShareDeclined
+		}
 		return p.Deliver(r, packet)
 	case "context-proposal":
 		var q ContextProposal
-		q = convert[ContextProposal](payload)
+		if err := DecodeJSON(JSON(payload), &q); err != nil {
+			return nil, fmt.Errorf("invalid context-proposal payload: %w", err)
+		}
 		if q.WorkflowID != r.Workflow.Id {
 			return nil, fmt.Errorf("context is scoped to the active workflow")
 		}
@@ -180,14 +213,18 @@ func (p *Project) AgentPacket(ctx context.Context, r Run, from string, input map
 		return result, nil
 	case "coworker-request":
 		if payload["workflowId"] != r.Workflow.Id {
-			return nil, fmt.Errorf("coworker workflow scope mismatch")
+			return nil, fmt.Errorf("coworker-request payload.workflowId must be %q; it asks the orchestrator for a new agent. To talk to an existing peer, send kind \"message\"", r.Workflow.Id)
 		}
 		packet := NewPacket(r.ID, kind, from, a.Runtime.Provider, "arena-orchestrator", r.Settings.DefaultModel.Provider, "", payload, a.Runtime)
 		if _, e := p.Deliver(r, packet); e != nil {
 			return nil, e
 		}
 		var q CoworkerRequest
-		q = convert[CoworkerRequest](payload)
+		if err := DecodeJSON(JSON(payload), &q); err != nil {
+			return nil, fmt.Errorf("invalid coworker-request payload: %w", err)
+		}
+		// Persistence metadata belongs to Arena, never to the requesting agent.
+		q.ID, q.State, q.CreatedAt = "", "", ""
 		q.From = from
 		q.RunID = r.ID
 		q.AgentID = str(payload["agentId"])
@@ -212,6 +249,33 @@ func (p *Project) Inbox(r Run, agent string) ([]Packet, error) {
 		}
 	}
 	return packets, nil
+}
+
+// WaitInbox returns the actor's peer messages oldest first. With newOnly it
+// skips already returned IDs and polls until one arrives or wait elapses.
+func (p *Project) WaitInbox(ctx context.Context, r Run, actor string, wait time.Duration, returned map[string]bool, newOnly bool) ([]Packet, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		all, err := p.Inbox(r, actor)
+		if err != nil {
+			return nil, err
+		}
+		sort.SliceStable(all, func(i, j int) bool { return str(all[i]["createdAt"]) < str(all[j]["createdAt"]) })
+		packets := []Packet{}
+		for _, packet := range all {
+			if !newOnly || !returned[str(packet["messageId"])] {
+				packets = append(packets, packet)
+			}
+		}
+		if len(packets) > 0 || !time.Now().Before(deadline) {
+			return packets, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(min(500*time.Millisecond, time.Until(deadline))):
+		}
+	}
 }
 
 func (p *Project) Acknowledge(r Run, packet Packet) error {

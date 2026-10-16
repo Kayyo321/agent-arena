@@ -42,10 +42,11 @@ This policy does not change how Arena handles a setup request made directly by t
 Other useful settings include:
 
 - `approvalPolicies.agent-workflow-edit`: `auto-refuse`, `ask-user`, or `auto-accept` for graph edits proposed by agents.
-- `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers.
-- `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode.
+- `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers. `ask-user` asks once per route (one source provider to one recipient agent) per run; see [Cross-provider data boundary](INTEROPERABILITY.md#cross-provider-data-boundary).
+- `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode. The one exception is a runtime the user opts into [Antigravity sandboxed blanket approval](#antigravity-command-approval), which needs `adapter-default` like every background CLI.
 - `approvalPolicies.change-integration`: `human-review` or `auto-if-clean` for eligible patches.
 - `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.
+- `approvalPolicies.orchestrator-stall-recovery` (optional): `answer-routing` (default when absent) lets the permanent orchestrator answer a stalled router fallback itself, choosing only among that router's declared branches or `stop`; `recommend-only` makes it suggest an answer for `/accept`. Agent questions and permission approvals are never answered by the orchestrator.
 - `limits.maxConcurrentAgents`, `maxTeamRounds`, `maxOnCallInvocationsPerRun`, `maxCoworkerAdditionsPerRun`, and `maxAgentRunMinutes` bound parallelism, deliberation, escalations, config growth, and execution time.
 - `context.defaultHandoffScope` and `context.maxFilesPerHandoff` bound what Arena forwards to provider sessions.
 - `sharedContext.storage` chooses Git-tracked project files or persistent local-only entries. `agentWritePolicy` controls agent additions/revisions, `agentDeletePolicy` controls archive requests, and entry/total limits bound the store. Stale entries are marked for review rather than deleted.
@@ -54,7 +55,7 @@ Other useful settings include:
 
 The TUI should show the effective policy before a run, coworker change, or persistent-context mutation. Effective limits use the stricter project and workflow value; workflow-level settings can be stricter but cannot raise a project cap or override a project-level refusal. `settings.sharedContext` in a workflow may lower entry/size caps or tighten write/archive policies; storage remains project-wide. The same rule applies to integration and audit retention. See [Shared context](SHARED-CONTEXT.md) and [Terminal interface](TERMINAL-UI.md).
 
-When creating settings, the CLI initializes shared context as Git-tracked, accepts bounded agent additions/revisions, asks before agent archive requests, and marks entries stale after 180 days without verification. It initializes display to automatic color and animation, a visible Git tree, and the small dotted title at the upper right. Existing settings that omit these optional blocks use the same defaults until the user edits them.
+When creating settings, the CLI initializes shared context as Git-tracked, accepts bounded agent additions/revisions, asks before agent archive requests, and marks entries stale after 180 days without verification. It initializes display to automatic color and animation, a visible Git tree, and the small dotted title leading the status band. Existing settings that omit these optional blocks use the same defaults until the user edits them.
 
 ## Workflow file
 
@@ -74,9 +75,9 @@ Core fields:
 
 `settings.maxConcurrentAgents` limits simultaneously running provider processes. Team members count individually, as do the head and any active on-call agents.
 
-Decision routers use `inputKind` and a JSON Pointer into the packet `payload`. Each branch matches one exact scalar value and points to an agent, team, or another router. Their branch edges count toward reachability and cycle checks. Every router declares what happens when the packet kind/field/value does not match: ask the user, stop, or route to a named fallback. Routes are deterministic; they do not ask an LLM to infer a branch from prose. Router IDs share the workflow node namespace, but routers are not agents, team members, or on-call targets. Incoming work uses a `delegates` relationship; conditional outgoing edges are defined by the router's route table. Peer communication links remain agent-to-agent.
+Decision routers use `inputKind` and a JSON Pointer into the packet `payload`. Each branch matches one exact scalar value and points to an agent, team, or another router. Their branch edges count toward reachability and cycle checks, except a loop route: a route with `"loop": true` and `"maxIterations"` (1-5) may return to an ancestor of the router to start a bounded revision pass (see [loop routes](INTEROPERABILITY.md#loop-routes)). Every router declares what happens when the packet kind/field/value does not match: ask the user, stop, or route to a named fallback. Routes are deterministic; they do not ask an LLM to infer a branch from prose. Router IDs share the workflow node namespace, but routers are not agents, team members, or on-call targets. Incoming work uses a `delegates` relationship; conditional outgoing edges are defined by the router's route table. Peer communication links remain agent-to-agent.
 
-Levels group path nodes visually. Relationships define ordinary task flow and peer message permissions. A team is addressed as one graph node; its members run inside the team boundary at their shared level. Team members cannot be the head or endpoints in ordinary relationships, so a member is never assigned both directly and through its team. The delegation graph must be acyclic. Agent and team IDs share one unique namespace. Every referenced agent, team, and profile must exist exactly once. On-call agents cannot appear in relationships or teams.
+Levels group path nodes visually. Relationships define ordinary task flow and peer message permissions. A team is addressed as one graph node; its members run inside the team boundary at their shared level. Team members cannot be the head or endpoints in ordinary relationships, so a member is never assigned both directly and through its team. The delegation graph must be acyclic; back edges are allowed only as explicitly capped router loop routes. Agent and team IDs share one unique namespace. Every referenced agent, team, and profile must exist exactly once. On-call agents cannot appear in relationships or teams.
 
 ## Teams
 
@@ -118,6 +119,83 @@ Example Gemini runtime fragment (the model ID must come from the selected adapte
 }
 ```
 
+### Antigravity command approval
+
+Antigravity's headless mode has no per-command approval: `agy` either refuses
+terminal commands or approves every tool request. By default Arena refuses to
+start an Antigravity agent whose profile has `run_commands`. The user can opt a
+runtime into the second behaviour:
+
+```json
+{
+  "provider": "antigravity",
+  "model": "<model-id-reported-by-agy-models>",
+  "options": {
+    "commandApproval": "sandboxed-blanket"
+  }
+}
+```
+
+`commandApproval` is the only Antigravity option and `sandboxed-blanket` its only
+value; validation rejects anything else, and the option on any other provider.
+It is never a default, the builder never asks for it, and neither the setup
+interview nor the orchestrator chooses it, even when the user delegates other
+choices. It is set by an explicit `--command-approval sandboxed-blanket` flag or
+by editing the runtime, and coworker requests from agents cannot carry it. The
+share-code import preview, `workflow create` and the interview's draft preview
+name every agent that uses it.
+
+With the option set and `run_commands` granted, Arena runs
+`agy --sandbox --dangerously-skip-permissions` inside its *command fence*, which
+is Linux only (bubblewrap 0.11 or newer). On macOS Arena refuses the mode: agy
+keeps its sign-in in the Keychain, and `sandbox-exec` cannot let it reach that
+item while keeping commands away from every other Keychain item.
+
+The fence has two layers, because agy needs the network and its sign-in to run
+inference while the commands it is told to run need neither. agy runs in an
+**outer fence**; each command it launches is re-sandboxed, without the network,
+in a **nested fence**. agy resolves the shell for its `run_command` tool through
+`PATH` (verified: agy 1.3.6 runs `bash -c <command>`), so the fence leads `PATH`
+with a directory of `bash`/`sh` wrappers that re-exec the real shell inside the
+nested fence. A command that calls `bash` by an absolute path is already inside
+the nested fence by then, so it cannot escape; the only assumption is that agy's
+first hop uses `PATH` (it does, and its own prepended `bin` holds no shell).
+
+| | Outer fence (agy) | Nested fence (each command) |
+| --- | --- | --- |
+| Root filesystem | read-only (`--ro-bind / /`) | read-only, inherited from the outer fence |
+| Home directory | emptied: a tmpfs over `$HOME`, every other user's home, `/root`, `/mnt`, `/media`, `/srv`, with only an allowlist bound back read-only — agy's `~/.gemini` config, the `PATH` and toolchain directories under home (e.g. `~/.local/bin`, `GOPATH`), and `ARENA_ANTIGRAVITY_EXTRA_READS` | inherited empty home |
+| Writable | the assigned worktree (writers only); a private `/tmp`; agy's state (`~/.gemini/antigravity-cli`) through a throwaway overlay, so nothing written there survives | **only** the assigned worktree (writers only) and a private `/tmp`; agy's state is hidden |
+| Network | **open**: agy needs it for inference | **none** (`--unshare-net`): a fresh, empty network namespace, which also cuts off abstract Unix sockets (X11, the bus) |
+| Session bus / keyring | a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused | hidden: the relay socket (`$XDG_RUNTIME_DIR`) is tmpfs'd and the netns has no abstract bus socket, so a command cannot reach the keyring at all |
+| Also hidden | the reviewed credential table `hiddenCredentialPaths` in `internal/arena/antigravity_sandbox.go` (`~/.codex`, `~/.claude`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/.docker`, `~/.kube`, browser profiles, shell history …) as defense in depth under the tmpfs home; sensitive `/etc` files; the project's `.arena/.state` except the agent's own worktree | all of the outer fence's, plus agy's state and the relay |
+| Environment | locale, terminal, `PATH`, home and toolchain locations, `AGY_*`/`ANTIGRAVITY_*`; credentials, agent sockets and display variables are dropped | inherited, minus the (now unreachable) bus address |
+| Processes | new PID and IPC namespaces, a new session, killed with Arena | its own new PID, IPC, UTS and network namespaces |
+
+agy stores its sign-in in the desktop keyring through the D-Bus Secret Service.
+The relay learns which keyring service agy uses from agy's own search while it
+starts, before Arena sends the first turn, and then accepts searches and reads
+for that service only. Arena never reads, copies or logs a keyring item; it parses
+messages only for the service attribute and object paths.
+
+Residual risks, stated plainly:
+
+- **agy itself keeps the network and the sign-in.** This is irreducible — agy
+  cannot do inference otherwise. A prompt-injected agy can still, through its own
+  file tools (not a command), read whatever the outer fence leaves readable and
+  describe it in a network turn. The outer fence shrinks that to agy's `~/.gemini`,
+  the project, the toolchains and the worktree; the rest of the home directory
+  and other credentials are gone.
+- **Commands are contained but the fence is Linux-only.** On macOS the mode is
+  refused, not weakened.
+- **The home allowlist is the boundary, with the credential table as a second
+  layer.** A secret placed inside a bound-back path (for example under
+  `~/.gemini`, or an `ARENA_ANTIGRAVITY_EXTRA_READS` directory) is readable by
+  agy; the credential table blanks the known ones even there.
+
+Arena does not rely on whatever agy's own `--sandbox` restricts; the two fences
+are the boundary. Use the mode for agents whose inputs you trust.
+
 Example local runtime fragment:
 
 ```json
@@ -135,7 +213,7 @@ The placeholder model ID is intentional: Arena must use the model the local back
 
 ## Example fixture
 
-[`../examples/project/.arena/`](../examples/project/.arena/) illustrates an implementer, a cross-provider review team with a structured verdict, and an on-call specialist for unresolved consensus. It is a format example, not a required hand-authored setup path.
+[`../examples/project/.arena/`](../examples/project/.arena/) illustrates a coordinator that delegates to an implementer, a cross-provider review team downstream of the implementer with a structured verdict, a review gate that loops `ChangesRequested` back to the implementer at most twice, and an on-call specialist for unresolved consensus. It scores S+ on the [score sheet](ARENA-SCORING.md). It is a format example, not a required hand-authored setup path.
 
 ## Compatibility rules
 
@@ -144,7 +222,7 @@ The placeholder model ID is intentional: Arena must use the model the local back
 - Removing or changing a field's meaning requires a schema version change and migration path.
 - Migrations create a checkpoint and report a diff before replacing a definition.
 - Agent profile references must stay within `.arena/.agents/`; path traversal and external absolute paths are rejected.
-- The validator checks IDs are unique across agents and teams, valid references, supported relationships, graph acyclicity for delegation links, reachability of every path agent directly or through a reachable team, and sensible level ordering. On-call agents are deliberately outside this reachability check.
+- The validator checks IDs are unique across agents and teams, valid references, supported relationships, graph acyclicity for delegation links (loop routes excepted only when capped and pointing at an ancestor of their router), reachability of every path agent directly or through a reachable team, and sensible level ordering. On-call agents are deliberately outside this reachability check.
 - Teams have at least two distinct path-agent members at one shared level, exactly one member facilitator, and a configured verdict contract; an agent belongs to at most one team. Team members cannot be the head or relationship endpoints.
 - On-call entries reference on-call agents exactly once, include at least one valid trigger, and enforce the per-run invocation cap. On-call agents cannot be the head, team members, or relationship endpoints.
 - A delegation edge may target a team ID. Communication edges may target only path-agent IDs. Internal team deliberation does not require normal graph edges.
@@ -160,3 +238,52 @@ without this optional setting get the embedded default. `arena shader create ID
 it without hand-editing JSON. Source and settings have recoverable transactions,
 and concurrent source changes invalidate an outstanding edit. See
 [Background Shader Creation](BACKGROUND-SHADERS.md) for commands and HLSL limits.
+
+## Share codes
+
+A share code carries an arena or its shader as one line of text:
+
+```text
+arena1.<kind>.<check>.<payload>
+```
+
+- `kind` is `a` for an arena or `s` for a shader.
+- `payload` is base64url without padding of raw DEFLATE over compact JSON
+  following [share-bundle.schema.json](../schemas/share-bundle.schema.json):
+  `{"format": "arena.share.v1", "kind", "rubric", "workflow", "profiles", "shader"}`
+  for an arena, `{"format", "kind": "shader", "from", "shader"}` for a shader.
+  `shader` is `{source, glyphs}`, or `null` when the arena has none.
+- `check` is the first 8 hex digits of SHA-256 over `payload`. A truncated or
+  edited code is rejected before decoding. Whitespace inside a code is ignored,
+  so line-wrapped codes and codes inside a chat message still paste.
+
+Export fails closed. Every string and key in the bundle is checked, and the
+export is refused, naming the field but not its value, when it finds:
+- credentials or keys: anything Arena's secret redaction recognizes, private
+  keys, AWS/Slack/GitHub/Google/Stripe-style tokens, JWTs,
+  `password=`/`token:`-style assignments and long random-looking tokens;
+- details that identify a machine or person: URLs carrying a user name or
+  password, home-directory paths, this project's path, email addresses,
+  non-loopback IP addresses and internal host names;
+- terminal control characters.
+
+Runtime options must be ones the adapter documents, with plain values:
+- Codex `config.model_reasoning_effort`/`service_tier`;
+- Gemini `authMethod` and generation settings;
+- local `backend`, a loopback `endpoint` and generation settings;
+- Antigravity `commandApproval` (the import preview names every agent that uses it);
+- no options for Claude Code.
+
+Values are never redacted inside a code: the receiver gets exactly what the
+author saw, or no code. Import runs the same checks, so a code carrying any of
+these is refused rather than saved.
+
+Codes are capped at 512 KiB and 1 MiB once inflated; export refuses an arena
+whose JSON exceeds 1 MiB so every code it produces can be imported. The workflow and each
+profile are validated against their schemas, runtimes are refused if their
+options look secret, the profile set must match the agents exactly, and the
+shader must compile. On import the graph is validated against this project's
+settings and limits, the arena is renamed when its ID or shader file is taken
+(rewriting every profile path and the shader source), and it is saved through a
+recoverable configuration transaction. Codes never contain shared context, run
+history, audit data, project settings or the orchestrator profile.

@@ -82,60 +82,46 @@ func wordmark(width, height int, mode string, color bool) []string {
 	return lines
 }
 
-// Keep the brand flush with the right edge; operational information stays left.
+// The brand leads from the left margin with its text beside it, matching the
+// live status band; a hairline closes the header when there is room.
 func brandedHeader(left []string, width, height int, mode string, color bool) []string {
 	logo := wordmark(width, height, mode, color)
 	logoWidth := 0
 	for _, line := range logo {
 		logoWidth = max(logoWidth, ansi.StringWidth(line))
 	}
+	if logoWidth == 0 {
+		lines := []string{}
+		for _, l := range left {
+			lines = append(lines, short(l, width))
+		}
+		return lines
+	}
+	margin, gap := 2, 4
+	if logoWidth+margin+gap > width {
+		margin, gap = 0, 0
+	}
 	lines := []string{}
 	for i := range max(len(left), len(logo)) {
 		l, r := "", ""
 		if i < len(left) {
-			l = left[i]
+			l = styled(left[i], sgrSoft, color && i > 0)
+			if i == 0 {
+				l = styled(left[i], sgrStrong, color)
+			}
 		}
 		if i < len(logo) {
 			r = logo[i]
 		}
-		if logoWidth == 0 {
-			lines = append(lines, short(l, width))
-		} else {
-			leftWidth := max(0, width-logoWidth)
-			lines = append(lines, pad(short(l, max(0, leftWidth-2)), leftWidth)+pad(r, logoWidth))
+		lines = append(lines, short(strings.Repeat(" ", margin)+pad(r, logoWidth)+strings.Repeat(" ", gap)+l, width))
+	}
+	if len(logo) == 3 && height >= 12 {
+		rule := "─"
+		if !unicodeLettering() {
+			rule = "-"
 		}
+		lead := min(width, margin+logoWidth)
+		lines = append(lines, styled(strings.Repeat(rule, lead), "38;5;60", color)+styled(strings.Repeat(rule, max(0, width-lead)), sgrHairline, color))
 	}
 	return lines
-}
-
-func (m LiveModel) header(width, height int, color bool) []string {
-	left := []string{}
-	if m.Run.Settings.Display.GitTree != "hide" {
-		base := short(m.Run.BaseCommit, 8)
-		if width >= 80 && height >= 18 {
-			boxWidth := min(36, width/3)
-			b := borders()
-			left = []string{muted(b.top(boxWidth, "git trees"), color), b.row("base "+base, boxWidth)}
-			for _, tree := range m.Trees[:min(2, len(m.Trees))] {
-				branch := tree.Branch
-				if !tree.Write {
-					branch = "detached read-only"
-				}
-				connector := "├─ "
-				if !unicodeLettering() {
-					connector = "|- "
-				}
-				label := tree.AgentID + " " + branch + " " + tree.State
-				left = append(left, b.row(connector+agentColor(tree.AgentID, label, color), boxWidth))
-			}
-			if len(m.Trees) == 0 || len(m.Trees) > 2 {
-				label := fmt.Sprintf("%d worktrees · /git details", len(m.Trees))
-				left = append(left, b.row(label, boxWidth))
-			}
-			left = append(left, muted(b.bottom(boxWidth), color))
-		} else if width >= 30 {
-			left = []string{fmt.Sprintf("Git: %s · %d trees · /git details", base, len(m.Trees))}
-		}
-	}
-	return brandedHeader(left, width, height, m.Run.Settings.Display.AsciiTitle, color)
 }

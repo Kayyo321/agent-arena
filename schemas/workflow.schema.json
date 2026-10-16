@@ -157,7 +157,9 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "equals": { "type": ["string", "number", "boolean", "null"] },
-        "to": { "$ref": "#/$defs/id" }
+        "to": { "$ref": "#/$defs/id" },
+        "loop": { "type": "boolean" },
+        "maxIterations": { "type": "integer", "minimum": 1, "maximum": 5 }
       }
     },
     "relationship": {

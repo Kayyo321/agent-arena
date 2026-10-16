@@ -4,7 +4,7 @@
 
 Each workflow arena has a durable context store shared by the agents in that workflow. It carries useful facts, decisions, conventions, and findings from one run to later runs. It is separate from transient handoff context and the run event journal: messages remain in run history, while selected knowledge becomes a context entry only through an explicit user or agent action.
 
-An agent may search and read the context for the workflow it is running in. The permanent `arena-orchestrator` may access that workflow's context while handling a request for it. Context is not implicitly shared between different workflows. Arena supplies relevant entries by ID and records the entry versions used in each run; it does not inject the entire store into every provider prompt.
+An agent may search and read the context for the workflow it is running in. The permanent `arena-orchestrator` may access that workflow's context while handling a request for it. Context is not implicitly shared between different workflows. Arena supplies relevant entries by ID and records the entry versions used in each run; it does not inject the entire store into every provider prompt. Relevance is word-based: an entry matches when it shares a meaningful word (three or more letters, common stop words ignored) with the query, title and tag matches rank above body matches, and newer entries win ties. Each task's objective is used as the query for up to ten entries in that agent's prompt; an empty search query lists every active entry.
 
 ## Storage
 

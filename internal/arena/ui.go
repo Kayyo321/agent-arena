@@ -3,6 +3,7 @@ package arena
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,10 +46,17 @@ type LiveModel struct {
 	Readiness          []Readiness
 	Width, Height      int
 	Offset, Selected   int
+	Panning            bool
+	PanX, PanY         int
+	SuggestIndex       int
+	SuggestFor         string
 	Prompt, Error      string
 	Events             []Event
 	State              RunState
 	Trees              []Workspace
+	DiffStats          map[string]diffStat
+	DiffBusy           bool
+	DiffAt             time.Time
 	Decisions          []Decision
 	Detail             bool
 	Expanded           bool
@@ -68,6 +76,8 @@ type LiveModel struct {
 	Chat               []chatLine
 	Transcript         string
 	Draft              *WorkflowDraft
+	DraftScore         *Scorecard
+	PastedShader       *ShaderDraft // a pasted arena's shader, kept across revisions
 	ControlEvents      []Event
 	Panel              string
 	PanelText          []string
@@ -76,6 +86,11 @@ type LiveModel struct {
 	PopupOffset        int
 	PopupLines         []string
 	PendingReply       chan string
+	Invoker            Invoker
+	StallKey           string
+	StallCount         int
+	StallBusy          bool
+	Stall              *stallDiagnosis
 }
 
 func (m LiveModel) Init() tea.Cmd {
@@ -113,6 +128,8 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.Attachments = items
 			}
+		} else if next, cmd, ok := m.pasteShare(v.Text); ok {
+			return next, cmd
 		} else if v.Text != "" {
 			m.insertPrompt(v.Text)
 		} else {
@@ -214,10 +231,40 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.LastProbeEvent = max(m.LastProbeEvent, event.Sequence)
 		}
-		if refreshReadiness {
-			return m, tea.Batch(tickUI(m.Run.ID), m.probeReadiness())
+		cmds := []tea.Cmd{tickUI(m.Run.ID)}
+		// Worktrees only change while the run works; a finished run is measured once.
+		if now := shaderClock(); m.Project != nil && !m.DiffBusy && len(m.Trees) > 0 && now.Sub(m.DiffAt) >= diffInterval && (m.DiffStats == nil || m.State.Status == "running" || len(m.DiffStats) != countWriting(m.Trees)) {
+			m.DiffBusy, m.DiffAt = true, now
+			cmds = append(cmds, m.refreshDiffStats())
 		}
-		return m, tickUI(m.Run.ID)
+		if refreshReadiness {
+			cmds = append(cmds, m.probeReadiness())
+		}
+		if stall := m.watchStall(); stall != nil {
+			cmds = append(cmds, stall)
+		}
+		return m, tea.Batch(cmds...)
+	case diffStatsResult:
+		m.DiffBusy = false
+		if v.RunID == m.Run.ID {
+			m.DiffStats = v.Stats
+		}
+	case stallDiagnosis:
+		m.StallBusy = false
+		if v.RunID == m.Run.ID {
+			m.Stall = &v
+		}
+	case shellResult:
+		lines := []string{"$ " + v.Command}
+		if output := strings.TrimRight(Redact(v.Output), "\n"); output != "" {
+			lines = append(lines, strings.Split(output, "\n")...)
+		}
+		status := fmt.Sprintf("exit %d", v.Code)
+		if v.Err != nil {
+			status = "error: " + Redact(v.Err.Error())
+		}
+		m.Panel, m.PanelText, m.Offset = "Shell · "+status, lines, 1<<30
+		m.ChatMode = false
 	case uiReadinessResult:
 		if v.Required == string(JSON(Required([]Workflow{m.Run.Workflow}, m.Run.Settings))) {
 			m.Readiness = v.Results
@@ -244,13 +291,26 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Chat = append(m.Chat, chatLine{"Arena", "Request failed: " + Redact(m.Error) + ". You can retry your message."})
 				return m, nil
 			}
-			m.Draft = v.Result.Draft
+			m.Draft, m.DraftScore = v.Result.Draft, nil
+			if m.Draft != nil && m.PastedShader != nil {
+				d := *m.Draft
+				d.Shader, d.Source = m.PastedShader, "share-import"
+				if d.Workflow.Settings.BackgroundShader == nil {
+					d.Workflow.Settings.BackgroundShader = defaultShader(d.Workflow.Id)
+				}
+				d.Workflow.Settings.BackgroundShader.Glyphs = m.PastedShader.Glyphs
+				m.Draft = &d
+			}
+			if m.Draft != nil {
+				score := ScoreArena(m.Draft.Workflow, m.Draft.Profiles)
+				m.DraftScore = &score
+			}
 			if v.Result.Question != "" {
 				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", Redact(v.Result.Question)})
 				m.Transcript += "\nAssistant: " + Redact(v.Result.Question)
 			}
 			if m.Draft != nil {
-				m.Chat = append(m.Chat, chatLine{"Arena", "Draft ready. Review the graph below, then /save to create it. Continue typing to revise."})
+				m.Chat = append(m.Chat, chatLine{"Arena", "Draft ready · " + m.DraftScore.Summary() + ". /score for the breakdown. Review the graph below, then /save to create it. Continue typing to revise."})
 			}
 			m.Offset = 1 << 30
 		}
@@ -260,11 +320,18 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Error = v.Err.Error()
 			return m, nil
 		}
-		m.Run, m.Draft, m.ChatMode = v.Run, nil, false
+		m.Run, m.Draft, m.DraftScore, m.PastedShader, m.ChatMode = v.Run, nil, nil, nil, false
+		saved := "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."
+		switch {
+		case v.CommitErr != nil:
+			saved += " Scaffold not committed: " + Redact(v.CommitErr.Error()) + " — commit before running writing agents."
+		case v.Commit != "":
+			saved += " Committed the scaffold as " + v.Commit + " (Arena scaffold)."
+		}
 		m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
 		m.State = RunState{Status: "idle", Agents: map[string]string{}}
 		m.Readiness, m.Panel, m.PopupAgent, m.Offset = unknownReadiness(v.Run), "", "", 0
-		m.Chat = append(m.Chat, chatLine{"Arena", "Saved " + v.Run.Workflow.Id + ". The graph is open; type a task or /run TASK to begin."})
+		m.Chat = append(m.Chat, chatLine{"Arena", saved})
 		return m, m.Init()
 	case agentContextLoaded:
 		if v.Agent == m.PopupAgent {
@@ -295,8 +362,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Run, m.Readiness = v.Run, v.Readiness
+		m.StallKey, m.StallCount, m.StallBusy, m.Stall = "", 0, false, nil
 		m.State = RunState{Status: "created", Agents: map[string]string{}}
-		m.Events, m.Trees, m.Decisions, m.Changes = nil, nil, nil, nil
+		m.Events, m.Trees, m.Decisions, m.Changes, m.DiffStats = nil, nil, nil, nil, nil
 		m.ChangePatch, m.SelectedChange = "", ""
 		m.LastProbeEvent, m.Offset, m.Selected = 0, 0, 0
 		if v.Err != nil {
@@ -315,8 +383,22 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.Error = ""
 		}
+	case tea.MouseWheelMsg:
+		// Capturing the wheel stops terminals from translating it into Up/Down,
+		// which would recall prompt history instead of scrolling.
+		switch v.Button {
+		case tea.MouseWheelUp:
+			m.scrollBy(-3)
+		case tea.MouseWheelDown:
+			m.scrollBy(3)
+		}
+	case shareCopied, shareImported:
+		return m.updateShare(msg)
 	case tea.PasteMsg:
 		m.noteShaderInput()
+		if next, cmd, ok := m.pasteShare(v.Content); ok {
+			return next, cmd
+		}
 		if !m.pasteAttachments(v.Content) {
 			m.insertPrompt(v.Content)
 		}
@@ -324,6 +406,11 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.noteShaderInput()
 		m.syncPrompt()
 		s := v.String()
+		if m.Panning {
+			if m.panKey(s) {
+				return m, nil
+			}
+		}
 		switch s {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -368,6 +455,13 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.PopupOffset = max(0, m.PopupOffset-1)
 				} else {
 					m.PopupOffset = min(m.scrollEnd(true), m.PopupOffset+1)
+				}
+			} else if m.input.recalled == 0 && len(m.slashSuggestions()) > 0 {
+				// The menu owns ↑/↓ unless history is being browsed.
+				if s == "up" {
+					m.moveSuggestion(-1)
+				} else {
+					m.moveSuggestion(1)
 				}
 			} else if strings.Contains(m.Prompt, "\n") || displayWidth(m.Prompt) > max(1, m.Width-3) && m.Width > 0 {
 				if s == "up" {
@@ -416,23 +510,9 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "alt+right", "ctrl+right", "alt+f":
 			m.input.cursor = m.wordBoundary(1)
 		case "pgup":
-			if m.PopupAgent != "" {
-				if m.PopupOffset >= 1<<29 {
-					m.PopupOffset = m.scrollEnd(true)
-				}
-				m.PopupOffset = max(0, m.PopupOffset-10)
-				return m, nil
-			}
-			if m.Offset >= 1<<29 {
-				m.Offset = m.scrollEnd(false)
-			}
-			m.Offset = max(0, m.Offset-10)
+			m.scrollBy(-10)
 		case "pgdown":
-			if m.PopupAgent != "" {
-				m.PopupOffset = min(m.scrollEnd(true), m.PopupOffset+10)
-				return m, nil
-			}
-			m.Offset = min(m.scrollEnd(false), m.Offset+10)
+			m.scrollBy(10)
 		case "home", "ctrl+a":
 			if m.PopupAgent != "" && s == "home" {
 				m.PopupOffset = 0
@@ -473,6 +553,12 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+enter", "alt+enter", "ctrl+j":
 			m.insertPrompt("\n")
 		case "enter":
+			// A partial command fills in the highlighted suggestion rather
+			// than running, so a typo like /ca never cancels a run.
+			if command := strings.TrimSpace(m.Prompt); !strings.Contains(command, " ") && !Has(slashCommands, command) && command != "/exit" && len(m.slashSuggestions()) > 0 {
+				m.completePrompt()
+				return m, nil
+			}
 			input := m.Prompt
 			next, cmd := m.submit(input)
 			value := next.(LiveModel)
@@ -489,6 +575,53 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// scrollBy moves the agent mini-window when open, otherwise the body.
+func (m *LiveModel) scrollBy(lines int) {
+	popup := m.PopupAgent != ""
+	offset := &m.Offset
+	if popup {
+		offset = &m.PopupOffset
+	}
+	if *offset >= 1<<29 {
+		*offset = m.scrollEnd(popup)
+	}
+	*offset = max(0, min(m.scrollEnd(popup), *offset+lines))
+}
+
+// graphShown reports whether the body is the workflow graph.
+func (m LiveModel) graphShown() bool {
+	return m.Panel == "" && !m.ChatMode && m.PopupAgent == "" && !m.Detail && !m.GitDetail && !m.ChangeDetail
+}
+
+// panKey moves the graph camera while /pan is active. Arrows pan, Space
+// recenters, and Esc or Enter leave the mode; any other key leaves it and is
+// handled normally, so typing resumes without an extra keystroke.
+func (m *LiveModel) panKey(key string) bool {
+	if !m.graphShown() {
+		m.Panning = false
+		return false
+	}
+	switch key {
+	case "left":
+		m.PanX -= panStepX
+	case "right":
+		m.PanX += panStepX
+	case "up":
+		m.PanY -= panStepY
+	case "down":
+		m.PanY += panStepY
+	case "space", " ":
+		m.PanX, m.PanY = 0, 0
+	case "esc", "enter":
+		m.Panning = false
+	default:
+		m.Panning = false
+		return false
+	}
+	return true
+}
+
 func (m *LiveModel) showDetail(panel string) {
 	open := panel == "git" && m.GitDetail || panel == "events" && m.Detail || panel == "changes" && m.ChangeDetail
 	m.ChatMode, m.Panel, m.PopupAgent, m.Offset = false, "", "", 0
@@ -527,6 +660,10 @@ func (m LiveModel) command(command string) error {
 	case "cancel":
 		return m.Project.Transition(m.Run.ID, "cancelled")
 	case "decision":
+		// With a single pending decision the ID may be omitted.
+		if len(parts) >= 2 && len(m.Decisions) == 1 && m.pendingDecision(parts[1]) == nil {
+			return m.Project.Answer(m.Run.ID, m.Decisions[0].ID, strings.Join(parts[1:], " "))
+		}
 		if len(parts) < 3 {
 			return fmt.Errorf("decision ID ANSWER")
 		}
@@ -570,6 +707,7 @@ func (m LiveModel) View() tea.View {
 	lines = m.overlay(lines, width, height)
 	view := tea.NewView(strings.Join(lines, "\n"))
 	view.AltScreen = true
+	view.MouseMode = tea.MouseModeCellMotion
 	view.Cursor = tea.NewCursor(cursorX, promptY+cursorY)
 	view.Cursor.Shape = tea.CursorBar
 	return view
@@ -580,7 +718,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		body = append(body, m.Panel+" · /close to return")
 		body = append(body, m.PanelText...)
 	} else if m.ChatMode {
-		body = append(body, m.chatBody()...)
+		// The styled transcript is appended after plain lines are wrapped.
 	} else if m.ChangeDetail {
 		body = append(body, "Review queue · Alt+↑/↓ select a change · PageUp/PageDown scroll · /close to return")
 		for i, change := range m.Changes {
@@ -617,11 +755,23 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		if m.Run.Settings.Display.Animation == "off" || m.Run.Settings.Display.Animation == "auto" && os.Getenv("TERM") == "dumb" {
 			frame = -1
 		}
-		if width >= 100 && !m.Expanded {
-			body = append(body, wideGraph(m.Run.Workflow, m.State, m.Events, width, color, frame)...)
+		wide := width >= 100 && !m.Expanded
+		graph, legend := []string{}, []string{}
+		if wide {
+			graph = graphView(m.Run.Workflow, m.State, m.Events, m.agentDiffs(), width, color, m.spinner(false), frame)
+			// The legend is the wide graph's last row; it stays put while the canvas pans.
+			graph, legend = graph[:len(graph)-1], graph[len(graph)-1:]
 		} else {
-			body = append(body, renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded)...)
+			graph = renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))
 		}
+		// While panning, the key hint takes the wide graph's spacer row.
+		if m.Panning {
+			body = append(body, fmt.Sprintf("Pan · ←↑↓→ move · Space center · Esc done · offset %+d,%+d", m.PanX, m.PanY))
+		} else if wide {
+			body = append(body, "")
+		}
+		body = append(body, panLines(graph, m.PanX, m.PanY, width)...)
+		body = append(body, legend...)
 		body = append(body, packetActivity(m.Events, frame)...)
 		pending := 0
 		for _, change := range m.Changes {
@@ -630,11 +780,7 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 			}
 		}
 		body = append(body, fmt.Sprintf("Review queue: %d pending · /changes for patches and integration", pending))
-		for _, ready := range m.Readiness {
-			if ready.State != "good" {
-				body = append(body, "Provider "+ready.Provider+" / "+ready.Model+": "+ready.State+" · "+ready.Auth)
-			}
-		}
+		body = append(body, foldReadiness(m.Readiness)...)
 	}
 	if !m.ChatMode && m.Panel == "" && !m.Detail && !m.GitDetail && !m.ChangeDetail {
 		body = append(body, "On-call rail: arena-orchestrator (permanent project control · "+m.Run.Settings.DefaultModel.Provider+" / "+m.Run.Settings.DefaultModel.Model+")")
@@ -658,15 +804,8 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 		body = append(body, "DECISION "+d.ID+" "+d.Prompt+" choices="+strings.Join(d.Choices, "/"))
 		body = append(body, "  > decision "+d.ID+" ANSWER")
 	}
-	if !m.ChatMode {
-		label := "arena: " + m.Run.Workflow.Id + " · " + m.State.Status
-		if m.Run.ID == "" {
-			label += " · type a task or /run TASK"
-		}
-		body = append([]string{label}, body...)
-	}
 	if m.Starting {
-		body = append([]string{"Starting task · checking readiness, policies and Git isolation…"}, body...)
+		body = append([]string{m.spinner(color) + " Starting task · checking readiness, policies and Git isolation"}, body...)
 	}
 	if m.ShaderError != "" {
 		body = append([]string{"Background shader disabled: " + Redact(m.ShaderError)}, body...)
@@ -677,9 +816,44 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 	if m.Detail || m.GitDetail || m.ChangeDetail || m.Panel != "" || m.ChatMode {
 		body = plainUILines(body, width)
 	}
+	if m.ChatMode && m.Panel == "" {
+		body = append(body, m.chatBody(width, color)...)
+	}
 	return body
 }
-func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, width int, color, expanded bool) []string {
+
+const panStepX, panStepY = 4, 2
+
+// panLines shows the graph through a camera offset by (dx, dy) cells from
+// its centered layout. The block keeps its height so the rows below it stay
+// put; the offset is clamped so some of the graph always remains in view.
+func panLines(lines []string, dx, dy, width int) []string {
+	if dx == 0 && dy == 0 || len(lines) == 0 {
+		return lines
+	}
+	cols := width
+	for _, line := range lines {
+		cols = max(cols, ansi.StringWidth(line))
+	}
+	dx = max(-(width - 1), min(cols-1, dx))
+	dy = max(-(len(lines) - 1), min(len(lines)-1, dy))
+	out := make([]string, len(lines))
+	for i := range out {
+		line := ""
+		if row := i + dy; row >= 0 && row < len(lines) {
+			line = lines[row]
+		}
+		if dx > 0 {
+			line = ansi.Cut(line, dx, dx+width)
+		} else if dx < 0 && line != "" {
+			line = strings.Repeat(" ", -dx) + line
+		}
+		out[i] = line
+	}
+	return out
+}
+
+func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, width int, color, expanded bool, spin ...string) []string {
 	lines := []string{}
 	members := map[string]bool{}
 	for _, t := range w.Teams {
@@ -695,6 +869,9 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 		if status == "" {
 			status = "waiting"
 		}
+		if (status == "running" || status == "queued") && len(spin) > 0 {
+			status = withSpinner(spin[0], status)
+		}
 		label := a.Id + " · " + a.Runtime.Provider
 		runtime := a.Runtime.Model
 		if a.Runtime.ReasoningEffort != "" {
@@ -704,9 +881,11 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 			lines = append(lines, agentColor(a.Id, "["+a.Id+"] "+runtime+" | "+status, color))
 			continue
 		}
-		cardWidth := min(width, 70)
-		b := borders()
-		lines = append(lines, muted(b.top(cardWidth, ""), color), b.row(agentColor(a.Id, label, color), cardWidth), b.row(runtime, cardWidth), b.row(status, cardWidth), muted(b.bottom(cardWidth), color))
+		kind := "agent"
+		if a.Id == w.HeadAgent {
+			kind, label = "head", "HEAD · "+label
+		}
+		lines = append(lines, kindCard(kind, a.Id, label, []string{runtime, status}, min(width, 70), color)...)
 	}
 	for _, t := range w.Teams {
 		roundState := "waiting"
@@ -759,7 +938,21 @@ func agentColor(id, s string, on bool) string {
 	if !on || id == "" {
 		return s
 	}
-	return fmt.Sprintf("\x1b[3%sm%s\x1b[0m", string('1'+rune(id[0]%6)), s)
+	return "\x1b[" + agentSGR(id) + "m" + s + "\x1b[0m"
+}
+func countWriting(trees []Workspace) int {
+	n := 0
+	for _, tree := range trees {
+		if tree.Write {
+			n++
+		}
+	}
+	return n
+}
+func agentSGR(id string) string {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return fmt.Sprintf("38;5;%d", agentPalette[h.Sum32()%uint32(len(agentPalette))])
 }
 func Watch(ctx context.Context, p *Project, r Run, readiness []Readiness) error {
 	if readiness == nil {

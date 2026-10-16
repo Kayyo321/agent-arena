@@ -60,7 +60,7 @@ func DefaultSettings(r Runtime) Settings {
 	return convert[Settings](map[string]any{
 		"schemaVersion": 1, "defaultModel": r,
 		"permanentOnCallAgent": map[string]any{"id": "arena-orchestrator", "profile": ".agents/arena-system/arena-orchestrator.agent.json", "runtimeSource": "defaultModel", "skill": "arena-orchestrator", "availability": "permanent-on-call"},
-		"approvalPolicies":     map[string]any{"arena-subagent-modification-inquiry": "ask-user", "agent-workflow-edit": "ask-user", "cross-provider-context-sharing": "ask-user", "shell-command-execution": "adapter-default", "change-integration": "human-review", "workflow-deletion": "ask-user"},
+		"approvalPolicies":     map[string]any{"arena-subagent-modification-inquiry": "ask-user", "agent-workflow-edit": "ask-user", "cross-provider-context-sharing": "ask-user", "shell-command-execution": "adapter-default", "change-integration": "human-review", "workflow-deletion": "ask-user", "orchestrator-stall-recovery": "answer-routing"},
 		"limits":               map[string]any{"maxConcurrentAgents": 4, "maxTeamRounds": 2, "maxOnCallInvocationsPerRun": 3, "maxCoworkerAdditionsPerRun": 1, "maxAgentRunMinutes": 30, "maxRetriesPerAgent": 1},
 		"context":              map[string]any{"defaultHandoffScope": "task-scoped", "maxFilesPerHandoff": 50},
 		"sharedContext":        map[string]any{"storage": "git-tracked", "agentWritePolicy": "auto-accept", "agentDeletePolicy": "ask-user", "maxEntries": 500, "maxEntryBytes": 32768, "maxTotalBytes": 2097152, "staleAfterDays": 180},
@@ -88,8 +88,24 @@ func ValidateRuntime(r Runtime) error {
 	if (r.Provider == "codex" || r.Provider == "claude-code") && r.ReasoningEffort == "" {
 		return fmt.Errorf("%s: select reasoning effort explicitly (status shows verifiable choices)", r.Provider)
 	}
+	if _, ok := r.Options["commandApproval"]; ok && r.Provider != "antigravity" {
+		return fmt.Errorf("commandApproval is an Antigravity option; %s has its own command sandbox", r.Provider)
+	}
 	switch r.Provider {
-	case "codex", "claude-code":
+	case "codex":
+	case "claude-code":
+		if a := str(r.Options["authMethod"]); a != "" && a != "api-key-or-cloud" && a != claudeSignInAuth {
+			return fmt.Errorf("Claude Code authMethod must be api-key-or-cloud or %s", claudeSignInAuth)
+		}
+	case "antigravity":
+		for key, value := range r.Options {
+			if key != "commandApproval" {
+				return fmt.Errorf("antigravity takes only the commandApproval option; its CLI owns sign-in and model settings")
+			}
+			if value != antigravityBlanketApproval {
+				return fmt.Errorf("antigravity commandApproval must be %q (or omit it to keep commands refused)", antigravityBlanketApproval)
+			}
+		}
 	case "gemini":
 		a, _ := r.Options["authMethod"].(string)
 		if a != "google-ai-studio-api-key" && a != "vertex-ai" {
@@ -264,6 +280,8 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 			}
 		}
 	}
+	type loopEdge struct{ router, route, to string }
+	loops := []loopEdge{}
 	for _, r := range w.DecisionRouters {
 		matches := map[string]bool{}
 		ids := map[string]bool{}
@@ -278,6 +296,21 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 			}
 			matches[k] = true
 			ids[route.Id] = true
+			if route.MaxIterations != nil && !LoopRoute(route) {
+				return fmt.Errorf("router %s route %s sets maxIterations without loop: true", r.Id, route.Id)
+			}
+			if LoopRoute(route) {
+				// A loop route is the only permitted back edge; it stays out of
+				// the cycle walk and must be capped and point at an ancestor.
+				if route.MaxIterations == nil {
+					return fmt.Errorf("router %s loop route %s needs maxIterations (1-5) so the revision loop is bounded", r.Id, route.Id)
+				}
+				if _, ok := nodes[route.To]; !ok || members[route.To] != "" || agents[route.To].Activation == "on-call" || route.To == r.Id {
+					return fmt.Errorf("router %s loop route %s must target an earlier path node, not %s", r.Id, route.Id, route.To)
+				}
+				loops = append(loops, loopEdge{r.Id, route.Id, route.To})
+				continue
+			}
 			if !targets[route.To] {
 				if e := edge(r.Id, route.To); e != nil {
 					return e
@@ -341,13 +374,38 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 	if e := walk(w.HeadAgent); e != nil {
 		return e
 	}
+	for _, l := range loops {
+		if !Has(descendants(edges, l.to), l.router) {
+			return fmt.Errorf("router %s loop route %s must return to an ancestor on its delegates path; %s does not lead to %s", l.router, l.route, l.to, l.router)
+		}
+	}
+	incoming := map[string]bool{}
+	for _, targets := range edges {
+		for _, to := range targets {
+			incoming[to] = true
+		}
+	}
+	for _, r := range w.DecisionRouters {
+		if !incoming[r.Id] {
+			return fmt.Errorf("router %s has no incoming delegates edge; add one from the node that produces its %s packets (for a team verdict, delegate from the team to the router)", r.Id, r.InputKind)
+		}
+	}
+	unreachable := []string{}
 	for id := range nodes {
 		if agents[id].Activation == "on-call" || members[id] != "" {
 			continue
 		}
 		if !visited[id] {
-			return fmt.Errorf("path node %s is unreachable from head %s", id, w.HeadAgent)
+			unreachable = append(unreachable, id)
 		}
+	}
+	if len(unreachable) > 0 {
+		sort.Strings(unreachable)
+		noun := "path node " + unreachable[0] + " is"
+		if len(unreachable) > 1 {
+			noun = "path nodes " + strings.Join(unreachable, ", ") + " are"
+		}
+		return fmt.Errorf("%s unreachable from head %s; connect each through a delegates edge (or a router route) from a node on the path", noun, w.HeadAgent)
 	}
 	if w.Settings.MaxConcurrentAgents > s.Limits.MaxConcurrentAgents {
 		return fmt.Errorf("workflow concurrency exceeds project limit")
@@ -359,6 +417,22 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 		return e
 	}
 	return nil
+}
+
+// LoopRoute reports whether a router route is an explicitly capped back edge.
+func LoopRoute(r c.WorkflowDecisionRoute) bool { return r.Loop != nil && *r.Loop }
+
+// descendants lists the nodes reachable from id over forward edges, id included.
+func descendants(edges map[string][]string, id string) []string {
+	out := []string{id}
+	for i := 0; i < len(out); i++ {
+		for _, to := range edges[out[i]] {
+			if !Has(out, to) {
+				out = append(out, to)
+			}
+		}
+	}
+	return out
 }
 func isTeam(w Workflow, id string) bool {
 	for _, t := range w.Teams {
@@ -410,8 +484,20 @@ func Required(w []Workflow, s Settings) []Runtime {
 			all = append(all, a.Runtime)
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].Provider+all[i].Model < all[j].Provider+all[j].Model })
-	return all
+	// One probe per distinct runtime: agents sharing a runtime share readiness.
+	seen := map[string]bool{}
+	unique := []Runtime{}
+	for _, r := range all {
+		key := string(JSON(r))
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, r)
+		}
+	}
+	sort.SliceStable(unique, func(i, j int) bool {
+		return unique[i].Provider+"\x00"+unique[i].Model+"\x00"+unique[i].ReasoningEffort < unique[j].Provider+"\x00"+unique[j].Model+"\x00"+unique[j].ReasoningEffort
+	})
+	return unique
 }
 
 func DecodeJSON(b []byte, v any) error {

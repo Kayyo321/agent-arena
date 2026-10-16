@@ -13,7 +13,7 @@ func providerSkillState(root, provider string) string {
 	if provider == "gemini" || provider == "local" {
 		return "canonical skill embedded for Arena control calls"
 	}
-	target := map[string]string{"codex": "codex", "claude-code": "claude"}[provider]
+	target := map[string]string{"codex": "codex", "claude-code": "claude", "antigravity": "gemini"}[provider]
 	if target == "" {
 		return "unknown host"
 	}

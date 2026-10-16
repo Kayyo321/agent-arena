@@ -30,11 +30,22 @@ type Readiness struct {
 }
 
 func Probe(ctx context.Context, root string, r Runtime) Readiness {
+	result := probe(ctx, root, r)
+	if result.CanStart && (result.State == "unknown" || result.State == "") {
+		result.State = "good"
+	}
+	return result
+}
+
+func probe(ctx context.Context, root string, r Runtime) Readiness {
 	result := Readiness{Provider: r.Provider, Model: r.Model, State: "unknown", Auth: "unknown", ModelState: "unknown", Efforts: []string{}, Skill: providerSkillState(root, r.Provider)}
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	if r.Provider == "local" {
 		return probeLocal(ctx, r, result)
+	}
+	if r.Provider == "antigravity" {
+		return probeAntigravity(ctx, r, result)
 	}
 	cli := map[string]string{"codex": "codex", "claude-code": "claude"}[r.Provider]
 
@@ -89,10 +100,16 @@ func Probe(ctx context.Context, root string, r Runtime) Readiness {
 		if e != nil {
 			return result
 		}
-		if !strings.Contains(string(help), "--output-format") || !strings.Contains(string(help), "--bare") {
-			result.State = "incompatible version"
-			result.Detail = "requires structured output and JSON Schema CLI flags"
-			return result
+		flags := []string{"--output-format", "--bare"}
+		if claudeSignIn(r) {
+			flags = []string{"--output-format", "--json-schema", "--mcp-config", "--permission-prompts", "--setting-sources"}
+		}
+		for _, flag := range flags {
+			if !strings.Contains(string(help), flag) {
+				result.State = "incompatible version"
+				result.Detail = "installed Claude CLI lacks " + flag
+				return result
+			}
 		}
 		if match := regexp.MustCompile(`(?s)--effort[^\(]*\(([^)]+)\)`).FindSubmatch(help); len(match) > 1 {
 			result.Efforts = split(string(match[1]))
@@ -101,6 +118,9 @@ func Probe(ctx context.Context, root string, r Runtime) Readiness {
 			result.State = "unsupported effort"
 			result.Detail = "effort not accepted by installed Claude CLI"
 			return result
+		}
+		if claudeSignIn(r) {
+			return probeClaudeSignIn(ctx, result)
 		}
 		result.Auth = "API-key or supported cloud credentials required"
 		if os.Getenv("ANTHROPIC_API_KEY") != "" {
@@ -120,69 +140,34 @@ func Probe(ctx context.Context, root string, r Runtime) Readiness {
 		return result
 	}
 	defer rpc.Close()
-	account, e := rpc.Call(ctx, "account/read", map[string]any{"refreshToken": false}, nil)
+	signedOut, e := codexSignedOut(ctx, rpc)
 	if e != nil {
 		result.Detail = e.Error()
 		return result
 	}
-	var a struct {
-		Account            map[string]any `json:"account"`
-		RequiresOpenAIAuth bool           `json:"requiresOpenaiAuth"`
-	}
-	if e = json.Unmarshal(account, &a); e != nil {
-		result.Detail = "unrecognized account response"
-		return result
-	}
-	if a.Account == nil && a.RequiresOpenAIAuth {
+	if signedOut {
 		result.Auth = "signed out"
 		result.State = "signed out"
 		return result
 	}
 	result.Auth = "Codex-owned authentication ready"
-	cursor := ""
-	for pages := 0; pages < 20; pages++ {
-		params := map[string]any{"limit": 100, "includeHidden": false}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		models, e := rpc.Call(ctx, "model/list", params, nil)
-		if e != nil {
-			result.Detail = e.Error()
-			return result
-		}
-		var m struct {
-			Data []struct {
-				ID      string `json:"id"`
-				Model   string `json:"model"`
-				Efforts []struct {
-					Effort string `json:"reasoningEffort"`
-				} `json:"supportedReasoningEfforts"`
-			} `json:"data"`
-			NextCursor *string `json:"nextCursor"`
-		}
-		if e = json.Unmarshal(models, &m); e != nil {
-			result.Detail = "unrecognized model catalog"
-			return result
-		}
-		for _, model := range m.Data {
-			if model.Model == r.Model || model.ID == r.Model {
-				result.ModelState = "advertised; inference access unverified"
-				for _, eff := range model.Efforts {
-					result.Efforts = append(result.Efforts, eff.Effort)
-				}
-				result.CanStart = r.ReasoningEffort == "" || len(result.Efforts) == 0 || Has(result.Efforts, r.ReasoningEffort)
-				if !result.CanStart {
-					result.Detail = "configured effort is absent from the installed CLI catalog"
-				} else {
-					result.Detail = "catalog discovery does not prove subscription model access"
-				}
-				return result
+	models, e := codexCatalog(ctx, rpc)
+	if e != nil {
+		result.Detail = e.Error()
+		return result
+	}
+	for _, model := range models {
+		if model.ID == r.Model {
+			result.ModelState = "advertised; inference access unverified"
+			result.Efforts = append(result.Efforts, model.Efforts...)
+			result.CanStart = r.ReasoningEffort == "" || len(result.Efforts) == 0 || Has(result.Efforts, r.ReasoningEffort)
+			if !result.CanStart {
+				result.Detail = "configured effort is absent from the installed CLI catalog"
+			} else {
+				result.Detail = "catalog discovery does not prove subscription model access"
 			}
+			return result
 		}
-		if m.NextCursor == nil {
-			break
-		}
-		cursor = *m.NextCursor
 	}
 	result.State = "unavailable model"
 	result.Detail = "selected model is absent from the installed CLI catalog"
@@ -215,31 +200,10 @@ func probeLocal(ctx context.Context, r Runtime, result Readiness) Readiness {
 	}
 	result.Version = "local " + str(r.Options["backend"])
 	result.Auth = "same-machine backend"
-	ids := []string{}
-	if r.Options["backend"] == "ollama" {
-		var response struct {
-			Models []struct {
-				Name string `json:"name"`
-			} `json:"models"`
-		}
-		e = localGET(ctx, endpoint+"/api/tags", &response)
-		for _, v := range response.Models {
-			ids = append(ids, v.Name)
-		}
-	} else {
-		var response struct {
-			Data []struct {
-				ID string `json:"id"`
-			} `json:"data"`
-		}
-		e = localGET(ctx, endpoint+"/models", &response)
-		for _, v := range response.Data {
-			ids = append(ids, v.ID)
-		}
-	}
+	ids, e := localModelIDs(ctx, r, endpoint)
 	if e != nil {
 		result.State = "unavailable"
-		result.Detail = Redact(e.Error())
+		result.Detail = e.Error()
 		return result
 	}
 	if !Has(ids, r.Model) {

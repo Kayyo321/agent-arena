@@ -15,21 +15,27 @@ var slashHelp = []string{
 	"Attachments retain exact file snapshots in full-local history. Images require Codex.",
 	"/shader DESCRIPTION         Create a background shader with the default model",
 	"/shader-save /shader-off    Apply the preview or disable the background",
+	"/copy /copy-shader          Copy this arena (or only its shader) as a share code",
+	"Paste a share code (Ctrl+V or your terminal's paste) to preview and import it.",
 	"/help                       Commands and keyboard controls",
 	"/agents                     Agents, roles and selected runtimes",
+	"/score                      Arena grade (S+ to F) and what costs points",
 	"/view NAME                  Live agent activity mini-window",
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
 	"/graph                      Return to the workflow graph",
+	"/pan                        Pan the graph: ←↑↓→ move, Space recenters, Esc done",
 	"/run TASK                   Start an attached workflow run",
 	"/pause /resume /cancel      Control the current run",
 	"/events /git /changes       Audit, worktrees and review queue",
 	"/status /refresh            Required-provider readiness",
 	"/teams                      Toggle team member expansion",
 	"/decisions                  Pending user questions and approvals",
-	"/answer ID TEXT             Answer a pending decision",
+	"/answer [ID] TEXT           Answer a pending decision (ID optional when only one)",
+	"/accept                     Apply the orchestrator's recommended answer",
+	"$ COMMAND                   Run a shell command in the project root",
 	"/integrate CHANGE_ID        Integrate a reviewed change",
-	"/save                       Save the previewed setup draft",
+	"/save [no-commit]           Save the previewed draft and commit the scaffold",
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
 	"/quit                       Exit; preserve attached run history",
@@ -38,11 +44,11 @@ var slashHelp = []string{
 	"Alt+←/→ move by word; Ctrl+W deletes a word; Ctrl+U/K clear before/after.",
 	"Enter sends; Shift+Enter inserts a newline. Alt+Enter/Ctrl+J work on legacy terminals.",
 	"PgUp/PgDn scroll; Ctrl+Home/End: first/latest; Alt+↑/↓ select events/changes.",
-	"Tab completes /commands. In a mini-window: Tab context/activity,",
+	"Typing / suggests commands: ↑/↓ pick, Tab/Enter fill in. In a mini-window: Tab context/activity,",
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/help", "/agents", "/view", "/context", "/chat", "/graph", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -87,6 +93,14 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 		}
 		text, input = "Inspect the attached files.", "Inspect the attached files."
 	}
+	if strings.HasPrefix(text, "$") {
+		command := strings.TrimSpace(strings.TrimPrefix(text, "$"))
+		if command == "" {
+			m.Error = "type a shell command after $"
+			return m, nil
+		}
+		return m, m.runShell(command)
+	}
 	parts := strings.Fields(text)
 	if strings.HasPrefix(text, "/") {
 		name := strings.TrimPrefix(parts[0], "/")
@@ -98,6 +112,16 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case "attach", "attachments", "detach":
 			m.attachmentCommand(name, arg)
+		case "copy", "copy-shader":
+			if arg != "" {
+				m.Error = "usage: /" + name
+				break
+			}
+			kind := "arena"
+			if name == "copy-shader" {
+				kind = "shader"
+			}
+			return m.copyShare(kind)
 		case "shader", "shader-save", "shader-off":
 			if name == "shader" && len(m.Attachments) > 0 {
 				m.Error = "Shader commands accept text only; detach the files or send them as a workflow/chat message"
@@ -108,6 +132,15 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "help":
 			m.Panel, m.PanelText = "Help", slashHelp
+		case "score":
+			switch {
+			case m.Draft != nil && m.DraftScore != nil:
+				m.Panel, m.PanelText = "Arena score · draft "+m.Draft.Workflow.Id, m.DraftScore.Report()
+			case m.Run.Workflow.Id != "":
+				m.Panel, m.PanelText = "Arena score · "+m.Run.Workflow.Id, m.Run.scorecard().Report()
+			default:
+				m.Error = "No arena or draft to score yet"
+			}
 		case "agents":
 			m.Panel, m.PanelText = "Agents", []string{"arena-orchestrator | permanent project control | " + m.Run.Settings.DefaultModel.Provider + " / " + m.Run.Settings.DefaultModel.Model}
 			for _, a := range m.Run.Workflow.Agents {
@@ -144,6 +177,15 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			}
 			m.ChatMode, m.Panel, m.PopupAgent = false, "", ""
 			m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
+			m.Panning, m.PanX, m.PanY = false, 0, 0
+		case "pan":
+			if m.Run.Workflow.HeadAgent == "" {
+				m.Error = "Create and /save a workflow first"
+				break
+			}
+			m.ChatMode, m.Panel, m.PopupAgent = false, "", ""
+			m.Detail, m.GitDetail, m.ChangeDetail = false, false, false
+			m.Panning = true
 		case "chat":
 			if m.Interview == nil {
 				m.Interview = newInterviewSession(m.Context, m.Project, m.Run.Settings)
@@ -156,28 +198,56 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			if len(m.Chat) == 0 {
 				m.Chat = append(m.Chat, chatLine{"arena-orchestrator", "Describe the new workflow you want to create. I will ask for all required choices."})
 			}
+		case "accept":
+			if m.Stall == nil || m.Stall.DecisionID == "" || m.pendingDecision(m.Stall.DecisionID) == nil {
+				m.Error = "no orchestrator recommendation is waiting; use /answer ID TEXT"
+				break
+			}
+			answer := "decision " + m.Stall.DecisionID + " " + m.Stall.Answer
+			operation := func() tea.Msg { return uiCommandResult{m.command(answer)} }
+			if m.Session != nil {
+				return m, m.Session.action(operation)
+			}
+			return m, operation
 		case "save":
+			commit := arg != "no-commit"
+			if arg != "" && arg != "no-commit" {
+				m.Error = "usage: /save [no-commit]"
+				break
+			}
 			if m.ChatBusy || m.Draft == nil {
 				m.Error = "No validated draft to save; finish the setup interview first"
 				break
 			}
-			if m.Run.Settings.ApprovalPolicies.AgentWorkflowEdit == "auto-refuse" {
+			if m.runActive() {
+				m.Error = "Finish or cancel the current run before saving another arena"
+				break
+			}
+			if m.Draft.Source != "share-import" && m.Run.Settings.ApprovalPolicies.AgentWorkflowEdit == "auto-refuse" {
 				m.Error = "project workflow-edit policy refuses agent proposals"
 				break
 			}
 			draft := *m.Draft
 			m.ChatBusy = true
 			operation := func() tea.Msg {
-				_, err := m.Project.Save(draft.Workflow, draft.Profiles, "")
+				_, err := m.Project.SaveDraft(draft)
 				if err != nil {
 					return draftSaved{Err: err}
 				}
-				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": "tui-setup", "approvedBy": "user"})
+				source := draft.Source
+				if source == "" {
+					source = "tui-setup"
+				}
+				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": source, "approvedBy": "user"})
 				if err != nil {
 					return draftSaved{Err: fmt.Errorf("workflow saved, audit failed: %w", err)}
 				}
 				r, err := loadWorkflowView(m.Project, draft.Workflow.Id)
-				return draftSaved{r, err}
+				saved := draftSaved{Run: r, Err: err}
+				if err == nil && commit {
+					saved.Commit, saved.CommitErr = commitScaffold(m.Project)
+				}
+				return saved
 			}
 			if m.Session != nil {
 				return m, m.Session.action(operation)
@@ -277,6 +347,10 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 		m.Offset = 1 << 30 // Follow the newest messages.
 		return m, m.Interview.turn(m.Transcript, m.ChatAttachments...)
 	}
+	if answer, ok := m.decisionShortcut(text); ok {
+		text = answer
+		parts = strings.Fields(text)
+	}
 	if !Has([]string{"run", "pause", "resume", "cancel", "decision", "integrate"}, parts[0]) {
 		text = "run " + text
 		parts = strings.Fields(text)
@@ -316,6 +390,21 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 	return m, operation
 }
 
+// foldReadiness reports each provider/model once, keeping the first
+// not-ready state, and omits runtimes that are ready.
+func foldReadiness(results []Readiness) []string {
+	lines, seen := []string{}, map[string]bool{}
+	for _, ready := range results {
+		key := ready.Provider + "/" + ready.Model
+		if ready.State == "good" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		lines = append(lines, "Provider "+ready.Provider+" / "+ready.Model+": "+ready.State+" · "+ready.Auth)
+	}
+	return lines
+}
+
 func readinessLines(results []Readiness) []string {
 	lines := []string{}
 	for _, r := range results {
@@ -324,29 +413,123 @@ func readinessLines(results []Readiness) []string {
 	return lines
 }
 
-func (m *LiveModel) completePrompt() {
-	parts := strings.Fields(m.Prompt)
-	if len(parts) == 0 {
-		return
-	}
-	options := []string{}
-	if strings.HasPrefix(m.Prompt, "/view ") || strings.HasPrefix(m.Prompt, "/context ") {
-		options = append(options, parts[0]+" arena-orchestrator")
-		for _, a := range m.Run.Workflow.Agents {
-			options = append(options, parts[0]+" "+a.Id)
+type slashSuggestion struct{ text, usage, about string }
+
+// slashUsage maps each command to the usage and summary shown in /help.
+var slashUsage = func() map[string][2]string {
+	usage := map[string][2]string{}
+	for _, line := range slashHelp {
+		split := strings.Index(line, "  ")
+		if !strings.HasPrefix(line, "/") || split < 0 {
+			continue
 		}
-	} else {
-		options = append(options, slashCommands...)
+		// Grouped lines such as "/attachments /detach N|all" give each
+		// command the arguments that follow it.
+		about, name := strings.TrimSpace(line[split:]), ""
+		for _, field := range strings.Fields(line[:split]) {
+			if _, seen := usage[field]; strings.HasPrefix(field, "/") && !seen {
+				name = field
+				usage[name] = [2]string{name, about}
+			} else if name != "" && !strings.HasPrefix(field, "/") {
+				usage[name] = [2]string{usage[name][0] + " " + field, about}
+			}
+		}
 	}
-	matches := []string{}
+	return usage
+}()
+
+// slashSuggestions lists the commands, or the /view and /context agent IDs,
+// that extend the single-line prompt.
+func (m LiveModel) slashSuggestions() []slashSuggestion {
+	if !strings.HasPrefix(m.Prompt, "/") || strings.Contains(m.Prompt, "\n") || m.PopupAgent != "" {
+		return nil
+	}
+	options := []slashSuggestion{}
+	if command, _, spaced := strings.Cut(m.Prompt, " "); !spaced {
+		for _, name := range slashCommands {
+			usage := slashUsage[name]
+			if usage[0] == "" {
+				usage[0] = name
+			}
+			options = append(options, slashSuggestion{name, usage[0], usage[1]})
+		}
+	} else if command == "/view" || command == "/context" {
+		options = append(options, slashSuggestion{command + " arena-orchestrator", "arena-orchestrator", "permanent project control"})
+		for _, a := range m.Run.Workflow.Agents {
+			about := a.Runtime.Provider + " / " + a.Runtime.Model
+			if p, ok := m.Run.Profiles[a.Id]; ok && p.Role != "" {
+				about = p.Role + " · " + about
+			}
+			options = append(options, slashSuggestion{command + " " + a.Id, a.Id, about})
+		}
+	}
+	matches := []slashSuggestion{}
 	for _, option := range options {
-		if strings.HasPrefix(option, m.Prompt) {
+		if strings.HasPrefix(option.text, m.Prompt) {
 			matches = append(matches, option)
 		}
 	}
-	if len(matches) == 1 {
-		m.Prompt = matches[0] + " "
-	} else if len(matches) > 1 {
-		m.Error = "Complete: " + strings.Join(matches, ", ")
+	return matches
+}
+
+// suggestion returns the highlighted entry; editing the prompt resets it.
+func (m LiveModel) suggestion(count int) int {
+	if m.SuggestFor != m.Prompt || count == 0 {
+		return 0
 	}
+	return (m.SuggestIndex%count + count) % count
+}
+
+// moveSuggestion steps the highlight, wrapping at either end.
+func (m *LiveModel) moveSuggestion(step int) {
+	count := len(m.slashSuggestions())
+	m.SuggestIndex, m.SuggestFor = m.suggestion(count)+step, m.Prompt
+	m.SuggestIndex = m.suggestion(count)
+}
+
+// completePrompt fills in the highlighted suggestion and a trailing space.
+func (m *LiveModel) completePrompt() {
+	options := m.slashSuggestions()
+	if len(options) == 0 {
+		return
+	}
+	text := options[m.suggestion(len(options))].text + " "
+	m.setPrompt(text, len(text))
+}
+
+// suggestionLines draws the menu above the prompt, keeping the highlight in
+// view when there are more matches than rows.
+func (m LiveModel) suggestionLines(width, rows int, color bool) []string {
+	options := m.slashSuggestions()
+	if len(options) == 0 || rows < 1 {
+		return nil
+	}
+	selected := m.suggestion(len(options))
+	rows = min(rows, len(options))
+	start := min(max(0, selected-rows+1), len(options)-rows)
+	column := 0
+	for _, option := range options {
+		column = max(column, displayWidth(option.usage))
+	}
+	column = min(column, max(8, width/2))
+	lines := []string{}
+	for i := start; i < start+rows; i++ {
+		option, marker := options[i], "  "
+		if i == selected {
+			marker = "› "
+		}
+		usage := pad(option.usage, column)
+		if i == selected && color {
+			usage = "\x1b[1;" + sgrBrand + "m" + usage + "\x1b[0m"
+		}
+		line := marker + usage
+		if room := width - 2 - column - 2; option.about != "" && room > 3 {
+			line += "  " + muted(short(option.about, room), color)
+		}
+		lines = append(lines, line)
+	}
+	if more := len(options) - rows; more > 0 && rows < len(options) {
+		lines[len(lines)-1] += muted(fmt.Sprintf("  +%d more", more), color)
+	}
+	return lines
 }

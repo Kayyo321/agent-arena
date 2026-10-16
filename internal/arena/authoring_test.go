@@ -114,3 +114,20 @@ func TestConcurrentProfileEditIsNotOverwritten(t *testing.T) {
 		t.Fatal("accepted profile edit lost")
 	}
 }
+
+func TestValidateWarnsAboutCapabilitiesTheAdapterCannotExercise(t *testing.T) {
+	p := testProject(t)
+	var out bytes.Buffer
+	cli := NewCLI(strings.NewReader(""), &out, &out)
+	for _, args := range [][]string{
+		{"workflow", "create", "agy", "--head", "head", "--provider", "antigravity", "--model", "gemini-test", "--capabilities", "read,run_commands", "--yes"},
+		{"workflow", "validate", "agy"},
+	} {
+		if e := cli.Run(context.Background(), append(args, "--project", p.Root)); e != nil {
+			t.Fatalf("%v: %v\n%s", args, e, out.String())
+		}
+	}
+	if n := strings.Count(out.String(), "warning: head has run_commands, but antigravity headless runs cannot execute commands"); n != 2 {
+		t.Fatalf("create and validate should each warn once, got %d:\n%s", n, out.String())
+	}
+}

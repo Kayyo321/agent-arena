@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Arena share bundle",
+  "description": "The JSON inside an arena1 share code. The workflow and profiles are validated with their own schemas; shared context, run history and project settings are never included.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "kind", "shader"],
+  "properties": {
+    "format": { "const": "arena.share.v1" },
+    "kind": { "enum": ["arena", "shader"] },
+    "rubric": { "type": "integer", "minimum": 1 },
+    "from": { "type": "string", "maxLength": 200 },
+    "workflow": { "type": "object" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": { "type": "object" }
+    },
+    "shader": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/shader" }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "arena" } }, "required": ["kind"] },
+      "then": { "required": ["workflow", "profiles"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "shader" } }, "required": ["kind"] },
+      "then": { "properties": { "shader": { "$ref": "#/$defs/shader" } } }
+    }
+  ],
+  "$defs": {
+    "shader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "glyphs"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "glyphs": { "type": "string", "pattern": "^[ .,:;~+=*#%@-]{1,16}$" }
+      }
+    }
+  }
+}

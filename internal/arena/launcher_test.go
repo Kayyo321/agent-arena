@@ -103,7 +103,7 @@ func TestMultipleArenasRequireChoiceAndOpenSelectedGraph(t *testing.T) {
 	}
 	next, _ = m.Update(cmd())
 	m = next.(launcherModel)
-	if m.Live == nil || m.Live.Run.Workflow.Id != "zeta" || !strings.Contains(m.View().Content, "arena: zeta") {
+	if m.Live == nil || m.Live.Run.Workflow.Id != "zeta" || !strings.Contains(strings.SplitN(ansi.Strip(m.View().Content), "\n", 2)[0], "zeta") {
 		t.Fatal("selected arena graph not opened")
 	}
 	var out bytes.Buffer

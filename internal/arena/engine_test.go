@@ -61,7 +61,7 @@ func TestWritingTeamPreservesProposalsAndComposesReadOnly(t *testing.T) {
 		if in.Schema["properties"].(map[string]any)["verdict"] == nil {
 			return ordinaryResult(), nil
 		}
-		return map[string]any{"verdict": "Approved", "affirm": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+		return map[string]any{"verdict": "Approved", "acceptTeamVerdict": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
 	})
 	engine := NewEngine(p, r, fake)
 	if _, err := p.Append(r.ID, w.Id, "", "workflow.started", map[string]any{}); err != nil {
@@ -90,7 +90,7 @@ func TestUnavailableTeamMemberCannotProduceConsensus(t *testing.T) {
 		if in.Schema["properties"].(map[string]any)["verdict"] == nil {
 			return ordinaryResult(), nil
 		}
-		return map[string]any{"verdict": "Approved", "affirm": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+		return map[string]any{"verdict": "Approved", "acceptTeamVerdict": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
 	})
 	r.Settings.Limits.MaxRetriesPerAgent = 0
 	if _, err := p.Append(r.ID, r.Workflow.Id, "", "workflow.started", map[string]any{}); err != nil {
@@ -159,7 +159,7 @@ func TestTeamsRequireEveryAffirmationAndRespectOnCallCaps(t *testing.T) {
 				if !unanimous && filepath.Base(in.Dir) == "two" {
 					verdict = "ChangesRequested"
 				}
-				return map[string]any{"verdict": verdict, "affirm": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
+				return map[string]any{"verdict": verdict, "acceptTeamVerdict": true, "summary": "fixture position", "evidence": []any{}, "rationale": "fixture evidence", "nextAction": "inspect"}, nil
 			})
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -280,5 +280,64 @@ func TestOpaqueLargeNumbersAndExactRouterScalars(t *testing.T) {
 	}
 	if scalarKey(json.Number("1e10000000000")) == scalarKey(json.Number("2e10000000000")) {
 		t.Fatal("large exponent numbers collapsed")
+	}
+}
+
+func TestTeamAgreeingOnChangesRequestedReachesConsensus(t *testing.T) {
+	p := committedProject(t)
+	r := teamRun(t, p)
+	asked := map[string]int{}
+	fake := testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
+		props := in.Schema["properties"].(map[string]any)
+		if props["verdict"] == nil {
+			return ordinaryResult(), nil
+		}
+		if props["affirm"] != nil && props["acceptTeamVerdict"] == nil && props["rationale"] == nil {
+			return nil, fmt.Errorf("deliberation still asks for an ambiguous affirm flag")
+		}
+		reply := map[string]any{"verdict": "ChangesRequested", "summary": "needs fixes", "evidence": []any{}, "rationale": "fixture", "nextAction": "fix", "affirm": false}
+		if props["acceptTeamVerdict"] != nil {
+			asked[in.AgentID]++
+			if !strings.Contains(in.Prompt, "not asking whether you approve the change") {
+				return nil, fmt.Errorf("affirmation question does not explain itself")
+			}
+			// Reproduces the live failure: same verdict, but declined at first.
+			reply["acceptTeamVerdict"] = in.AgentID != "two" || asked[in.AgentID] > 1
+		}
+		return reply, nil
+	})
+	engine := NewEngine(p, r, fake)
+	if _, err := p.Append(r.ID, r.Workflow.Id, "", "workflow.started", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	seed, err := p.Workspace(r, "one", "seed", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed.Path, "reviewed.txt"), []byte("code under review\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.finishWorkspace(context.Background(), seed); err != nil {
+		t.Fatal(err)
+	}
+	var finished Workspace
+	if err := ReadJSON(filepath.Join(p.RunDir(r.ID), "workspaces", "seed.json"), &finished); err != nil || finished.LastChange == "" {
+		t.Fatalf("seed change missing: %v", err)
+	}
+	reviewed := NewPacket(r.ID, "result", "builder", "codex", "review-team", "arena", "", ordinaryResult(), Runtime{Provider: "codex"})
+	reviewed["arenaChangeIds"] = []string{finished.LastChange}
+	packet, err := engine.team(context.Background(), r.Workflow.Teams[0], []Packet{reviewed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := packet["payload"].(map[string]any)
+	if payload["outcome"] != "consensus" || payload["verdict"] != "ChangesRequested" {
+		t.Fatalf("agreeing reviewers did not reach consensus: %v", payload)
+	}
+	if asked["two"] != 2 {
+		t.Fatalf("contradictory affirmation was not clarified: %v", asked)
+	}
+	if !Has(stringSlice(packet["arenaChangeIds"]), finished.LastChange) {
+		t.Fatalf("team result dropped the reviewed changes: %v", packet["arenaChangeIds"])
 	}
 }

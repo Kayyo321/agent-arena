@@ -206,10 +206,35 @@ func TestGraphUnicodeLabelsKeepTerminalCellGeometry(t *testing.T) {
 	w.Agents[0].Runtime.Model = "模型 👩🏽‍💻 e\u0301"
 	w.Teams[0].Name = "検証チーム"
 	for _, color := range []bool{false, true} {
-		for _, line := range wideGraph(w, RunState{}, nil, 120, color) {
+		for _, line := range wideGraph(w, RunState{}, nil, 120, color, "") {
 			if ansi.StringWidth(line) > 120 {
 				t.Fatal("wide label overflowed graph: ", line)
 			}
 		}
+	}
+}
+
+func TestMouseWheelScrollsWithoutRecallingHistory(t *testing.T) {
+	m := LiveModel{Run: Run{Settings: DefaultSettings(Runtime{})}, Width: 40, Height: 10, ChatMode: true}
+	for i := 0; i < 30; i++ {
+		m.Chat = append(m.Chat, chatLine{"Arena", fmt.Sprintf("line %d", i)})
+	}
+	m.rememberPrompt("sent message")
+	m.Offset = 1 << 30
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	m = next.(LiveModel)
+	if m.Prompt != "" {
+		t.Fatalf("wheel recalled history: %q", m.Prompt)
+	}
+	end := m.scrollEnd(false)
+	if m.Offset != end-3 {
+		t.Fatalf("wheel up offset %d, end %d", m.Offset, end)
+	}
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if next.(LiveModel).Offset != end {
+		t.Fatalf("wheel down offset %d", next.(LiveModel).Offset)
+	}
+	if m.View().MouseMode != tea.MouseModeCellMotion {
+		t.Fatal("live view must capture the wheel")
 	}
 }

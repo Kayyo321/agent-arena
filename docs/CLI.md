@@ -15,11 +15,20 @@ arena setup --project ~/my-new-project
 
 Setup can create that directory and initialize Git. It asks for the permanent
 orchestrator's provider, exact model and supported effort before writing anything,
-then confirms initialization. It installs the skill and launches the selected
+then confirms initialization. The model prompt lists the exact IDs the provider
+reports (Codex app-server catalog, Gemini SDK, local `/api/tags` or `/models`) with
+their supported efforts; enter a number or type an exact ID. Claude Code exposes
+no catalog, so its model is typed. A listed model is not proof of inference access. It installs the skill and launches the selected
 default orchestrator: describe what you want to build and answer its questions
 about the workflow in Arena's own TUI. Codex runs invisibly through app-server,
 with no native Codex terminal screen. Review the proposed graph and enter `/save`;
-Arena validates and saves it, then opens its graph in the same TUI. Until saved, bare `arena` re-enters
+Arena validates and saves it, commits the project scaffold (`git add -A` and
+`git commit -m "Arena scaffold"`, refused if staged files look secret; use
+`/save no-commit` to skip), then opens its graph in the same TUI. Choices you
+delegate ("you pick the efforts") are made by the orchestrator from the reported
+catalog and listed in its reply. If a draft fails validation, Arena returns the
+error to the orchestrator for up to two automatic repairs (journaled as
+`setup.repair`) before reporting it. Until saved, bare `arena` re-enters
 setup using the saved control runtime. No worker runtime is inferred from it.
 
 To prepare configuration without starting the conversation:
@@ -66,6 +75,43 @@ request contains `workflow` and `profiles` objects following the public schemas.
 The exact same validation, preview, transaction, and conflict checks apply.
 `--dry-run` previews without saving. This is an optional programmatic input, not a
 manual setup prerequisite.
+
+Every preview ends with the arena's grade (S+ to F) and its costliest deductions.
+`arena score ID [--json]` prints the full breakdown: points per category, the
+findings with fixes, any ceiling that capped the grade, and what the next tier
+needs. The score sheet is [docs/ARENA-SCORING.md](ARENA-SCORING.md).
+
+`workflow validate` and `workflow create` also print a `warning:` line for each
+capability an agent's provider adapter cannot exercise, such as `run_commands` on
+Antigravity, whose headless mode cannot execute commands. Such an agent fails when it
+starts, and the score gives the grant no credit. `--command-approval sandboxed-blanket`
+on an Antigravity runtime opts it into blanket command approval inside Arena's command
+fence (Linux only); `workflow create` then names each agent that uses it before asking
+to save. See [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval).
+
+### Sharing arenas and shaders
+
+```sh
+arena share export development --copy           # whole arena: arena1.a.…
+arena share export development --shader --copy  # shader only: arena1.s.…
+arena share import 'arena1.a.…'                 # or - for stdin, or --clipboard
+arena share import --clipboard --as review-copy --dry-run
+arena share import 'arena1.s.…' --into development
+```
+
+A share code is a single line holding the workflow, its profiles and its
+background shader (or only the shader). Export fails closed: it refuses the
+whole code and names the field when any value looks like a credential, key or
+token, a home-directory or project path, an email address, an IP address or
+internal host name, or contains terminal control characters, and when a runtime
+option is not one the adapter documents. Nothing is redacted silently.
+Import validates the code, picks a free ID (`--as ID`, or the author's ID with a
+`-2`, `-3` … suffix), prints the graph, score, who writes or runs commands,
+the integration policy, and readiness for each of the author's runtimes, then
+saves through the normal transaction after confirmation. A shader code goes
+through `arena shader set` for the `--into` arena. Shared context, run history
+and project settings are never part of a code. The format is described in
+[Configuration format](CONFIGURATION.md#share-codes).
 
 `settings edit --set /pointer=JSON-value` is repeatable and validates every workflow
 against the proposed settings. Runtime IDs/options retain provider-specific meaning.
@@ -118,15 +164,20 @@ Slash commands are available in setup and the graph:
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
-| `/save` | Apply an explicitly reviewed setup draft; never overwrite another workflow |
+| `/pan` | Pan the graph with ←↑↓→ and press Space to recenter; Esc, Enter or typing leaves pan mode and keeps the view, and `/graph` recenters |
+| `/save [no-commit]` | Apply an explicitly reviewed setup draft and commit the scaffold; never overwrite another workflow |
 | `/run TASK`, `/pause`, `/resume`, `/cancel` | Control attached work |
 | `/events`, `/git`, `/changes`, `/teams` | Inspect audit, worktrees, patches and team members |
 | `/status`, `/refresh` | Inspect required providers or refresh the selected context/status |
-| `/decisions`, `/answer ID TEXT` | Inspect and answer pending questions/approvals |
+| `/decisions`, `/answer [ID] TEXT`, `/accept` | Inspect and answer pending questions/approvals; apply the orchestrator's stall recommendation |
+| `$ COMMAND` | Run a shell command in the project root and show its output |
 | `/integrate CHANGE_ID` | Integrate a reviewed change |
 | `/clear`, `/close`, `/quit` | Reset scroll/errors, close a panel, or exit |
 
-Tab completes slash commands and agent IDs. In the mini-window, Tab switches
+Typing `/` opens a suggestion menu above the prompt with each matching command's
+usage and summary, or the agent IDs after `/view ` and `/context `. ↑/↓ move the
+highlight, and Tab or Enter fills it in; Enter on a partial command never runs it.
+In the mini-window, Tab switches
 activity/context, PageUp/PageDown scroll, Home/End jump, and Esc closes it. Activity
 shows public progress summaries, tool activity and results; private chain-of-thought
 is not displayed or retained. Context distinguishes the actual retained task from
@@ -135,6 +186,16 @@ drafts; editing existing workflows continues to use `arena workflow edit`.
 
 `run --plain` prints events without terminal control sequences. `watch --plain` and
 `history --json` provide non-TUI inspection. `NO_COLOR` disables owner colors.
+
+`history RUN --json` prints one object: `runId`, `status`, `terminal`,
+`pendingDecisions` and the `events` array. `status` is the run state replayed from
+the events: `created`, `running`, `paused`, `interrupted`, or one of the terminal
+states `succeeded`, `failed` and `cancelled`, which the `workflow.succeeded`,
+`workflow.failed` and `workflow.cancelled` events record. `terminal` is true for
+those three; a script can poll until it is. A failed run whose provider request was
+interrupted can still be resumed with `arena resume RUN --retry-interrupted`. A
+`running` run with `pendingDecisions` above zero is waiting on the user. If the events
+do not replay, `status` is `invalid` and `stateError` says why.
 Bare `arena` with a configured workflow and redirected input/output prints a static graph.
 `arena --plain` explicitly requests inspection, including setup guidance for an empty directory.
 If multiple workflows exist, that mode requires `--workflow ID` and lists the choices

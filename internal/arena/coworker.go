@@ -24,6 +24,15 @@ type CoworkerRequest struct {
 	CreatedAt     string   `json:"createdAt"`
 }
 
+// coworkerRequestPath confines a request file to .state/coworker-requests.
+// Request IDs are Arena-generated; a malformed one never names a path.
+func (p *Project) coworkerRequestPath(id string) (string, error) {
+	if err := validID(id); err != nil {
+		return "", fmt.Errorf("coworker request: %w", err)
+	}
+	return SafePath(p.Path(), filepath.ToSlash(filepath.Join(".state", "coworker-requests", id+".json")))
+}
+
 func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approved bool, invoker Invoker) (CoworkerRequest, error) {
 	w, profiles, version, e := p.LoadVersion(q.WorkflowID)
 	if e != nil {
@@ -42,7 +51,11 @@ func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approv
 		q.CreatedAt = Now()
 		q.State = "requested"
 	}
-	save := func() error { return Atomic(p.Path(".state", "coworker-requests", q.ID+".json"), SafeJSON(q), 0600) }
+	path, e := p.coworkerRequestPath(q.ID)
+	if e != nil {
+		return q, e
+	}
+	save := func() error { return Atomic(path, SafeJSON(q), 0600) }
 	policy := s.ApprovalPolicies.ArenaSubagentModificationInquiry
 	if policy == "auto-refuse" {
 		q.State = "refused"
@@ -59,6 +72,9 @@ func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approv
 	}
 	if e := ValidateRuntime(q.Runtime); e != nil {
 		return q, e
+	}
+	if _, ok := q.Runtime.Options["commandApproval"]; ok {
+		return q, fmt.Errorf("a coworker request cannot select blanket command approval; only the user sets commandApproval, by editing the workflow")
 	}
 	if q.WorkspaceMode != "read-only" && q.WorkspaceMode != "write" {
 		return q, fmt.Errorf("explicit workspaceMode is required")
@@ -184,7 +200,11 @@ func (p *Project) handleCoworkerPacket(ctx context.Context, r Run, q CoworkerReq
 	}
 	if answer != "yes" {
 		result.State = "refused"
-		if err := Atomic(p.Path(".state", "coworker-requests", result.ID+".json"), SafeJSON(result), 0600); err != nil {
+		path, err := p.coworkerRequestPath(result.ID)
+		if err != nil {
+			return result, err
+		}
+		if err := Atomic(path, SafeJSON(result), 0600); err != nil {
 			return result, err
 		}
 		return result, p.Audit(r.Workflow.Id, "coworker.refused", map[string]any{"requestId": result.ID, "reason": "user declined"})

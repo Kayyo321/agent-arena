@@ -10,7 +10,9 @@ Setup asks for missing runtime choices and opens the configured default
 orchestrator's interview inside Arena. Codex runs as a background app-server;
 its native terminal interface is never launched. Type answers in Arena, review
 the proposed graph, and use `/save` to apply it and open the graph in the same TUI.
-`arena --workflow ID` selects one directly. Discovery uses the resolved project root
+The chooser shows each arena's grade; `c` copies the selected arena as a share
+code, `C` copies only its shader, and `p` (or pasting a code) previews an arena
+code for import, saved with Enter. `arena --workflow ID` selects one directly. Discovery uses the resolved project root
 and never inherits workflows across a nested Git project boundary.
 
 The initial graph is idle: it has no run ID or invented history. Required-provider
@@ -21,52 +23,70 @@ explicit workflow ID when several are available.
 
 ## Screen layout
 
-The live CLI is a full-terminal view. A small `A2rena` wordmark sits at the upper
-right, with the Git worktree tree at the upper left. The wordmark uses dotted
-Braille lettering with a lavender-to-violet gradient and no backdrop or shadow.
-It is at most 27 columns by three rows, leaving the main viewport for the graph. The status
-row and command prompt span the bottom.
+The live CLI is a full-terminal view. A three-row status band spans the top and
+is closed by a hairline that starts in the brand color under the title. The small
+`A2rena` wordmark leads the band from a two-column left margin; the run's vital
+signs sit beside it in labelled columns, and the Git tree closes the band flush
+right on wide terminals. The wordmark uses dotted Braille lettering with a
+lavender-to-violet gradient and no backdrop or shadow. It is at most 27 columns by
+three rows, leaving the main viewport for the graph. The prompt spans the bottom.
 
 ```text
-╭─ git trees ─────────────────╮                                  A2rena
-│ base 1a2b3c4d               │                            (purple dots)
-│ ├─ builder arena/task       │
-╰────────────────────────────╯
+  A2rena    ledger-loop          ACTIVE          NODES         CHANGES             GIT  ca79e2f · 13 worktrees
+  (dots)    ⠋ running  4m12s     ● tester        ✓ 4/6 done    +342 −13            ├ builder  +186 −0
+            ━━━ ━━━ ━━━ ━━━      ◌ 1 queued      0 failed      33 files            └ tester   +101 −13  +1 more
+────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-             ╭──────────────────────────────╮
-             │ HEAD · codex                 │
-             │ gpt-6.1-sol · high            │
-             │ running                      │
-             ╰──────────────────────────────╯
-                            │
-                            ↓
-             ╭──────────────────────────────╮
-             │ BUILDER · claude-code        │
-             │ sonnet-5.5 · medium           │
-             │ waiting                      │
-             ╰──────────────────────────────╯
-
-code-review · codex: good, claude-code: good · running · decisions: 0
-─ /help · ↑↓ history · PgUp/PgDn scroll ────────────────────────────────
-> memento mori
+                     ┏━ ◆ HEAD · lead ━━━━━━━━ codex ┓
+                     ┃ gpt-6.1-sol · high            ┃
+                     ┃ ✓ succeeded                   ┃
+                     ┗━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━┛
+                                    ▼ delegates
+                     ╭─ builder ───────────── codex ╮
+                     │ sonnet-5.5 · medium          │
+                     │ ⠋ running             pass 2 │
+                     │ +186 −0 · 16 files           │
+                     ╰──────────────────────────────╯
 ```
 
-The dotted letters spell `A2rena`: `A2` is larger and `rena` is lowercase, smaller
-and aligned to its baseline. The compact plain-text form is `A2rena`. Narrow
-or short terminals use the compact title, aligned to the right. Non-Unicode
-locales and dumb terminals also use text. `NO_COLOR` removes color while preserving
-the same dotted lettering. The title appears in both the chooser and
-graph; `display.asciiTitle` retains its existing show/compact/hide controls.
-The Git tree, agent cards and detail windows share thin, rounded Unicode borders.
-ASCII borders remain the fallback for non-Unicode locales and dumb terminals.
-Agent ownership colors highlight card labels; the frame and footer stay quiet.
+The band reports, from audited state: the workflow ID, run status with the
+loading animation while running, elapsed time since the run started, and one
+progress segment per agent colored by its state; the agents running now, then
+pending decisions (`⚑ N waiting on you`), queued agents or packets in flight;
+completed and failed node counts; and line changes (`+added −deleted`) and files
+summed across every writing worktree. Each worktree is measured against its own
+base, so loop passes that build on earlier changes are not counted twice; a
+removed worktree falls back to its recorded change patch. Worktrees are scanned
+off the UI loop at most every two seconds. The Git column shows the run base,
+the worktree count and the agents with the most churn.
+
+Columns join by priority while they fit: identity, changes, activity, nodes, Git.
+Without the Git column the worktree count joins the change size, and without the
+changes column the change size sits beside the workflow ID, so it is never
+dropped. Narrow or short terminals use a single row led by the compact title.
+Non-Unicode locales and dumb terminals use text. `NO_COLOR` removes color while
+preserving the same layout. The workflow chooser and `arena setup` lead with the
+same wordmark at the left margin; `display.asciiTitle` retains its existing
+show/compact/hide controls.
+
+Graph nodes are told apart by shape before color. The head agent has a heavy
+violet frame with a `◆ HEAD` badge; worker agents have rounded frames; teams have
+dashed amber frames with a `◈ TEAM` badge and a roster of member states; and
+decision routers have chamfered teal frames with a `◇ ROUTER` badge, their
+input, routes and the branch taken. The name and provider sit in the top border,
+so each card keeps three rows for runtime, status and detail: an agent's line
+changes across its loop passes once worktree statistics exist, and its role
+profile before that. Frames are dim until a node starts, bright while it works,
+and red when it fails; delegation edges are grey, router branches teal and
+capped loops amber. ASCII borders remain the fallback for non-Unicode locales
+and dumb terminals, with a distinct frame per kind.
 The bottom prompt's idle text is `> memento mori`; typing replaces it. A thin
 full-width rule above the composer shows only `/help`. Run status and required
-provider readiness stay in the graph and `/status`, with pending questions in `/decisions`. The purple title keeps its existing placement and lettering.
+provider readiness stay in the graph and `/status`, with pending questions in `/decisions`.
 
 ## Prompt commands and agent windows
 
-`/help` lists commands, and Tab completes command names and agent IDs. Ordinary
+`/help` lists commands. Typing `/` shows matching commands, or agent IDs after `/view` and `/context`, in a menu above the prompt; ↑/↓ move the highlight and Tab or Enter fills it in without running a partial command. Ordinary
 text is an answer in the setup interview or a task in the loaded workflow. Letter
 keys remain text input; Ctrl+E/G/T open events/Git/teams, `/changes` opens the review queue,
 and Ctrl+V pastes clipboard images or text, and Ctrl+Q or
@@ -88,9 +108,40 @@ keyboard reporting (requested automatically). Alt+Enter or Ctrl+J also inserts a
 newline, including in older terminals that cannot distinguish Shift+Enter. Bracketed paste inserts at the caret and
 preserves line breaks, stripping terminal control sequences. The composer wraps,
 grows to at most five rows, and keeps the caret visible after resizing. PageUp/
-PageDown scroll the conversation or current view; Ctrl+Home/End jump to its
-beginning/latest content. Alt+Up/Down select audit events or review changes,
-leaving ordinary arrows available for message editing and history.
+PageDown and the mouse wheel scroll the conversation, current view or open agent
+window; Ctrl+Home/End jump to its beginning/latest content. Arena captures the
+wheel so terminals cannot turn it into Up/Down history recall; hold Shift while
+dragging to select text with the terminal. Alt+Up/Down select audit events or
+review changes, leaving ordinary arrows available for message editing and history.
+
+Pending decisions are pinned above the composer with their choices. When only
+one is pending, typing one of its choices answers it (`/answer TEXT` also omits
+the ID). If a run stops making progress (nothing executing and a decision older
+than 15 seconds, or no events for a minute) Arena wakes the permanent
+`arena-orchestrator` once per stall (at most three times per run). It reads the
+run's evidence and pins a short diagnosis. For a router fallback it picks a
+branch and Arena applies it (policy `orchestrator-stall-recovery: answer-routing`,
+the default); the banner counts down so you can answer first. Other decisions,
+or `recommend-only`, get a recommendation that `/accept` applies. Every
+diagnosis and applied answer is journaled as `orchestrator.stall-diagnosed`. The note clears from the banner once the run ends; the journal keeps it. A router waiting on you shows `⚑ waiting for you`.
+
+A line starting with `$` runs that shell command in the project root with your
+environment (two-minute limit, 256 KiB of output) and shows the output in a
+panel; the command and exit code are journaled in project history.
+
+Graph edges leave a card through a `┬` on its bottom border and end in `▼`
+just above the target. Cards that are working show the same rotating loading
+animation as the status line.
+
+The orchestrator transcript opens each message with a full-width rule in the
+speaker's label color: a heavy rule labelled in cyan for you, purple for `arena-orchestrator`, and
+amber for Arena notices (failures in red). Agent replies are rendered from
+Markdown by Arena: headings, bold/italic/strikethrough, inline code on a dark
+background, fenced code blocks, quotes, lists, rules, tables and links. Provider
+escape sequences are stripped before Arena applies its own styles. While work is
+in progress the status line shows a Unicode loading animation that switches to a
+different set about every four seconds; `display.animation: off` (or a
+non-UTF-8 locale) shows a static ellipsis instead.
 
 
 `/view AGENT_NAME` opens a centered, live mini-window with the selected agent's
@@ -138,7 +189,7 @@ The bottom bar shows only `/help`. The graph reports the loaded arena and run st
 
 ## Fit and accessibility
 
-Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
+Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs: `/pan` moves a camera over the graph with the arrow keys, keeps the graph block's height so the rows below it stay put, and Space snaps back to the centered layout. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
 
 Color is supplementary: every state has a text label or symbol. `display.colorMode` follows terminal capability by default and honors `NO_COLOR`; `display.animation` follows terminal capability and can be disabled. Unicode tree connectors fall back to ASCII when the terminal cannot render them. Non-TTY output uses a readable event stream or static graph summary, never terminal escape animations. Resizing recomputes layout without changing workflow state.
 
@@ -163,6 +214,31 @@ shows a diagnostic and disables the background, leaving the graph usable.
 source; `/shader-save` applies it, `/shader-off` disables it, and `/refresh` reloads
 external CLI changes. See [the shader contract](BACKGROUND-SHADERS.md).
 
+## Arena score
+
+The identity column of the status band shows the arena's grade beside its name,
+from S+ down to F, and the compact one-row header keeps it after the name. While
+the setup conversation has a draft, the band and the draft message show the
+draft's grade and its costliest deductions. `/score` opens the breakdown for the
+draft or the open arena: points per category, each finding with its fix, the
+ceilings that capped the grade, and what the next tier needs. The score is
+computed by Arena from the workflow and profiles; see
+[Arena scoring](ARENA-SCORING.md).
+
+## Sharing arenas and shaders
+
+`/copy` copies the open arena as a one-line share code and `/copy-shader` copies
+only its shader. Arena writes the code with `pbcopy` on macOS or `wl-copy`,
+`xclip` or `xsel` on Linux, and also sends it to the terminal clipboard with OSC
+52 so copying works over SSH. Pasting a share code anywhere in the composer,
+through the terminal's paste or Ctrl+V, never inserts it as text:
+- an arena code opens an import draft in the orchestrator chat with its graph,
+  grade, trust notes (who writes, who runs commands, auto-if-clean) and the
+  readiness of each runtime; `/save` imports it, and typing asks the
+  orchestrator to revise it first;
+- a shader code opens the shader preview for the open arena, and `/shader-save`
+  applies it.
+
 ## Attachments and clipboard
 
 `/attach PATH [PATH ...]` snapshots images and other regular files for the next
@@ -179,7 +255,8 @@ including TIFF-to-PNG conversion for screenshots; Linux uses `wl-paste` on Wayla
 or `xclip` on X11. Clipboard reading is asynchronous, bounded and cancellable.
 Cmd+V is owned by the terminal; terminals that only forward text cannot forward
 clipboard image bytes, so use Ctrl+V or `/paste` for images. Clipboard failures
-leave the existing draft intact. Arena does not write to the user's clipboard.
+leave the existing draft intact. Arena writes to the clipboard only for `/copy`,
+`/copy-shader` and the chooser's copy keys.
 
 Limits are eight files, 10 MiB per file and 32 MiB total (also the cumulative
 attachment limit for an orchestrator chat). PNG, JPEG, GIF and WebP are delivered

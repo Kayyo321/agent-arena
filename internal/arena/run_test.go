@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -144,5 +145,41 @@ func TestReducedRetentionCompactsConsumedDecision(t *testing.T) {
 	}
 	if pending, err := p.Decisions(r.ID); err != nil || len(pending) != 0 {
 		t.Fatal("compacted decision appears pending")
+	}
+}
+
+func TestHistoryJSONReportsRunStatus(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	history := func() RunHistory {
+		t.Helper()
+		var out bytes.Buffer
+		if err := NewCLI(strings.NewReader(""), &out, &out).Run(context.Background(), []string{"history", r.ID, "--json", "--project", p.Root}); err != nil {
+			t.Fatalf("%v\n%s", err, out.String())
+		}
+		var h RunHistory
+		if err := DecodeJSON(out.Bytes(), &h); err != nil {
+			t.Fatalf("%v\n%s", err, out.String())
+		}
+		return h
+	}
+	if _, err := p.Append(r.ID, r.Workflow.Id, "", "workflow.started", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if h := history(); h.RunID != r.ID || h.Status != "running" || h.Terminal || len(h.Events) < 2 {
+		t.Fatalf("running run: %+v", h)
+	}
+	if _, err := p.Append(r.ID, r.Workflow.Id, "", "workflow.succeeded", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if h := history(); h.Status != "succeeded" || !h.Terminal || h.PendingDecisions != 0 || h.Events[len(h.Events)-1].Type != "workflow.succeeded" {
+		t.Fatalf("finished run: %+v", h)
+	}
+	// A journal that does not replay is still readable.
+	if _, err := p.Append(r.ID, r.Workflow.Id, "", "workflow.succeeded", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if h := history(); h.Status != "invalid" || h.StateError == "" || h.Terminal {
+		t.Fatalf("invalid journal: %+v", h)
 	}
 }

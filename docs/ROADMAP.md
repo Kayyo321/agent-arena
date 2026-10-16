@@ -2,6 +2,15 @@
 
 This roadmap sequences a usable local product. Milestones are outcomes with exit checks; exact implementation choices can evolve while preserving the documented contracts.
 
+## Final TODOs
+
+The last items before release, in order. Item 4 closes the list.
+
+1. **`/consult` the orchestrator from the live view.** Ask the permanent `arena-orchestrator` about the loaded arena or run, for example why a run stalled, how to raise the grade, or which runtime fits a role. It runs on the project default runtime, does not start a run or change configuration, and any edit it proposes goes through the normal draft preview and `/save`.
+2. **Spinning wordmark.** Each character of the `A2rena` wordmark spins in place, one at a time: `A`, then `2`, `r`, `e`, `n`, and the final `a`, then restarting at `A`. The wordmark's position and width never change, only the spinning glyph's frames. Keep the static wordmark for the text fallback, no-color, reduced-motion and non-TTY output (`internal/arena/wordmark.go`).
+3. **`/walkthrough` in arena setup.** For users who arrive without a design: the orchestrator asks about the project, its goals and pain points, proposes two or three arena ideas with their roles, providers, rough cost and grade, and lets the user pick or combine one before the normal interview drafts it. Provider, model and effort stay the user's choice unless they delegate it.
+4. **Production readiness sweep, approved by Fable and Astra.** Run a final sweep as an arena whose review team is Claude Fable 5.1 (`claude-code`, `claude-fable-5-1`) and Codex GPT-6-Astra (`codex`, `gpt-6-astra`) with unanimous consensus. Cover security (fences, credentials, share codes, blanket-approval modes), correctness, documentation against behavior, packaging, and the pending M3 and M6 live exits. Release only when both reviewers return `Approved`; `no-consensus` stays unresolved.
+
 ## M0 — Product and protocol foundation
 
 **Status: complete.** Product contracts, schemas, examples and skill entry points are present; generated validators and fixture tests now exercise them. Implementation status is tracked below and in [validation evidence](VALIDATION.md).
@@ -78,7 +87,7 @@ This roadmap sequences a usable local product. Milestones are outcomes with exit
 
 **Status: implemented; local terminal and packaging exit checks pass.** Bare `arena` opens a sole workflow or a chooser, then the idle graph with explicit task start. Embedded chat, slash commands, live agent mini-windows and scoped context views are implemented. Rounded terminal borders, a visible multiline composer, cursor/word/line editing, Shift+Return, clipboard image paste, run-scoped attachments and session-local message history are implemented. Native image delivery is currently Codex-only; see validation evidence for platform and provider limits. The adaptive UI, acknowledged packet lifecycle, Git ownership colors, run controls, attached process cleanup and standalone release builder are implemented. PTY interaction/resize and standalone cross-build/archive checks pass; see [validation evidence](VALIDATION.md) for platform limits.
 
-- Render the full A2rena layout: compact purple-gradient dotted wordmark upper right, colored Git tree upper left, agent graph cards and authority/peer arrows, packet markers, required-provider status row, and full-width `> memento mori` prompt.
+- Render the full A2rena layout: status band led by the compact purple-gradient dotted wordmark with run vitals and the Git tree, agent graph cards and authority/peer arrows, packet markers, required-provider status row, and full-width `> memento mori` prompt.
 - Fit the graph to the terminal, with compact/list navigation for constrained screens and labels for every state independent of color.
 - Add keyboard navigation, event detail, and accessible non-TUI output for logs and automation.
 - Add usage/concurrency controls, process cleanup, crash recovery, and diagnostics.

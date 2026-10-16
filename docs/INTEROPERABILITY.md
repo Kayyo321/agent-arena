@@ -73,6 +73,10 @@ stateDiagram-v2
 - A task result identifies completed work, files changed, commit/checkpoint references, validation performed, known limitations, and recommended next action.
 - A question includes the missing decision and blocks only its own work item unless the scheduler has a dependency on it.
 - A worker result returns to its delegator. Peer messages use declared communication links.
+- Peers run concurrently. Over MCP, `arena_send` with kind `message` reaches a peer and `arena_inbox` with `newOnly` and `waitSeconds` (at most 120) blocks until an unseen message arrives, so an agent can wait for agreement before returning. A result returned first ends that agent's side of the conversation.
+- A `message` payload needs a non-empty `text`; structured fields may sit beside it. Arena checks the packet before any sharing prompt, so the user never approves a packet that is then rejected, and the agent gets an error it can fix.
+- When a peer message needs the user's cross-provider sharing approval, `arena_send` does not hold the tool call open: after a short wait it returns `{"status": "awaiting-approval", "messageId", "decisionId"}` and Arena keeps the validated packet. Answering the decision delivers it (or journals `packet.rejected` on `no`), even if the sender has already finished. Resending identical content while it waits does not queue a second copy.
+- Extra packets in a worker's result that cannot be delivered (an unlinked peer, invalid JSON, a refused proposal) are journaled as `packet.rejected` and skipped; the result itself still returns to the delegator and the run continues.
 - A retry gets a new attempt ID and retains the same correlation ID.
 - Delivery is at least once across process recovery; consumers deduplicate by `messageId`.
 - Cancellation is a request with a recorded outcome. Arena does not claim a provider stopped until the adapter confirms process exit.
@@ -114,7 +118,7 @@ Example review-result payload:
 
 Arena launches each member of a team with the same objective, acceptance criteria, context, constraints, and workspace base. It collects each member's position in a structured response, then shares the team's positions for up to the configured number of deliberation rounds. The provider sessions remain separate; Arena carries only explicit messages between them.
 
-Team protocol version `1.1` requires unanimity. Every member must affirm the same verdict from the team's configured list. The facilitator then emits one `team-result` envelope whose `payload` is the team's only output to its caller:
+Team protocol version `1.1` requires unanimity. Every member must affirm the same verdict from the team's configured list. Deliberation rounds collect positions only. When all positions match, a separate affirmation asks each member whether it accepts that candidate as the team's verdict (`acceptTeamVerdict`), which is distinct from approving the change: unanimous `ChangesRequested` is a consensus. A member that repeats the candidate but declines it is asked once more (journaled as `team.affirmation-clarified`); only explicit acceptance counts. The team result carries the change IDs of the inputs it reviewed as well as any member changes, so the agent a router sends it to starts from the reviewed code. The facilitator then emits one `team-result` envelope whose `payload` is the team's only output to its caller:
 
 ```json
 {
@@ -143,7 +147,7 @@ Before delivery, Arena checks that every configured member appears once, every v
 
 A decision-router block consumes a structured envelope kind and reads one JSON Pointer relative to its `payload`. It compares the resulting scalar to configured exact-match values and routes the original packet along the matching branch. For example, a router may inspect `/outcome` from `review-result` and branch on `Approved`, `ChangesRequested`, or `Deny`. It does not invoke a model or infer a value from prose.
 
-Every router has an explicit fallback for an unrecognized packet kind/value or missing field: ask the user, stop the path with a recorded unhandled outcome, or route to a configured fallback node. Workflow validation requires unique match values, valid branch targets, and an acyclic graph including all conditional branch edges. A selected branch records the source packet ID, field value, rule ID, target, and fallback decision when applicable. It passes the packet and its provenance to the target agent or team.
+Every router has an explicit fallback for an unrecognized packet kind/value or missing field: ask the user, stop the path with a recorded unhandled outcome, or route to a configured fallback node. Workflow validation requires unique match values, valid branch targets, and an acyclic graph including all conditional branch edges, except for explicitly capped loop routes (below). A selected branch records the source packet ID, field value, rule ID, target, and fallback decision when applicable. It passes the packet and its provenance to the target agent or team.
 
 Example router definition:
 
@@ -155,12 +159,20 @@ Example router definition:
   "payloadPointer": "/outcome",
   "routes": [
     { "id": "approved", "equals": "Approved", "to": "integrator" },
-    { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer" },
+    { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer", "loop": true, "maxIterations": 2 },
     { "id": "denied", "equals": "Deny", "to": "request-owner" }
   ],
   "fallback": { "action": "ask-user" }
 }
 ```
+
+### Loop routes
+
+A route with `"loop": true` is the only permitted back edge. It must set `maxIterations` (1-5) and its `to` must be an ancestor of the router: a node that reaches the router through forward edges, such as the implementer whose work the reviewers examined. Loop routes are excluded from the cycle check; every other cycle is rejected.
+
+When a loop route matches and fewer than `maxIterations` revisions have run for that router and target, Arena journals `loop.iteration` (router, route, target, iteration, cap, the restarted nodes and the feedback packet IDs) and starts the next pass of the loop body: every node reachable from the target through forward edges is reset to pending and runs again. Nodes outside the body, such as a tester that feeds the same review team, keep their earlier result. The target receives its original parent packets plus an Arena note and the routed verdict packet (for a team, the `team-result` with `memberPositions` and `dissent`). Agents in later passes get iteration-suffixed task IDs and worktrees (`implementer-iter2`) whose base includes the change IDs the verdict carried, so a revision builds on the reviewed change and records it as a dependency; the earlier proposal stays in the integration queue. The restart waits until nothing in the body is still running.
+
+When the cap is spent, the matching value is treated as unmatched: Arena journals `loop.capped` and applies the router's fallback (`ask-user` no longer offers the capped target). The terminal graph draws a loop route as a side return edge labelled with the used and allowed revisions, for example `↺ 1/2`.
 
 The `to` values refer to existing agent, team, or router IDs in the same arena. On-call agents are not valid path targets; use an event trigger to invoke them.
 
@@ -214,6 +226,8 @@ The orchestrator applies `approvalPolicies.arena-subagent-modification-inquiry` 
 - `ask-user` presents the complete proposal and waits for the user's decision.
 - `auto-accept` applies a complete proposal only when provider readiness, project limits, graph validation, and adapter capability checks pass.
 
+A coworker request cannot set `runtime.options.commandApproval`: blanket command approval for Antigravity is only ever the user's own edit (see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)).
+
 If a request is missing a required value, the orchestrator asks the user for it instead of inventing it, except when `auto-refuse` has already declined that agent-originated request. A direct request from the user to create an agent always gets clarification when required details are missing. All accepted changes are written through the CLI as a reversible configuration transaction.
 
 ## Shared-context packets
@@ -258,6 +272,8 @@ Do not pass hidden chain-of-thought. Pass concise findings and evidence instead.
 
 When Arena forwards a task, selected context and file contents may be sent to the recipient provider for inference. The live view must show the destination provider before launch, and the workflow builder should let the user constrain which files or context may cross that boundary. Team membership permits sharing structured positions and evidence among those members, but does not expand the source task's file scope. Do not silently forward full conversation history or unrelated files. A configured communication edge permits routing; it does not imply that every file in the repository should be attached.
 
+Under the `ask-user` sharing policy, the user approves a *route*: content from one provider reaching one recipient agent on another provider, for the rest of the run. A peer message, an agent's retries of it and the later handoff to the same recipient share one decision; while it is pending, further shares on the route wait on it instead of raising another prompt. The reverse direction and other recipients are separate routes. A declined route stays declined for the run.
+
 ## Provider and model mapping
 
 Provider identifiers are stable adapter IDs such as `codex`, `claude-code`, `gemini`, and `local`. Model IDs and effort labels are provider-defined strings. The UI may display them, but it must not claim that two providers' `high` settings mean the same thing. Missing or unsupported options are rejected or omitted with a clear notice; never silently substitute a different model.
@@ -273,6 +289,8 @@ The MVP local adapter connects only to same-machine loopback services. It does n
 Use the provider's supported local sign-in or an approved integration, such as the configured Gemini API-key or Vertex AI route. The CLI checks readiness without reading or displaying secrets. Arena stores no passwords, session cookies, API-key values, or reusable provider tokens and does not relay credentials between agent processes.
 
 Provider plans, supported integrations, and terms change. Release checks must verify the exact supported sign-in and automation path. For OpenAI, an integration that uses ChatGPT plan usage must follow [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) and current [partner-app guidance](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites), including user authorization and app-specific use. For Claude Code, use Anthropic's [documented setup and authentication options](https://docs.anthropic.com/en/docs/claude-code/getting-started). Gemini CLI's published FAQ says third-party tools must not harvest or piggyback on its OAuth session; it points third-party coding agents to Vertex AI or Google AI Studio API keys. Arena must therefore reject Gemini CLI OAuth as an Arena-managed auth path and guide setup only through a currently approved API-key or Vertex adapter. Do not infer that because a human can use a consumer plan in one CLI, a third-party scheduler may use it through any method.
+
+Background CLIs keep their own permission model. Antigravity's headless mode refuses terminal commands, so Arena refuses `run_commands` on Antigravity unless the user opts that runtime into `commandApproval: "sandboxed-blanket"`. Arena then runs `agy --sandbox --dangerously-skip-permissions` inside a two-layer command fence (Linux only): agy runs in an outer fence with an emptied home (only its own config, the toolchains and the project bound back) and the network it needs for inference, while every command agy launches is re-sandboxed in a nested fence with no network, no session bus and no access to agy's sign-in, writable only in the agent's worktree. See [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval) for the full table and residual risks. Like the `claude-code-sign-in` route, the mode is the user's explicit choice and is never selected on their behalf.
 
 ## Current adapter references
 

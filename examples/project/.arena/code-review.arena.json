@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "code-review",
   "name": "Cross-provider implementation and review",
-  "description": "A coordinator delegates implementation and consensus review, with a maintainer available for unresolved results.",
+  "description": "A coordinator hands implementation to one agent, a cross-provider review team examines the change and can send it back for revision, and a maintainer is on call for unresolved results.",
   "headAgent": "orchestrator",
   "agents": [
     {
@@ -31,7 +31,7 @@
       "id": "reviewer",
       "profile": ".agents/code-review/reviewer.agent.json",
       "activation": "path",
-      "level": 1,
+      "level": 2,
       "runtime": {
         "provider": "codex",
         "model": "gpt-6.1-sol",
@@ -42,7 +42,7 @@
       "id": "security-reviewer",
       "profile": ".agents/code-review/security-reviewer.agent.json",
       "activation": "path",
-      "level": 1,
+      "level": 2,
       "runtime": {
         "provider": "claude-code",
         "model": "sonnet",
@@ -76,6 +76,18 @@
       }
     }
   ],
+  "decisionRouters": [
+    {
+      "id": "review-gate",
+      "name": "Release review gate",
+      "inputKind": "team-result",
+      "payloadPointer": "/verdict",
+      "routes": [
+        { "id": "changes-requested", "equals": "ChangesRequested", "to": "implementer", "loop": true, "maxIterations": 2 }
+      ],
+      "fallback": { "action": "stop" }
+    }
+  ],
   "onCall": [
     {
       "agentId": "maintainer-on-call",
@@ -89,7 +101,8 @@
   ],
   "relationships": [
     { "type": "delegates", "from": "orchestrator", "to": "implementer" },
-    { "type": "delegates", "from": "orchestrator", "to": "release-review" },
+    { "type": "delegates", "from": "implementer", "to": "release-review" },
+    { "type": "delegates", "from": "release-review", "to": "review-gate" },
     { "type": "communicates", "from": "orchestrator", "to": "implementer", "direction": "two-way" }
   ],
   "settings": {

@@ -102,7 +102,13 @@ func visibleActivity(e Event) string {
 		}
 		return fmt.Sprintf("Output recorded: %v bytes (body omitted by retention policy)", data["bytes"])
 	case "provider.arena-tool-completed":
-		return "Arena tool: " + str(data["tool"]) + " " + str(data["status"])
+		line := "Arena tool: " + str(data["tool"]) + " " + str(data["status"])
+		if message := str(data["message"]); message != "" {
+			line += " · " + message
+		}
+		return line
+	case "packet.rejected":
+		return "Rejected packet to " + str(data["to"]) + " (" + str(data["kind"]) + "): " + str(data["error"])
 	}
 	return ""
 }
@@ -204,20 +210,26 @@ func (m LiveModel) overlay(lines []string, width, height int) []string {
 	return lines
 }
 
-func (m LiveModel) chatBody() []string {
-	lines := []string{"Project orchestrator · describe your project · /help commands"}
-	for _, line := range m.Chat {
-		role := line.Role
-		if role == "you" {
-			role = "You"
-		}
-		lines = append(lines, role, line.Text, "")
-	}
+// chatBody is already sanitized and styled; callers must not wrap it again.
+func (m LiveModel) chatBody(width int, color bool) []string {
+	lines := []string{muted(short("Project orchestrator · describe your project · /help commands", width), color), ""}
+	lines = append(lines, m.chatTranscript(width, color)...)
 	if m.Draft != nil {
-		lines = append(lines, "WORKFLOW PREVIEW:", GraphSummary(m.Draft.Workflow), "Review runtimes and policy above. /save applies this draft; typing revises it.")
+		lines = append(lines, chatRule("Workflow preview", width, color))
+		preview := []string{}
+		if m.DraftScore != nil {
+			preview = append(preview, m.DraftScore.Summary())
+		}
+		preview = append(preview, m.Draft.Notes...)
+		if note := blanketApprovalNote(m.Draft.Workflow, m.Draft.Profiles); note != "" && m.Draft.Source != "share-import" {
+			preview = append(preview, note)
+		}
+		preview = append(preview, GraphSummary(m.Draft.Workflow))
+		preview = append(preview, "Review runtimes and policy above. /save applies this draft; typing revises it.")
+		lines = append(lines, plainUILines(preview, width)...)
 	}
 	if m.ChatBusy {
-		lines = append(lines, "Working… · /view arena-orchestrator for activity")
+		lines = append(lines, short(m.spinner(color)+" Working · /view arena-orchestrator for activity", width+20))
 	}
 	return lines
 }

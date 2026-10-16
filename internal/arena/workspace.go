@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +32,8 @@ type Workspace struct {
 	TaskID       string   `json:"taskId"`
 	Path         string   `json:"path"`
 	Branch       string   `json:"branch"`
+	GitDir       string   `json:"gitDir,omitempty"`
+	Rejected     string   `json:"rejected,omitempty"`
 	Base         string   `json:"base"`
 	Write        bool     `json:"write"`
 	LastTree     string   `json:"lastTree,omitempty"`
@@ -64,42 +67,75 @@ func gitEnv(dir string, env []string, args ...string) (string, error) {
 	if env != nil {
 		cmd.Env = append(os.Environ(), env...)
 	}
-	var output cappedBuffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	// Stdout carries machine-readable results (path lists, binary patches), so
+	// it is kept exactly and fails loudly past maxGitOutput instead of being
+	// cut short. Stderr is diagnostics only and stays capped.
+	stdout := exactBuffer{limit: maxGitOutput}
+	var stderr cappedBuffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), Redact(output.String()))
+	if stdout.overflow {
+		return "", fmt.Errorf("git %s: output exceeds %d MiB; Arena does not record truncated Git results", strings.Join(args, " "), maxGitOutput>>20)
 	}
-	return strings.TrimSuffix(output.String(), "\n"), nil
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), Redact(strings.TrimSpace(stderr.String()+"\n"+string(stdout.data[:min(len(stdout.data), 1<<20)]))))
+	}
+	return strings.TrimSuffix(string(stdout.data), "\n"), nil
+}
+
+const maxGitOutput = 256 << 20
+
+// exactBuffer keeps every byte up to limit and records an overflow beyond it.
+type exactBuffer struct {
+	data     []byte
+	limit    int
+	overflow bool
+}
+
+func (b *exactBuffer) Write(p []byte) (int, error) {
+	if len(b.data)+len(p) > b.limit {
+		b.overflow = true
+		return 0, fmt.Errorf("git output exceeds %d bytes", b.limit)
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
 }
 func (p *Project) Checkpoint(dir, reason string) (Checkpoint, error) {
+	g, e := p.repo(dir)
+	if e != nil {
+		return Checkpoint{Directory: dir, Reason: reason}, e
+	}
+	return p.checkpointRepo(g, reason)
+}
+func (p *Project) checkpointRepo(g gitRepo, reason string) (Checkpoint, error) {
 	l, e := p.WaitLock("git")
 	if e != nil {
 		return Checkpoint{}, e
 	}
 	defer l.Close()
-	return p.checkpoint(dir, reason)
+	return p.checkpoint(g, reason)
 }
-func (p *Project) checkpoint(dir, reason string) (Checkpoint, error) {
+func (p *Project) checkpoint(g gitRepo, reason string) (Checkpoint, error) {
+	dir := g.dir
 	c := Checkpoint{ID: ID("checkpoint-"), Directory: dir, Reason: reason, CreatedAt: Now(), Untracked: []string{}}
-	if e := flatRepository(dir); e != nil {
+	if e := flatRepository(g); e != nil {
 		return c, e
 	}
 	var e error
-	c.Head, e = Git(dir, "rev-parse", "HEAD")
+	c.Head, e = g.git("rev-parse", "HEAD")
 	if e != nil {
 		return c, fmt.Errorf("commit the initial repository state before running Arena: %w", e)
 	}
-	c.Status, e = Git(dir, "status", "--porcelain=v1", "--untracked-files=all")
+	c.Status, e = g.git("status", "--porcelain=v1", "--untracked-files=all")
 	if e != nil {
 		return c, e
 	}
-	tracked, e := Git(dir, "ls-tree", "-r", "--name-only", "-z", c.Head)
+	tracked, e := g.git("ls-tree", "-r", "--name-only", "-z", c.Head)
 	if e != nil {
 		return c, e
 	}
-	candidates, e := Git(dir, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	candidates, e := g.git("ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	if e != nil {
 		return c, e
 	}
@@ -108,15 +144,15 @@ func (p *Project) checkpoint(dir, reason string) (Checkpoint, error) {
 			return c, fmt.Errorf("credential path %q must be excluded from the repository/checkpoint", path)
 		}
 	}
-	c.StagedDiff, e = Git(dir, "diff", "--cached", "--binary")
+	c.StagedDiff, e = g.git("diff", "--cached", "--binary", "--no-ext-diff", "--no-textconv")
 	if e != nil {
 		return c, e
 	}
-	c.WorkingDiff, e = Git(dir, "diff", "--binary")
+	c.WorkingDiff, e = g.git("diff", "--binary", "--no-ext-diff", "--no-textconv")
 	if e != nil {
 		return c, e
 	}
-	untracked, e := Git(dir, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, e := g.git("ls-files", "--others", "--exclude-standard", "-z")
 	if e != nil {
 		return c, e
 	}
@@ -134,7 +170,7 @@ func (p *Project) checkpoint(dir, reason string) (Checkpoint, error) {
 	}
 	defer os.Remove(index)
 	env := []string{"GIT_INDEX_FILE=" + index, "GIT_AUTHOR_NAME=Agent Arena", "GIT_AUTHOR_EMAIL=arena@localhost", "GIT_COMMITTER_NAME=Agent Arena", "GIT_COMMITTER_EMAIL=arena@localhost"}
-	if _, e = gitEnv(dir, env, "read-tree", c.Head); e != nil {
+	if _, e = g.gitEnv(env, "read-tree", c.Head); e != nil {
 		return c, e
 	}
 	paths := map[string]bool{}
@@ -157,7 +193,7 @@ func (p *Project) checkpoint(dir, reason string) (Checkpoint, error) {
 	}
 	// read-tree starts from HEAD, which may accidentally track Arena runtime data.
 	// Remove that data from the alternate index without modifying the caller index.
-	if _, e = gitEnv(dir, env, "rm", "--cached", "-r", "-f", "--ignore-unmatch", "--", ".arena/.state", ".arena/locks", ".arena-root"); e != nil {
+	if _, e = g.gitEnv(env, "rm", "--cached", "-r", "-f", "--ignore-unmatch", "--", ".arena/.state", ".arena/locks", ".arena-root"); e != nil {
 		return c, e
 	}
 	listPath := index + ".paths"
@@ -166,19 +202,19 @@ func (p *Project) checkpoint(dir, reason string) (Checkpoint, error) {
 		return c, e
 	}
 	if len(paths) > 0 {
-		if _, e = gitEnv(dir, append(env, "GIT_LITERAL_PATHSPECS=1"), "add", "-A", "--pathspec-from-file="+listPath, "--pathspec-file-nul"); e != nil {
+		if _, e = g.gitEnv(append(env, "GIT_LITERAL_PATHSPECS=1"), "add", "-A", "--pathspec-from-file="+listPath, "--pathspec-file-nul"); e != nil {
 			return c, e
 		}
 	}
-	c.Tree, e = gitEnv(dir, env, "write-tree")
+	c.Tree, e = g.gitEnv(env, "write-tree")
 	if e != nil {
 		return c, e
 	}
-	c.Commit, e = gitEnv(dir, env, "commit-tree", c.Tree, "-p", c.Head, "-m", "Arena checkpoint: "+reason)
+	c.Commit, e = g.gitEnv(env, "commit-tree", c.Tree, "-p", c.Head, "-m", "Arena checkpoint: "+reason)
 	if e != nil {
 		return c, e
 	}
-	if _, e = Git(dir, "update-ref", "refs/arena/checkpoints/"+c.ID, c.Commit); e != nil {
+	if _, e = g.git("update-ref", "refs/arena/checkpoints/"+c.ID, c.Commit); e != nil {
 		return c, e
 	}
 	if e := Atomic(p.Path(".state", "checkpoints", c.ID+".json"), SafeJSON(c), 0600); e != nil {
@@ -225,9 +261,9 @@ func checkSecretContent(path string) error {
 
 // Nested repositories have independent indexes/objects. Until they have their own
 // recovery contract, refuse them instead of silently producing a partial snapshot.
-func flatRepository(dir string) error {
+func flatRepository(g gitRepo) error {
 	for _, args := range [][]string{{"ls-files", "--stage", "-z"}, {"ls-tree", "-r", "-z", "HEAD"}} {
-		entries, err := Git(dir, args...)
+		entries, err := g.git(args...)
 		if err != nil {
 			return err
 		}
@@ -237,13 +273,13 @@ func flatRepository(dir string) error {
 			}
 		}
 	}
-	untracked, err := Git(dir, "ls-files", "--others", "--exclude-standard", "-z")
+	untracked, err := g.git("ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return err
 	}
 	for _, path := range strings.Split(untracked, "\x00") {
 		if strings.HasSuffix(path, "/") {
-			if _, err := os.Lstat(filepath.Join(dir, path, ".git")); err == nil {
+			if _, err := os.Lstat(filepath.Join(g.dir, path, ".git")); err == nil {
 				return fmt.Errorf("nested Git repository %q is not supported by Arena checkpoints", path)
 			}
 		}
@@ -288,6 +324,9 @@ func (p *Project) Workspace(r Run, agent, task string, write bool, dependencies 
 		if w.Write != write || w.AgentID != agent {
 			return w, fmt.Errorf("workspace capability/owner changed")
 		}
+		if w.Rejected != "" {
+			return w, fmt.Errorf("workspace was rejected and is preserved for inspection: %s", w.Rejected)
+		}
 		if _, e := os.Stat(w.Path); e != nil {
 			return w, fmt.Errorf("workspace missing; recover it before retrying")
 		}
@@ -324,6 +363,14 @@ func (p *Project) Workspace(r Run, agent, task string, write bool, dependencies 
 	if _, e = Git(p.Root, args...); e != nil {
 		return w, e
 	}
+	// Record the gitdir pointer before any worker runs so later host Git calls
+	// can refuse a worktree whose .git was replaced.
+	if w.GitDir, e = readGitPointer(w.Path); e != nil {
+		return w, e
+	}
+	if _, e := p.workerRepo(w.Path, w.GitDir); e != nil {
+		return w, e
+	}
 	if e := Atomic(filepath.Join(w.Path, ".arena-root"), []byte(p.Root+"\n"), 0600); e != nil {
 		return w, e
 	}
@@ -346,14 +393,21 @@ func (p *Project) FinishWorkspace(r Run, w Workspace) (*Event, error) {
 	if e := ReadJSON(manifest, &w); e != nil {
 		return nil, e
 	}
-	checkpoint, e := p.Checkpoint(w.Path, "proposal from "+w.AgentID)
+	if w.Rejected != "" {
+		return nil, fmt.Errorf("workspace was rejected and is preserved for inspection: %s", w.Rejected)
+	}
+	repo, e := p.workerRepo(w.Path, w.GitDir)
+	if e != nil {
+		return nil, p.rejectWorkspace(r, manifest, w, e)
+	}
+	checkpoint, e := p.checkpointRepo(repo, "proposal from "+w.AgentID)
 	if e != nil {
 		return nil, e
 	}
 	if checkpoint.Tree == w.LastTree {
 		return nil, nil
 	}
-	patch, e := Git(w.Path, "diff", "--binary", w.Base, checkpoint.Commit)
+	patch, e := repo.git("diff", "--binary", "--no-ext-diff", "--no-textconv", w.Base, checkpoint.Commit)
 	if e != nil {
 		return nil, e
 	}
@@ -361,7 +415,7 @@ func (p *Project) FinishWorkspace(r Run, w Workspace) (*Event, error) {
 		w.LastTree = checkpoint.Tree
 		return nil, Atomic(manifest, JSON(w), 0600)
 	}
-	paths, e := Git(w.Path, "diff", "--name-only", "-z", w.Base, checkpoint.Commit)
+	paths, e := repo.git("diff", "--name-only", "-z", w.Base, checkpoint.Commit)
 	if e != nil {
 		return nil, e
 	}
@@ -403,6 +457,19 @@ func (p *Project) FinishWorkspace(r Run, w Workspace) (*Event, error) {
 	}
 	event, e := p.Append(r.ID, r.Workflow.Id, w.AgentID, "change.touches-paths", map[string]any{"changeId": change.ID, "paths": changed})
 	return &event, e
+}
+
+// rejectWorkspace fails a worktree closed: it is never checkpointed or
+// proposed again, and stays on disk for the user to inspect.
+func (p *Project) rejectWorkspace(r Run, manifest string, w Workspace, cause error) error {
+	w.Rejected = Redact(cause.Error())
+	if e := Atomic(manifest, JSON(w), 0600); e != nil {
+		return errors.Join(cause, e)
+	}
+	if _, e := p.Append(r.ID, r.Workflow.Id, w.AgentID, "workspace.rejected", map[string]any{"taskId": w.TaskID, "workspace": w.Path, "reason": w.Rejected, "preserved": true}); e != nil {
+		return errors.Join(cause, e)
+	}
+	return cause
 }
 func (p *Project) saveChange(c Change) error {
 	return Atomic(filepath.Join(p.RunDir(c.RunID), "changes", c.ID+".json"), JSON(c), 0600)
@@ -466,6 +533,8 @@ func (p *Project) Workspaces(run string) ([]Workspace, error) {
 		}
 		if _, err := os.Stat(w.Path); err != nil {
 			w.State = "missing"
+		} else if w.Rejected != "" {
+			w.State = "rejected"
 		}
 		out = append(out, w)
 	}
@@ -515,7 +584,7 @@ func (p *Project) integrate(run, id, actor string) (Change, error) {
 	if e != nil {
 		return change, e
 	}
-	checkpoint, e := p.checkpoint(p.Root, "before integrating "+id)
+	checkpoint, e := p.checkpoint(gitRepo{dir: p.Root}, "before integrating "+id)
 	if e != nil {
 		return change, e
 	}
@@ -591,7 +660,7 @@ func (p *Project) Rollback(run, id string, approved bool) (Change, error) {
 	if e != nil {
 		return original, e
 	}
-	checkpoint, e := p.checkpoint(p.Root, "before rollback "+id)
+	checkpoint, e := p.checkpoint(gitRepo{dir: p.Root}, "before rollback "+id)
 	if e != nil {
 		return original, e
 	}
