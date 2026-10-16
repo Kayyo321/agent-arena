@@ -85,6 +85,8 @@ recovery procedures are in the [CLI guide](docs/CLI.md).
 
 ```sh
 arena watch RUN_ID
+arena watch RUN_ID --json --follow
+arena view AGENT --run RUN_ID --follow
 arena history RUN_ID --json
 arena changes RUN_ID
 arena changes RUN_ID CHANGE_ID

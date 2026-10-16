@@ -60,6 +60,12 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		if err != nil {
 			return err
 		}
+		if o.Bool("follow") && !o.Bool("json") {
+			return fmt.Errorf("watch --follow streams NDJSON; add --json")
+		}
+		if o.Bool("json") {
+			return cli.streamEvents(ctx, p, r.ID, o.Bool("follow"))
+		}
 		if o.Bool("plain") {
 			events, err := p.Events(r.ID)
 			if err != nil {
@@ -69,6 +75,11 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return nil
 		}
 		return Watch(ctx, p, r, nil)
+	case "view":
+		if len(args) != 2 {
+			return fmt.Errorf("view AGENT --run RUN [--follow]")
+		}
+		return cli.viewAgent(ctx, p, args[1], o)
 	case "changes":
 		if len(args) < 2 {
 			return fmt.Errorf("changes RUN [CHANGE]")

@@ -198,6 +198,25 @@ The bottom bar shows only `/help`. The graph reports the loaded arena and run st
 
 `arena status` without a selected workflow shows the union required by configured workflows plus the permanent orchestrator. A workflow-specific status view shows only that workflow and its required control agent. Readiness distinguishes missing CLI, signed-out account, unsupported authentication mode, incompatible version, and unavailable model; `good` requires a compatible auth path for Arena's integration. The live view updates readiness when provider processes or configuration change.
 
+## Plain streams for terminal panes
+
+The live view is the only interactive surface, but its two read-only projections are
+available as line-oriented text for a pipe, a script or another terminal pane:
+
+- `arena watch RUN --json --follow` is the event feed. It prints one flushed JSON line
+  per journal event, in sequence order and never twice, and exits when the run reaches
+  a terminal state or on interrupt. Without `--follow` it prints the journal once.
+- `arena view AGENT --run RUN [--follow]` is the agent activity window (`/view AGENT`)
+  as plain text, with the same exit behaviour. It states when raw process output is not
+  retained (`audit.processOutput` other than `full`, or reduced run retention) and falls
+  back to the recorded output size, as the window does.
+
+Both poll the run journal on the live view's 150 ms tick and hold no state of their own,
+so what they print always agrees with the audited history. Provider text keeps the live
+view's rules: redacted, and without escape or control sequences. Their output is the
+building block for panes that mirror a run; see [CLI](CLI.md#structured-terminal-streams)
+for flags and exit behaviour.
+
 ## Fit and accessibility
 
 Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs: `/pan` moves a camera over the graph with the arrow keys, keeps the graph block's height so the rows below it stay put, and Space snaps back to the centered layout. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.
