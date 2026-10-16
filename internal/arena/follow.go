@@ -21,12 +21,20 @@ const followInterval = 150 * time.Millisecond
 // It ends once the run is terminal and a poll finds nothing new (a cancelled
 // run's agents still record agent.cancelled after workflow.cancelled), when the
 // events do not replay, or when the journal no longer holds what was already
-// delivered. Cancelling ctx, which is how an interrupt arrives, ends it
-// without error. Without follow it delivers the journal once.
+// delivered. It also ends when the run is interrupted while it is attached: the
+// supervisor stopped, so nothing more arrives until a person resumes the run.
+// A follower that starts on a run that is already interrupted does not quit,
+// because `arena tmux resume` starts its observers beside the supervisor, which
+// probes providers before it records workflow.resumed; that follower waits for
+// the resume, as tail -f would. Cancelling ctx, which is how an interrupt
+// arrives, ends it without error. Without follow it delivers the journal once.
 func (p *Project) followEvents(ctx context.Context, runID string, follow bool, emit func(Event) error) error {
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	last := 0
+	// interruptedWhileAttached is set when this follower saw the run become
+	// interrupted, not when the backlog it started with already ended that way.
+	interruptedWhileAttached, firstPoll := false, true
 	for {
 		events, err := p.Events(runID)
 		if err != nil {
@@ -54,7 +62,14 @@ func (p *Project) followEvents(ctx context.Context, runID string, follow bool, e
 		if err != nil {
 			return fmt.Errorf("run %s events do not replay: %w", runID, err)
 		}
-		if !fresh && Has(terminalStatuses, state.Status) {
+		switch {
+		case state.Status != "interrupted":
+			interruptedWhileAttached = false
+		case fresh && !firstPoll:
+			interruptedWhileAttached = true
+		}
+		firstPoll = false
+		if !fresh && (Has(terminalStatuses, state.Status) || interruptedWhileAttached) {
 			return nil
 		}
 		select {

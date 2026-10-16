@@ -350,14 +350,16 @@ func (p *Project) awaitDecision(ctx context.Context, run, id string) (string, er
 		}
 	}
 }
+
+// Answer answers a decision from the live view.
 func (p *Project) Answer(run, id, answer string) error {
-	_, e := p.AnswerDecision(run, id, answer)
+	_, e := p.AnswerDecision(run, id, answer, Approval{Channel: ApprovalTUI})
 	return e
 }
 
 // AnswerDecision answers a decision. An approved integrate or rollback request
 // from the control server runs here, once, and its outcome is returned.
-func (p *Project) AnswerDecision(run, id, answer string) (outcome map[string]any, err error) {
+func (p *Project) AnswerDecision(run, id, answer string, via Approval) (outcome map[string]any, err error) {
 	if e := validID(run); e != nil {
 		return nil, e
 	}
@@ -385,7 +387,7 @@ func (p *Project) AnswerDecision(run, id, answer string) (outcome map[string]any
 		return nil, e
 	}
 	d.Answer = answer
-	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer}); e != nil {
+	if _, e := p.Append(run, r.Workflow.Id, "user", "decision.answered", map[string]any{"decisionId": id, "answer": answer, "approval": via.Record()}); e != nil {
 		return nil, e
 	}
 	if d.Route != "" {
@@ -406,7 +408,7 @@ func (p *Project) AnswerDecision(run, id, answer string) (outcome map[string]any
 	// The answer is stored first, so a crash or a failure below can never run
 	// the action a second time: a new request needs a new decision.
 	if answer == "approve" {
-		outcome, err = p.executeChangeRequest(r, d)
+		outcome, err = p.executeChangeRequest(r, d, via)
 	}
 	// No waiter compacts a change request either.
 	if r.Retention != "full-local" {

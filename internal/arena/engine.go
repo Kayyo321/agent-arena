@@ -20,6 +20,7 @@ type Engine struct {
 	Invoker      Invoker
 	slots        chan struct{}
 	mu           sync.Mutex
+	budgetMu     sync.Mutex // serializes enforceBudget
 	onCallCounts map[string]int
 	onCallSeen   map[string]bool
 	Observe      func(Event)
@@ -31,6 +32,9 @@ type Engine struct {
 	loops      map[string]int
 	// children are the fan-out worker instances registered so far; guarded by mu.
 	children map[string]FanOutChild
+	// patchApply replaces git in the fan-out conflict check; nil means git.
+	// Only tests set it.
+	patchApply patchApplier
 }
 
 func NewEngine(p *Project, r Run, invoker Invoker) *Engine {
@@ -502,6 +506,11 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		if err := e.Project.AwaitScheduling(ctx, e.Run.ID); err != nil {
 			return nil, err
 		}
+		// The scheduler checks budgets per node, but a fan-out node or a team
+		// starts many agents under one launch.
+		if err := e.awaitBudget(ctx); err != nil {
+			return nil, err
+		}
 	}
 	profile := e.profileOf(a.Id)
 	if invocation != nil && (invocation["mode"] == "team-composition" || invocation["mode"] == "fanout-planner") {
@@ -921,6 +930,14 @@ func (e *Engine) onCall(ctx context.Context, id string, trigger Event, manual bo
 		return fmt.Errorf("on-call trigger is not configured")
 	}
 
+	// An on-call agent is a launch too. It runs beside a paused or failed run, so
+	// it cannot wait for the user's answer: it is skipped while a budget stands.
+	if kind, limit, used, err := e.reachedBudget(); err != nil {
+		return err
+	} else if kind != "" {
+		_, err := e.event(id, "on-call.skipped", map[string]any{"triggerEventId": trigger.ID, "budget": kind, "limit": limit, "used": used})
+		return err
+	}
 	reservation, err := e.Project.WaitLock("oncall-" + Hash([]byte(e.Run.ID))[:20])
 	if err != nil {
 		return err
@@ -995,7 +1012,7 @@ func (e *Engine) finishWorkspace(ctx context.Context, w Workspace) error {
 			return err
 		}
 		if e.Run.Settings.ApprovalPolicies.ChangeIntegration == "auto-if-clean" && e.Run.Workflow.Settings.Integration.Policy == "auto-if-clean" {
-			_, err := e.Project.integrate(e.Run.ID, str(event.Data["changeId"]), "policy:auto-if-clean")
+			_, err := e.Project.integrate(e.Run.ID, str(event.Data["changeId"]), "policy:auto-if-clean", Approval{})
 			if err != nil {
 				_, eventErr := e.event(w.AgentID, "change.requires-review", map[string]any{"changeId": event.Data["changeId"], "reason": Redact(err.Error())})
 				return eventErr

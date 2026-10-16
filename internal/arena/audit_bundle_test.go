@@ -160,7 +160,7 @@ func TestAuditExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("import not journaled: %+v", events)
 	}
 	out.Reset()
-	if err := cli.Run(context.Background(), []string{"history", "--json", "--project", q.Root}); err != nil {
+	if err := cli.Run(context.Background(), []string{"history", "--all", "--project", q.Root}); err != nil {
 		t.Fatal(err)
 	}
 	var list []HistoryEntry
@@ -175,10 +175,19 @@ func TestAuditExportImportRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &h); err != nil || !h.Imported || len(h.Events) != len(want) {
 		t.Fatalf("imported history: %s %v", out.String(), err)
 	}
-	// The live project lists its own run as not imported; the plain list is unchanged.
+	// The live project lists its own run as not imported under --all; the plain
+	// and --json lists keep their original shape, an array of run ID strings.
 	out.Reset()
-	if err := cli.Run(context.Background(), []string{"history", "--json", "--project", p.Root}); err != nil || !strings.Contains(out.String(), `"imported": false`) && !strings.Contains(out.String(), `"imported":false`) {
+	if err := cli.Run(context.Background(), []string{"history", "--all", "--project", p.Root}); err != nil || !strings.Contains(out.String(), `"imported": false`) && !strings.Contains(out.String(), `"imported":false`) {
 		t.Fatalf("live list: %s %v", out.String(), err)
+	}
+	out.Reset()
+	if err := cli.Run(context.Background(), []string{"history", "--json", "--project", p.Root}); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	if err := json.Unmarshal(out.Bytes(), &ids); err != nil || len(ids) != 1 || ids[0] != r.ID {
+		t.Fatalf("--json list must stay an array of run IDs: %s %v", out.String(), err)
 	}
 	out.Reset()
 	if err := cli.Run(context.Background(), []string{"history", "--project", q.Root}); err != nil || strings.Contains(out.String(), r.ID) {

@@ -190,7 +190,7 @@ Slash commands are available in setup and the graph:
 | Command | Action |
 | --- | --- |
 | `/help`, `/agents` | List commands or agent names and selected runtimes |
-| `/usage` | Input and output tokens providers reported for the run and per agent; `unreported` when a provider reports none, and never a cost |
+| `/usage` | Input and output tokens providers reported for the run and per agent (fan-out children listed by their `<id>.<n>`; see [Configuration](CONFIGURATION.md) for how cache, tool-use and thinking tokens are counted); `unreported` when a provider reports none, and never a cost |
 | `/view NAME` | Open live agent activity in a mini-window |
 | `/context [NAME]` | Inspect role, actual task and available workflow context |
 | `/chat`, `/graph` | Open the control-agent interview or return to the graph |
@@ -279,8 +279,16 @@ appears once in `sequence` order, and the command exits 0 when the run is
 terminal (`succeeded`, `failed` or `cancelled`, the `terminal` flag of
 `history --json`) and a poll finds nothing new. That last poll lets
 `agent.cancelled` events that follow `workflow.cancelled` still arrive; an event
-recorded later than one poll after the run ended is only in `history`. An
-interrupt (Ctrl+C or SIGTERM) also exits 0. If the events stop replaying or the
+recorded later than one poll after the run ended is only in `history`. It also
+exits 0 when the run becomes `interrupted` while it is attached (its supervisor
+stopped, so nothing more arrives until `arena resume`; the follow ends and a
+resume needs a new one). A follow that starts on a run that is already
+`interrupted` does not quit: it waits for the resume and follows it, as
+`arena tmux resume` relies on, and stays until you stop it if no one resumes the
+run. A supervisor killed without a chance to journal (SIGKILL, power loss) leaves
+the run `running`, and a follow stays attached to it. An interrupt (Ctrl+C or
+SIGTERM) also exits 0. Each poll re-reads the whole journal, as the live view does;
+incremental reading is [deferred](ROADMAP.md#deferred-work). If the events stop replaying or the
 history is retired while following, it exits non-zero with the reason. `--follow`
 requires `--json`; `watch --plain` and the interactive `watch` are unchanged.
 
@@ -325,8 +333,16 @@ arena decision answer RUN DECISION approve   # or: reject
 ```
 
 Approving executes the integration or rollback once, in that command, and
-prints the outcome. It is refused, and journaled as `decision.refused`, if `HEAD`
-moved since the request, the change is no longer eligible, or the decision was
+prints the outcome. The command refuses to approve unless it runs in a
+terminal (a pipe or an agent's command runner has none); `reject` works
+anywhere, and the TUI's `/answer` is the other route. The terminal check stops
+a plain pipe, not an agent given a pseudo-terminal or access to your terminal:
+Arena records which entry point received the approval but cannot verify who was
+behind it, and does not yet isolate agent processes from the answer path (see
+[ADR 0002](adr/0002-operator-approval-boundary.md)). It is refused, and
+journaled as `decision.refused`, if `HEAD` moved since the request, the patch
+(or, for a rollback, the integration commit) differs from the one in the
+request's preview, the change is no longer eligible, or the decision was
 already answered; ask the agent to request it again. See
 [Integrate and rollback requests](INTEROPERABILITY.md#integrate-and-rollback-requests).
 
@@ -347,6 +363,16 @@ Arena never installs it):
 - The observers only read the journal. Closing one never stops the run. When the run
   ends the followers exit and the panes stay open (`remain-on-exit`) so the final
   output is still readable.
+- **When a tmux step fails.** Two steps are required: `new-session`, which starts the
+  supervisor, and `remain-on-exit`, which keeps its final output on screen. If
+  `new-session` fails nothing has started and the command fails. If `remain-on-exit`
+  fails the supervisor is already running, so Arena leaves the session alone (killing
+  it would interrupt the run); the command exits non-zero, says the run is live in
+  session `arena-RUN`, and names `tmux attach -t`, `tmux kill-session -t` (which
+  interrupts the run) and `arena resume`. Every other step only places observer panes
+  or focus (the event feed, the agent panes, tiling, selection): a failure prints a
+  warning on stderr naming the step, the run and the rest of the layout go on, and at
+  a terminal the command waits for Enter before attaching so the warning is read.
 
 Run-id handoff: the observer panes must name the run, so `tmux run` first reserves it
 with the same readiness, policy and baseline checks as `arena run` (failures print
@@ -475,7 +501,8 @@ purge is not secure erasure.
 ```sh
 arena history RUN export FILE     # write one run's redacted audit bundle
 arena history import FILE         # verify a bundle and land it read-only
-arena history --json              # [{"id": ..., "imported": true|false}, ...]
+arena history [--json]            # unchanged: an array of local run ID strings
+arena history --all               # [{"id": ..., "imported": true|false}, ...]
 arena history IMPORTED_RUN [--json]   # imported events; --json adds "imported": true
 ```
 
@@ -500,8 +527,9 @@ imported. A verified bundle lands under `.arena/.state/imported/RUN/` as read-on
 files and a `history.imported` event is journaled in the project history. Import
 never merges into live state, never creates a resumable run and never touches
 worktrees, checkpoints or Git refs. Imported runs are absent from the plain
-`arena history` list and from `status`, `watch` and `resume`; `arena history --json`
-marks them `imported: true`. A checksum proves the file is unchanged since export and
+`arena history` and `arena history --json` lists (still an array of run IDs) and from
+`status`, `watch` and `resume`; `arena history --all` lists them with
+`imported: true`. A checksum proves the file is unchanged since export and
 internally consistent; it does not identify who exported it.
 
 ## Skills and compatibility

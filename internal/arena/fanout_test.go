@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -355,6 +356,8 @@ type fanOutFixture struct {
 	edit func(id, dir string) error
 	// base is what the reviewer saw in base.txt.
 	base string
+	// files lists every file in the reviewer's workspace.
+	files []string
 }
 
 func newFanOutFixture(n int) *fanOutFixture {
@@ -407,6 +410,11 @@ func (f *fanOutFixture) invoke(ctx context.Context, in Invocation) (map[string]a
 		}
 		if b, err := os.ReadFile(filepath.Join(in.Dir, "base.txt")); err == nil {
 			f.base = string(b)
+		}
+		if entries, err := os.ReadDir(in.Dir); err == nil {
+			for _, entry := range entries {
+				f.files = append(f.files, entry.Name())
+			}
 		}
 		f.mu.Unlock()
 		if props["outcome"] != nil {
@@ -1082,5 +1090,207 @@ func TestFanOutConflictCheckNeedsNoWorktreeAndLeavesNothingBehind(t *testing.T) 
 	}
 	if status, err := Git(p.Root, "status", "--porcelain=v1"); err != nil || strings.Contains(status, "base.txt") {
 		t.Fatalf("the user's checkout was touched: %q %v", status, err)
+	}
+}
+
+// Edits a few lines apart share patch context, so plain `git apply --check`
+// refuses the second one, but the next node's base is built with --3way and
+// merges them. The check must agree with that base, not hold clean work back.
+func TestFanOutNearbyLineEditsAreNotFlaggedAsConflicts(t *testing.T) {
+	p := committedProject(t)
+	lines := make([]string, 30)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	if err := os.WriteFile(filepath.Join(p.Root, "notes.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Git(p.Root, "add", "notes.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Git(p.Root, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "notes"); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(3)
+	line := map[string]int{"split.1": 1, "split.2": 3, "split.3": 20}
+	f.edit = func(id, dir string) error {
+		b, err := os.ReadFile(filepath.Join(dir, "notes.txt"))
+		if err != nil {
+			return err
+		}
+		edited := strings.Replace(string(b), fmt.Sprintf("line %d\n", line[id]), "edited by "+id+"\n", 1)
+		return os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(edited), 0644)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	events := finished(t, p, r, startFanOut(ctx, p, r, f, false))
+	for _, v := range anySlice(fanOutResult(t, p, r, events, "split")["results"]) {
+		if m := v.(map[string]any); m["conflict"] != nil {
+			t.Fatalf("a clean child was held out: %v", m)
+		}
+	}
+	if countEvents(events, "fanout.conflict", "split") != 0 {
+		t.Fatal("a conflict was journaled for edits that merge")
+	}
+}
+
+// Only the clashing pair is flagged; a disjoint child stays clean. Called
+// directly with patches on disk, so no worktrees are needed.
+func TestFanOutConflictsFlagsOnlyTheClashingPair(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	first, second, third := proposedChange(t, p, r, "one", "same.txt", "one\n"), proposedChange(t, p, r, "two", "other.txt", "two\n"), proposedChange(t, p, r, "three", "third.txt", "three\n")
+	changes := map[string][]string{"split.1": {first.ID}, "split.2": {second.ID}, "split.3": {third.ID}}
+	got, err := p.fanOutConflicts(r, []string{"split.1", "split.2", "split.3"}, changes)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("disjoint children flagged: %v %v", got, err)
+	}
+	// Make the third child's patch create the file the first child created.
+	if err := os.WriteFile(filepath.Join(p.RunDir(r.ID), "changes", third.ID+".patch"), []byte("diff --git a/same.txt b/same.txt\nnew file mode 100644\nindex 0000000..e69de29\n--- /dev/null\n+++ b/same.txt\n@@ -0,0 +1 @@\n+three\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = p.fanOutConflicts(r, []string{"split.1", "split.2", "split.3"}, changes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// split.3 clashes with split.1 as a pair, so both are held, and split.2 is clean.
+	if strings.Join(got["split.1"], ",") != "split.3" || strings.Join(got["split.3"], ",") != "split.1" || len(got["split.2"]) != 0 {
+		t.Fatalf("conflicts %v", got)
+	}
+}
+
+// indexFiles lists the paths in a scratch index file.
+func indexFiles(t *testing.T, root, index string) []string {
+	t.Helper()
+	out, err := gitEnv(root, []string{"GIT_INDEX_FILE=" + index}, "ls-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(out)
+}
+
+// COMBINED-FAILURE HANDLING, WITH AN INJECTED PATCH APPLIER. A conflict that
+// only the combination of three or more children shows cannot be built from
+// real git patches, so this test stands in for git on exactly one application:
+// trial that adds split.3 on top of the accepted split.1 and split.2. Every individual build and pair trial, and every other application,
+// still runs real git. The stub also dirties the failed trial index, as a git
+// apply that stops half-way would, and checks that the child applied after the
+// failure sees the accepted changes and none of that debris.
+//
+// It asserts the failing child alone is held out and mapped to the accepted
+// ones, the accepted changes stay intact, the held change stays a reviewable
+// proposal, and the next node's base holds only the accepted changes.
+func TestFanOutCombinedOnlyFailureHoldsOutJustThatChildAndLeavesTheBaseClean(t *testing.T) {
+	p := committedProject(t)
+	s, _ := p.Settings()
+	w, profiles := fanOutWorkflow(s, 4, "auto-within-cap")
+	r := splitRun(t, p, w, profiles)
+	f := newFanOutFixture(4)
+
+	var mu sync.Mutex
+	combinedFailures, checkedAfterFailure := 0, 0
+	stub := func(root, index, patch string) error {
+		body, err := os.ReadFile(patch)
+		if err != nil {
+			return err
+		}
+		have := indexFiles(t, root, index)
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.Contains(string(body), "split.3.txt") && Has(have, "split.1.txt") && Has(have, "split.2.txt") {
+			combinedFailures++
+			// An empty blob, written to the object store, placed in the trial index.
+			write := exec.Command("git", "hash-object", "-w", "--stdin")
+			write.Dir, write.Stdin = root, strings.NewReader("")
+			blob, err := write.Output()
+			if err != nil {
+				t.Errorf("planting debris: %v", err)
+			}
+			debris := exec.Command("git", "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(string(blob))+",contaminated.txt")
+			debris.Dir, debris.Env = root, append(os.Environ(), "GIT_INDEX_FILE="+index)
+			if out, err := debris.CombinedOutput(); err != nil {
+				t.Errorf("planting debris: %v %s", err, out)
+			}
+			return fmt.Errorf("injected: split.3 does not apply on top of split.1 and split.2")
+		}
+		if strings.Contains(string(body), "split.4.txt") && Has(have, "split.1.txt") && Has(have, "split.2.txt") {
+			// The accumulated index after the failure: both accepted changes
+			// are still there and the failed trial left nothing in it.
+			checkedAfterFailure++
+			if Has(have, "contaminated.txt") || Has(have, "split.3.txt") {
+				t.Errorf("the failed application reached the accumulated index: %v", have)
+			}
+		}
+		return gitApplyCached(root, index, patch)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	engine := NewEngine(p, r, testInvoker(f.invoke))
+	engine.patchApply = stub
+	done := make(chan error, 1)
+	go func() { done <- engine.Execute(ctx, false, false) }()
+	events := finished(t, p, r, done)
+
+	if combinedFailures != 1 || checkedAfterFailure != 1 {
+		t.Fatalf("the injected failure ran %d times and split.4 was checked after it %d times; want once each", combinedFailures, checkedAfterFailure)
+	}
+
+	result := fanOutResult(t, p, r, events, "split")
+	results := anySlice(result["results"])
+	if len(results) != 4 {
+		t.Fatalf("results %v", results)
+	}
+	changeOf := map[string]string{}
+	for _, v := range results {
+		m := v.(map[string]any)
+		id := str(m["childId"])
+		changeOf[id] = strings.Join(stringSlice(m["changeIds"]), ",")
+		held := m["conflict"] == true
+		if m["status"] != "succeeded" || held != (id == "split.3") {
+			t.Fatalf("%s: %v (only split.3 may be held)", id, m)
+		}
+		if held && strings.Join(stringSlice(m["conflictsWith"]), ",") != "split.1,split.2" {
+			t.Fatalf("split.3 is held against %v, want the accepted split.1 and split.2", m["conflictsWith"])
+		}
+	}
+
+	// One journaled conflict: split.3 alone, with a pair for each accepted child.
+	var conflict Event
+	for _, v := range events {
+		if v.Type == "fanout.conflict" {
+			conflict = v
+		}
+	}
+	if countEvents(events, "fanout.conflict", "split") != 1 || strings.Join(stringSlice(conflict.Data["children"]), ",") != "split.3" || strings.Join(stringSlice(conflict.Data["changeIds"]), ",") != changeOf["split.3"] || len(anySlice(conflict.Data["pairs"])) != 2 {
+		t.Fatalf("conflict event %+v", conflict)
+	}
+
+	// The node pins the accepted changes only, in order; every change is still a proposal.
+	var packet Packet
+	for _, v := range events {
+		if v.Type == "node.completed" && str(v.Data["nodeId"]) == "split" {
+			packet, _ = p.ReadPacket(r.ID, str(v.Data["messageId"]))
+		}
+	}
+	wantPinned := changeOf["split.1"] + "," + changeOf["split.2"] + "," + changeOf["split.4"]
+	if got := strings.Join(stringSlice(packet["arenaChangeIds"]), ","); got != wantPinned {
+		t.Fatalf("pinned %s, want %s", got, wantPinned)
+	}
+	for id, state := range changeStates(t, p, r) {
+		if state != "proposed" {
+			t.Fatalf("change %s is %q; nothing may be dropped or integrated", id, state)
+		}
+	}
+
+	// The next node's base, built from the pinned changes, holds the accepted
+	// changes and neither the held one nor any debris from the failed trial.
+	if strings.Join(f.saw, ",") != "split.1.txt,split.2.txt,split.4.txt" || Has(f.files, "contaminated.txt") || Has(f.files, "split.3.txt") {
+		t.Fatalf("the reviewer's workspace holds %v (split files %v)", f.files, f.saw)
 	}
 }

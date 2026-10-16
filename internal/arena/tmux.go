@@ -49,6 +49,17 @@ func checkTmuxVersion(ctx context.Context, bin string) error {
 	return nil
 }
 
+// tmuxStep is one tmux command of a run's layout.
+type tmuxStep struct {
+	argv []string
+	// required marks the setup the documented behaviour depends on: the session
+	// whose pane 0 supervises the run, and keeping that pane, with the run's final
+	// output, on screen after the supervisor exits. A required step that fails is
+	// an error even when it comes after new-session. Everything else only places
+	// optional observer panes and focus, and costs only that when it fails.
+	required bool
+}
+
 // tmuxCommands lays a run out in the user's own tmux. Window 0, pane 0 is the
 // supervisor, the process that executes the run; ending it interrupts the run,
 // as for any attached supervisor. Every other pane is an observer
@@ -59,25 +70,34 @@ func checkTmuxVersion(ctx context.Context, bin string) error {
 // directly, without a shell, so no user text is ever parsed as shell syntax.
 // The run is reserved before the layout so every pane can name it.
 func tmuxCommands(exe, root, session string, supervisor []string, runID string, agents []string) [][]string {
+	steps := tmuxLayout(exe, root, session, supervisor, runID, agents)
+	cmds := make([][]string, len(steps))
+	for i, step := range steps {
+		cmds[i] = step.argv
+	}
+	return cmds
+}
+
+func tmuxLayout(exe, root, session string, supervisor []string, runID string, agents []string) []tmuxStep {
 	pane := func(args ...string) []string { return append([]string{"--", exe}, args...) }
 	target := session + ":"
-	cmds := [][]string{
-		append([]string{"new-session", "-d", "-s", session, "-n", "run", "-c", root}, pane(append([]string{"--project", root}, supervisor...)...)...),
-		{"set-option", "-t", session, "remain-on-exit", "on"},
-		append([]string{"split-window", "-h", "-t", target + "0", "-c", root}, pane("watch", runID, "--json", "--follow", "--project", root)...),
+	required := func(argv ...string) tmuxStep { return tmuxStep{argv: argv, required: true} }
+	optional := func(argv ...string) tmuxStep { return tmuxStep{argv: argv} }
+	steps := []tmuxStep{
+		required(append([]string{"new-session", "-d", "-s", session, "-n", "run", "-c", root}, pane(append([]string{"--project", root}, supervisor...)...)...)...),
+		required("set-option", "-t", session, "remain-on-exit", "on"),
+		optional(append([]string{"split-window", "-h", "-t", target + "0", "-c", root}, pane("watch", runID, "--json", "--follow", "--project", root)...)...),
 	}
-	if len(agents) > 0 {
-		for i, id := range agents {
-			args := pane("view", "--run", runID, "--follow", "--project", root, "--", id)
-			if i == 0 {
-				cmds = append(cmds, append([]string{"new-window", "-t", target, "-n", "agents", "-c", root}, args...))
-			} else {
-				cmds = append(cmds, append([]string{"split-window", "-t", target + "1", "-c", root}, args...))
-			}
-			cmds = append(cmds, []string{"select-layout", "-t", target + "1", "tiled"})
+	for i, id := range agents {
+		args := pane("view", "--run", runID, "--follow", "--project", root, "--", id)
+		if i == 0 {
+			steps = append(steps, optional(append([]string{"new-window", "-t", target, "-n", "agents", "-c", root}, args...)...))
+		} else {
+			steps = append(steps, optional(append([]string{"split-window", "-t", target + "1", "-c", root}, args...)...))
 		}
+		steps = append(steps, optional("select-layout", "-t", target+"1", "tiled"))
 	}
-	return append(cmds, []string{"select-window", "-t", target + "0"}, []string{"select-pane", "-t", target + "0.0"})
+	return append(steps, optional("select-window", "-t", target+"0"), optional("select-pane", "-t", target+"0.0"))
 }
 
 func tmuxFinish(session string, inside bool) []string {
@@ -128,13 +148,39 @@ func (cli *CLI) tmux(ctx context.Context, p *Project, args []string, o Options) 
 		agents = append(agents, a.Id)
 	}
 	session := "arena-" + r.ID
-	for _, argv := range tmuxCommands(exe, p.Root, session, supervisor, r.ID, agents) {
-		if out, err := exec.CommandContext(ctx, bin, argv...).CombinedOutput(); err != nil {
-			_ = exec.Command(bin, "kill-session", "-t", session).Run()
-			return fmt.Errorf("tmux %s failed for run %s: %v: %s", argv[0], r.ID, err, strings.TrimSpace(string(out)))
+	skipped := []string{}
+	for i, step := range tmuxLayout(exe, p.Root, session, supervisor, r.ID, agents) {
+		out, err := exec.CommandContext(ctx, bin, step.argv...).CombinedOutput()
+		if err == nil {
+			continue
+		}
+		failure := fmt.Sprintf("tmux %s failed for run %s: %v: %s", step.argv[0], r.ID, err, strings.TrimSpace(string(out)))
+		switch {
+		case i == 0:
+			// The supervisor never started, so nothing is running.
+			return fmt.Errorf("%s", failure)
+		case step.required:
+			// The supervisor is already running. The session is left alone,
+			// since killing it would interrupt the run, and the error says so.
+			return fmt.Errorf("required tmux setup step failed: %s; the run is already live in tmux session %s, so attach with `tmux attach -t %s`, or `tmux kill-session -t %s` to interrupt it (resume with `arena resume %s`)", failure, session, session, session, r.ID)
+		default:
+			// A pane that cannot be laid out (no room, an old tmux) costs only
+			// that observer.
+			skipped = append(skipped, failure)
 		}
 	}
 	fmt.Fprintf(cli.Out, "Run %s laid out in tmux session %s; pane 0 supervises the run (ending it interrupts the run), the other panes only observe\n", r.ID, session)
+	if len(skipped) > 0 {
+		for _, failure := range skipped {
+			fmt.Fprintf(cli.Err, "Warning: optional tmux step skipped, the run is unaffected: %s\n", failure)
+		}
+		// Attaching replaces the screen, so a person at a terminal reads the
+		// warning first.
+		if cli.isTerminal() {
+			fmt.Fprint(cli.Err, "Press Enter to attach: ")
+			_, _ = cli.In.ReadString('\n')
+		}
+	}
 	finish := exec.CommandContext(ctx, bin, tmuxFinish(session, os.Getenv("TMUX") != "")...)
 	finish.Stdin, finish.Stdout, finish.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := finish.Run(); err != nil {

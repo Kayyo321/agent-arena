@@ -83,3 +83,32 @@ func TestHistoryJSONCarriesUsage(t *testing.T) {
 		t.Fatalf("%v %+v", err, out.Usage)
 	}
 }
+
+func TestUsageCountsClaudeCacheTokensAsInputButNotSubsets(t *testing.T) {
+	events := []Event{
+		{AgentID: "claude", Type: "agent.started"},
+		usageEvent("claude", map[string]any{"input_tokens": float64(10), "cache_read_input_tokens": float64(100), "cache_creation_input_tokens": float64(5), "output_tokens": float64(3)}),
+		{AgentID: "codex", Type: "agent.started"},
+		// Codex's cached count is already inside inputTokens.
+		usageEvent("codex", map[string]any{"tokenUsage": map[string]any{"total": map[string]any{"inputTokens": json.Number("200"), "cachedInputTokens": json.Number("150"), "outputTokens": json.Number("7")}}}),
+	}
+	u := SumUsage(events)
+	if c := u.Agents["claude"]; c.InputTokens != 115 || c.OutputTokens != 3 {
+		t.Fatalf("claude %+v", c)
+	}
+	if c := u.Agents["codex"]; c.InputTokens != 200 {
+		t.Fatalf("codex cached tokens were counted twice: %+v", c)
+	}
+}
+
+func TestUsagePanelListsFanOutChildrenNotTheirTemplate(t *testing.T) {
+	w, profiles, s := fixture(t)
+	w.FanOuts = []FanOut{{Id: "split", Planner: "planner", Worker: "orchestrator", MaxChildren: 2}}
+	events := []Event{{AgentID: "split.1", Type: "agent.started"}, usageEvent("split.1", map[string]any{"inputTokens": 40, "outputTokens": 8})}
+	m := LiveModel{Run: Run{ID: "run-1", Workflow: w, Profiles: profiles, Settings: s, BaseCommit: "12345678"}, Width: 100, Height: 24, State: RunState{Agents: map[string]string{}}, Events: events}
+	next, _ := m.submitInput("/usage")
+	panel := strings.Join(next.(LiveModel).PanelText, "\n")
+	if !strings.Contains(panel, "split.1 | 40 in · 8 out") || strings.Contains(panel, "orchestrator |") {
+		t.Fatalf("panel:\n%s", panel)
+	}
+}
