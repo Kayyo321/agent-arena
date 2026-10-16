@@ -2,7 +2,7 @@ GO ?= go
 PREFIX ?= $(HOME)/.local
 VERSION ?= 0.1.0-dev
 
-.PHONY: build test check generate install dist
+.PHONY: build test check bench generate install dist
 build:
 	mkdir -p bin
 	CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/Kayyo321/agent-arena/internal/arena.Version=$(VERSION)" -o bin/arena ./cmd/arena
@@ -16,6 +16,10 @@ test:
 check:
 	$(GO) vet ./...
 	$(GO) test -race ./...
+
+# Deterministic conflict and rollback benchmark; see docs/BENCHMARKS.md.
+bench:
+	$(GO) test ./internal/arena -run '^TestBench' -count=1 -v
 
 install: build
 	mkdir -p "$(PREFIX)/bin"
