@@ -62,17 +62,18 @@ nature, so the loop row has no concurrent variant.
 
 ## Results
 
-Linux amd64, Go 1.27.2, Git 2.47.3, 2026-10-16. 26 writes in total.
+Linux amd64, Go 1.27.2, Git 2.47.3, 2026-10-16. 31 writes in total.
 
 | Scenario | Writes | Arena landed / preserved / lost | Naive serial landed / lost | Naive concurrent landed / lost |
 | --- | --: | --- | --- | --- |
 | Disjoint parallel writers | 6 | 6 / 0 / 0 | 6 / 0 | 4 / 2 |
 | Overlapping hunks | 5 | 3 / 2 / 0 | 4 / 1 | 3 / 2 |
+| Overlapping fan-out children | 5 | 3 / 2 / 0 | 4 / 1 | 3 / 2 |
 | User edit between proposal and integrate | 5 | 3 / 2 / 0 | 4 / 1 | 4 / 1 |
 | Rollback, then a disjoint later edit | 3 | 3 / 0 / 0 | 1 / 2 | 1 / 2 |
 | Rollback, then an overlapping later edit | 3 | 3 / 0 / 0 | 1 / 2 | 1 / 2 |
 | Loop iteration (revision builds on the first pass) | 4 | 4 / 0 / 0 | 4 / 0 | n/a |
-| **Total** | 26 | 22 / 4 / 0 | 20 / 6 | 13 / 9 (of 22) |
+| **Total** | 31 | 25 / 6 / 0 | 24 / 7 | 16 / 11 (of 27) |
 
 In the rollback rows the writes counted are the ones that must survive the
 rollback (a second writer's change and the later edit), not the rolled-back
@@ -92,6 +93,15 @@ change itself.
   conflicted writer's work is *preserved*, not landed: Arena integrates a whole
   change, so its non-overlapping new file waits with the overlapping line. Both
   naive variants silently overwrite one of the two values.
+- **Overlapping fan-out children.** The same three writers, as the children of a
+  fan-out. Before the next node starts, the overlap check (`fanOutConflicts`, the
+  same `git apply --check` integrate runs) names the two writers that clash and
+  not the third. A reviewer workspace built on the clean child's change succeeds
+  where `composeBase` refuses the full set, and integration ends as in the
+  overlapping-hunks row. The scenario calls the check on the recorded proposals;
+  it does not run a fan-out node (`fanout_test.go` does), so the counts equal the
+  previous row by construction. It shows that the overlap is found without losing
+  either proposal, not that the counts improve.
 - **User edit between proposal and integrate.** After two proposals exist, the
   user edits `notes.txt` in the checkout. Integration is refused for both
   proposals while the checkout is dirty, the proposals stay `proposed` and the
@@ -120,7 +130,7 @@ before approval, that refused integrations and conflicted rollbacks do not move
 
 ## Limits
 
-- Small fixtures, 26 writes, one file of interest. The counts show which
+- Small fixtures, 31 writes, one file of interest. The counts show which
   behaviors hold, not how often conflicts occur in real work.
 - The naive baseline is a model with explicit assumptions (whole-file write-back
   for concurrent writers, file-level restore for rollback). A different naive

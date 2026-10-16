@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -103,6 +104,8 @@ type fanOutProgress struct {
 	approved bool
 	count    int
 	dropped  int
+	// conflicted is set once the pass journaled its fanout.conflict event.
+	conflicted bool
 	// done holds each child's terminal fanout.child.completed/failed event.
 	done map[string]Event
 }
@@ -118,6 +121,8 @@ func readFanOutProgress(events []Event, id string, iteration int) fanOutProgress
 			progress.plan, progress.planned = str(v.Data["planMessageId"]), v.Sequence
 		case "fanout.approved":
 			progress.approved, progress.count, progress.dropped = true, intValue(v.Data["count"]), intValue(v.Data["dropped"])
+		case "fanout.conflict":
+			progress.conflicted = true
 		case "fanout.child.completed", "fanout.child.failed":
 			progress.done[str(v.Data["childId"])] = v
 		}
@@ -249,6 +254,37 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 		}
 		providers = append(providers, stringSlice(parent["arenaSourceProviders"])...)
 	}
+	childChanges := map[string][]string{}
+	order := []string{}
+	for i, child := range children {
+		if outcomes[i].err == nil {
+			order = append(order, child.Id)
+			childChanges[child.Id] = stringSlice(outcomes[i].packet["arenaChangeIds"])
+		}
+	}
+	conflicts, err := e.Project.fanOutConflicts(e.Run, order, childChanges)
+	if err != nil {
+		return nil, err
+	}
+	if len(conflicts) > 0 && !progress.conflicted {
+		held := []string{}
+		pairs := [][]string{}
+		heldChanges := []string{}
+		for _, id := range order {
+			if len(conflicts[id]) > 0 {
+				held = append(held, id)
+				heldChanges = append(heldChanges, childChanges[id]...)
+				for _, other := range conflicts[id] {
+					if id < other {
+						pairs = append(pairs, []string{id, other})
+					}
+				}
+			}
+		}
+		if _, err := e.event(f.Id, "fanout.conflict", map[string]any{"fanOutId": f.Id, "iteration": iteration, "children": held, "pairs": pairs, "changeIds": heldChanges}); err != nil {
+			return nil, err
+		}
+	}
 	succeeded := 0
 	for i, child := range children {
 		result := map[string]any{"childId": child.Id, "item": items[i], "status": "failed", "messageId": nil, "changeIds": []string{}, "summary": ""}
@@ -259,7 +295,13 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 			body, _ := o.packet["payload"].(map[string]any)
 			ids := stringSlice(o.packet["arenaChangeIds"])
 			result["status"], result["messageId"], result["changeIds"], result["summary"] = "succeeded", o.packet["messageId"], ids, str(body["summary"])
-			changeIDs = append(changeIDs, ids...)
+			if with := conflicts[child.Id]; len(with) > 0 {
+				// The proposal stays reviewable but is held out of the base
+				// the next node builds on, so the run goes on.
+				result["conflict"], result["conflictsWith"] = true, with
+			} else {
+				changeIDs = append(changeIDs, ids...)
+			}
 		}
 		results = append(results, result)
 	}
@@ -269,6 +311,9 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 	summary := fmt.Sprintf("Fan-out %s: %d of %d children succeeded.", f.Id, succeeded, len(children))
 	if len(items) == 0 {
 		summary = fmt.Sprintf("Fan-out %s: the planner found no work items.", f.Id)
+	}
+	if len(conflicts) > 0 {
+		summary += fmt.Sprintf(" %d children conflict with each other: their changes stay proposed for review and are left out of the next node's workspace.", len(conflicts))
 	}
 	if progress.dropped > 0 {
 		summary += fmt.Sprintf(" %d planned items were dropped at the cap.", progress.dropped)
@@ -287,10 +332,74 @@ func (e *Engine) fanOut(ctx context.Context, f FanOut, parents []Packet) (Packet
 	if _, err := e.Project.Deliver(e.Run, packet); err != nil {
 		return nil, err
 	}
-	if _, err := e.event(f.Id, "fanout.completed", map[string]any{"fanOutId": f.Id, "iteration": iteration, "messageId": packet["messageId"], "succeeded": succeeded, "failed": len(children) - succeeded, "dropped": len(dropped)}); err != nil {
+	if _, err := e.event(f.Id, "fanout.completed", map[string]any{"fanOutId": f.Id, "iteration": iteration, "messageId": packet["messageId"], "succeeded": succeeded, "failed": len(children) - succeeded, "dropped": len(dropped), "conflicting": len(conflicts)}); err != nil {
 		return nil, err
 	}
 	return packet, nil
+}
+
+// fanOutConflicts finds the children whose changes cannot both be applied to
+// the base they share, using the check integrate runs: the first child's
+// patch goes into a scratch index, then git apply --check tries the second's.
+// A child that clashes with any sibling maps to the siblings it clashes with,
+// in order. Nothing is chosen between them and nothing is dropped.
+func (p *Project) fanOutConflicts(r Run, order []string, changes map[string][]string) (map[string][]string, error) {
+	conflicts := map[string][]string{}
+	for i, a := range order {
+		for _, b := range order[i+1:] {
+			clash, err := p.changesClash(r, changes[a], changes[b])
+			if err != nil {
+				return nil, err
+			}
+			if clash {
+				conflicts[a], conflicts[b] = append(conflicts[a], b), append(conflicts[b], a)
+			}
+		}
+	}
+	return conflicts, nil
+}
+
+func (p *Project) changesClash(r Run, first, second []string) (bool, error) {
+	if len(first) == 0 || len(second) == 0 {
+		return false, nil
+	}
+	base, err := p.Change(r.ID, first[0])
+	if err != nil {
+		return false, err
+	}
+	index := p.Path(".state", "indices", ID("overlap-"))
+	if err := os.MkdirAll(filepath.Dir(index), 0700); err != nil {
+		return false, err
+	}
+	defer os.Remove(index)
+	env := []string{"GIT_INDEX_FILE=" + index}
+	if _, err := gitEnv(p.Root, env, "read-tree", base.Base); err != nil {
+		return false, err
+	}
+	patch := func(id string) (string, error) {
+		path := filepath.Join(p.RunDir(r.ID), "changes", id+".patch")
+		_, err := os.Stat(path)
+		return path, err
+	}
+	for _, id := range first {
+		path, err := patch(id)
+		if err != nil {
+			return false, err
+		}
+		if _, err := gitEnv(p.Root, env, "apply", "--cached", path); err != nil {
+			return false, fmt.Errorf("change %s does not apply to its own base: %w", id, err)
+		}
+	}
+	for _, id := range second {
+		path, err := patch(id)
+		if err != nil {
+			return false, err
+		}
+		if _, err := gitEnv(p.Root, env, "apply", "--cached", "--check", path); err != nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // approveFanOut settles how many planned items run: within the cap an
