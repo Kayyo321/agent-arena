@@ -3,6 +3,7 @@ package arena
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -151,5 +152,58 @@ func TestOrchestratorCannotTurnOnBlanketApproval(t *testing.T) {
 	// A revision may keep the user's existing choice.
 	if _, err := decodeRevision(s, string(JSON(blanket)), blanket.Workflow, "v1"); err != nil {
 		t.Fatalf("revision that keeps the user's choice: %v", err)
+	}
+}
+
+func TestSaveNeedsTheUsersOwnBlanketApproval(t *testing.T) {
+	m := interviewModel(t)
+	m.Interview.invoker = testInvoker(func(ctx context.Context, in Invocation) (map[string]any, error) {
+		if err := in.Delivered(); err != nil {
+			return nil, err
+		}
+		// The orchestrator sets the mode even though the user declined it.
+		return map[string]any{"question": "Drafted.", "complete": true, "builderRequestJson": ideaDraft("agy-arena", false, blanketRuntime)}, nil
+	})
+	next, cmd := m.submit("An Antigravity builder, but no blanket approval")
+	m = pumpInterview(t, next.(LiveModel), cmd, "")
+	if m.Draft == nil || !strings.Contains(strings.Join(m.bodyLines(120, false), "\n"), "/save allow-blanket") {
+		t.Fatalf("draft or consent hint missing: %s", m.Error)
+	}
+	next, cmd = m.submit("/save no-commit")
+	if m = next.(LiveModel); cmd != nil || !strings.Contains(m.Error, "Only you can choose it") {
+		t.Fatalf("/save kept the orchestrator's blanket approval: %q", m.Error)
+	}
+	if _, _, err := m.Project.Load("agy-arena"); err == nil {
+		t.Fatal("arena saved without the user's choice")
+	}
+	next, cmd = m.submit("/save no-commit allow-blanket")
+	m = next.(LiveModel)
+	next, _ = m.Update(cmd())
+	if m = next.(LiveModel); m.Error != "" || m.Run.Workflow.Id != "agy-arena" {
+		t.Fatalf("/save allow-blanket: %s", m.Error)
+	}
+	events, _ := m.Project.Events("project")
+	chosen := false
+	for _, event := range events {
+		chosen = chosen || event.Type == "workflow.saved" && event.Data["blanketApprovalChosenBy"] == "user"
+	}
+	if !chosen {
+		t.Fatal("the user's blanket choice was not audited")
+	}
+	if usage := slashUsage["/save"][0]; usage != "/save [no-commit] [allow-blanket]" {
+		t.Fatalf("/help usage: %q", usage)
+	}
+}
+
+func TestWalkthroughReportsASetupErrorInsteadOfPanicking(t *testing.T) {
+	m := interviewModel(t)
+	// Without the control profile, setupInvocation fails before any schema exists.
+	if err := os.Remove(m.Project.Path(m.Run.Settings.PermanentOnCallAgent.Profile)); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd := m.submit("/walkthrough")
+	m = pumpInterview(t, next.(LiveModel), cmd, "")
+	if m.Error == "" || !strings.Contains(m.Chat[len(m.Chat)-1].Text, "Request failed") {
+		t.Fatalf("setup error not reported: %q", m.Error)
 	}
 }

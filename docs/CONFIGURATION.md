@@ -147,7 +147,9 @@ name every agent that uses it.
 
 With the option set and `run_commands` granted, Arena runs
 `agy --sandbox --dangerously-skip-permissions` inside its *command fence*, which
-is Linux only (bubblewrap 0.11 or newer). On macOS Arena refuses the mode: agy
+is Linux only (bubblewrap 0.11 or newer). The orchestrator never chooses it: a
+setup draft that sets it saves only when you type `/save allow-blanket`, and
+walkthrough ideas and `/consult` revisions that add it are refused. On macOS Arena refuses the mode: agy
 keeps its sign-in in the Keychain, and `sandbox-exec` cannot let it reach that
 item while keeping commands away from every other Keychain item.
 

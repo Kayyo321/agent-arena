@@ -243,6 +243,9 @@ func (m LiveModel) chatBody(width int, color bool) []string {
 		if note := blanketApprovalNote(m.Draft.Workflow, m.Draft.Profiles); note != "" && m.Draft.Source != "share-import" {
 			preview = append(preview, note)
 		}
+		if agents := m.Draft.modelBlanket(); len(agents) > 0 {
+			preview = append(preview, "The orchestrator cannot choose blanket approval ("+strings.Join(agents, ", ")+"). /save allow-blanket chooses it yourself; otherwise ask it to remove it.")
+		}
 		preview = append(preview, GraphSummary(m.Draft.Workflow))
 		preview = append(preview, "Review runtimes and policy above. /save applies this draft; typing revises it.")
 		lines = append(lines, plainUILines(preview, width)...)

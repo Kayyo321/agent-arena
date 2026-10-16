@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -242,5 +243,33 @@ echo '{"event":"result","result":{"status":"SUCCESS","response":"{}","structured
 	}
 	if followup := recorded(t, probe, "followup"); !strings.Contains(followup, "list_dir") {
 		t.Fatalf("follow-up turn: %s", followup)
+	}
+}
+
+func TestWriteFenceKeepsAgyStateDisposable(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		if err := writeFenceError(); err == nil || !strings.Contains(err.Error(), "Linux only") {
+			t.Fatalf("write fence off Linux must refuse: %v", err)
+		}
+		return
+	}
+	if !writeFenceAvailable() {
+		t.Skip(writeFenceError())
+	}
+	home, tree := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	state := antigravityStateDir(home)
+	if err := os.MkdirAll(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("true")
+	if err := writeFence(cmd, nil, []string{tree}, state); err != nil {
+		t.Fatal(err)
+	}
+	if argRun(cmd.Args, "--tmp-overlay", state) < 0 || argRun(cmd.Args, "--bind", state, state) >= 0 {
+		t.Fatalf("agy state must be a throwaway overlay, never a writable bind: %q", cmd.Args)
+	}
+	if argRun(cmd.Args, "--ro-bind", "/", "/") < 0 || argRun(cmd.Args, "--bind", "/", "/") >= 0 {
+		t.Fatalf("root must be read-only: %q", cmd.Args)
 	}
 }

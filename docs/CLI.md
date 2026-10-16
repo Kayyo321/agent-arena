@@ -174,7 +174,7 @@ Slash commands are available in setup and the graph:
 | `/walkthrough [NOTE]` | Compare two or three arena ideas (roles, suggested providers, rough cost, grade) before the interview drafts the one you pick |
 | `/consult [QUESTION]` | Ask the control agent about the loaded arena or run; it only advises, and a proposed edit is a draft until `/save` |
 | `/pan` | Pan the graph with ←↑↓→ and press Space to recenter; Esc, Enter or typing leaves pan mode and keeps the view, and `/graph` recenters |
-| `/save [no-commit]` | Apply an explicitly reviewed setup draft or `/consult` revision and commit the scaffold; never overwrite another workflow or an arena changed since the revision was proposed |
+| `/save [no-commit] [allow-blanket]` | Apply an explicitly reviewed setup draft or `/consult` revision and commit the scaffold; never overwrite another workflow or an arena changed since the revision was proposed. A draft written by the orchestrator that turns on Antigravity blanket approval saves only with `allow-blanket`, which is your own choice and is audited |
 | `/run TASK`, `/pause`, `/resume`, `/cancel` | Control attached work |
 | `/events`, `/git`, `/changes`, `/teams` | Inspect audit, worktrees, patches and team members |
 | `/status`, `/refresh` | Inspect required providers or refresh the selected context/status |

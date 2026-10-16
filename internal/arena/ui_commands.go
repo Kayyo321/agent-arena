@@ -37,7 +37,7 @@ var slashHelp = []string{
 	"/accept                     Apply the orchestrator's recommended answer",
 	"$ COMMAND                   Run a shell command in the project root",
 	"/integrate CHANGE_ID        Integrate a reviewed change",
-	"/save [no-commit]           Save the previewed draft and commit the scaffold",
+	"/save [no-commit] [allow-blanket]  Save the previewed draft; allow-blanket confirms Antigravity blanket approval",
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
 	"/quit                       Exit; preserve attached run history",
@@ -243,9 +243,19 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			}
 			return m, operation
 		case "save":
-			commit := arg != "no-commit"
-			if arg != "" && arg != "no-commit" {
-				m.Error = "usage: /save [no-commit]"
+			commit, allowBlanket, usage := true, false, false
+			for _, option := range strings.Fields(arg) {
+				switch option {
+				case "no-commit":
+					commit = false
+				case "allow-blanket":
+					allowBlanket = true
+				default:
+					usage = true
+				}
+			}
+			if usage {
+				m.Error = "usage: /save [no-commit] [allow-blanket]"
 				break
 			}
 			if m.ChatBusy || m.Draft == nil {
@@ -260,6 +270,13 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				m.Error = "project workflow-edit policy refuses agent proposals"
 				break
 			}
+			// The orchestrator never chooses blanket approval; the user does,
+			// here, after seeing what it allows.
+			blanket := m.Draft.modelBlanket()
+			if len(blanket) > 0 && !allowBlanket {
+				m.Error = "This draft turns on Antigravity blanket command approval for " + strings.Join(blanket, ", ") + ": agy auto-approves every tool request and keeps the network for inference. Only you can choose it: /save allow-blanket, or ask the orchestrator to remove it"
+				break
+			}
 			draft := *m.Draft
 			m.ChatBusy = true
 			operation := func() tea.Msg {
@@ -271,7 +288,11 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 				if source == "" {
 					source = "tui-setup"
 				}
-				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", map[string]any{"source": source, "approvedBy": "user"})
+				audit := map[string]any{"source": source, "approvedBy": "user"}
+				if len(blanket) > 0 {
+					audit["blanketApprovalChosenBy"], audit["blanketApprovalAgents"] = "user", blanket
+				}
+				err = m.Project.Audit(draft.Workflow.Id, "workflow.saved", audit)
 				if err != nil {
 					return draftSaved{Err: fmt.Errorf("workflow saved, audit failed: %w", err)}
 				}

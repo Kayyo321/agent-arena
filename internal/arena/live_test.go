@@ -256,8 +256,10 @@ func TestLiveMultiProviderTeamWorkflow(t *testing.T) {
 			t.Fatal(err)
 		}
 		payload, _ := packet["payload"].(map[string]any)
+		t.Logf("team packet: %s outcome=%v verdict=%v", event.Type, payload["outcome"], payload["verdict"])
 		for _, position := range anySlice(payload["memberPositions"]) {
 			entry, _ := position.(map[string]any)
+			t.Logf("member %v (%v, verdict %v): %v", entry["agentId"], entry["status"], entry["verdict"], Redact(short(str(entry["summary"]), 200)))
 			if entry["status"] == "unavailable" {
 				t.Fatalf("a real adapter did not return a position: %v", entry)
 			}

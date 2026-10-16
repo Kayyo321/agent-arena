@@ -57,7 +57,7 @@ The last items before release, in order. Item 4 closes the list. Items 1-3 are i
 
 ## M3 — Provider adapters and handoffs
 
-**Status: implementation present; live multi-provider exit check PENDING.** Real Codex `gpt-6.1-sol` / `high` read-only inference passed. Claude API/cloud, Gemini API-key/Vertex and local contracts are implemented with fixture/interface coverage. The owner will supply a second approved route; do not mark this milestone complete before it is exercised. An opt-in multi-provider team workflow test is prepared.
+**Status: implementation present; live multi-provider exit passed (2026-10-16).** Real Codex `gpt-6.1-sol` / `high` read-only inference passed, and in the production-readiness sweep a Codex plus Antigravity (`gemini-3.8-flash-medium`, the owner's chosen second route) team workflow passed live for both reviewers; see [validation evidence](VALIDATION.md#production-readiness-sweep-2026-10-16). Claude API/cloud, Gemini API-key/Vertex and local contracts are implemented with fixture/interface coverage. The opt-in multi-provider team workflow test is the exit check; Claude Code, Gemini and local routes still need their own live runs before they are called verified.
 
 - Implement capability-based adapter interface and readiness checks.
 - Add Codex CLI and Claude Code adapters through their current supported local interfaces.
@@ -97,7 +97,7 @@ The last items before release, in order. Item 4 closes the list. Items 1-3 are i
 
 ## M6 — Skill distribution and additional adapters
 
-**Status: skill/compatibility implementation complete; adapter portability exit PENDING M3 live verification.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. No unsupported execution adapter is advertised; audit export/import and expanded team policies remain deferred considerations.
+**Status: skill/compatibility implementation complete; adapter portability exit met for Codex and Antigravity with the M3 live run; other adapters remain fixture-covered.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. No unsupported execution adapter is advertised; audit export/import and expanded team policies remain deferred considerations.
 
 - Extend the bootstrap/skill installer to more supported project/user skill locations beyond the initial Codex, Claude Code, and Gemini CLI targets.
 - Add adapter compatibility manifests and version drift reporting.

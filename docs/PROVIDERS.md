@@ -106,13 +106,13 @@ level, and `--effort` is passed only when selected.
 
 Version 1.3.6 headless mode writes files without asking, ignores `--mode plan`
 alongside disabled slash commands, and auto-denies terminal commands. Arena
-therefore wraps it in a write fence (bubblewrap on Linux; `sandbox-exec` on macOS, not yet exercised there):
+therefore wraps it in a write fence (Linux, bubblewrap 0.11 or newer; Arena refuses Antigravity elsewhere, because it cannot keep agy's own state disposable there):
 the whole filesystem, including the home directory and the project, is read-only;
 a writer's own worktree is writable again, `/tmp` is private, caches go to that
-`/tmp`, and `agy`'s state (`~/.gemini/antigravity-cli`) is writable through a
-throwaway overlay where bubblewrap supports one (0.11+; older bubblewrap binds it
-writable). On macOS writes are denied everywhere except the worktree, `agy`'s
-state, the per-user temporary directory and `/dev`. The fence confines writes, not
+`/tmp`, and `agy`'s state (`~/.gemini/antigravity-cli`) is writable only through a
+throwaway overlay, so nothing a reader or writer writes there survives the run.
+Without bubblewrap's `--tmp-overlay`, and on macOS, readiness reports Antigravity
+as unsupported rather than mount that state writable. The fence confines writes, not
 reads or networking: `agy` reaches its keyring sign-in and its model as usual. Agents with `run_commands` are
 refused unless the user opts the runtime into `commandApproval: "sandboxed-blanket"`:
 Arena then adds `--sandbox --dangerously-skip-permissions` and swaps the write fence

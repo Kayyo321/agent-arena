@@ -10,6 +10,16 @@ import (
 	assets "github.com/Kayyo321/agent-arena"
 )
 
+// modelBlanket lists the agents an orchestrator-written draft opts into
+// Antigravity's blanket approval; /save needs the user's own allow-blanket
+// for them. A pasted arena carries its author's consent note instead.
+func (d WorkflowDraft) modelBlanket() []string {
+	if d.Source == "share-import" {
+		return nil
+	}
+	return newBlanketApproval(d.Workflow, Workflow{})
+}
+
 type WorkflowDraft struct {
 	Workflow Workflow           `json:"workflow"`
 	Profiles map[string]Profile `json:"profiles"`
@@ -29,7 +39,7 @@ type WorkflowDraft struct {
 const arenaDesignRules = `Choices and delegation:
 - Each worker's provider, model and supported reasoning effort is the user's choice. The user can make it by delegating explicitly ("you pick", "come up with the efforts for me", "whatever fits"). When they do, choose concrete values yourself from the supplied model catalog and supported efforts, apply them, and list each value you chose in your reply. Never ask again about a delegated choice.
 - Apply shorthand as the user wrote it: "all", "every agent" or "same as 1" applies that value to every matching agent. If a list could be read more than one way, pick the most reasonable reading, say which you used, and continue.
-- Antigravity agents cannot run commands unless the user explicitly chooses runtime.options.commandApproval "sandboxed-blanket": agy then auto-approves every tool request inside Arena's command fence. Each command runs with an emptied home, no credentials and no network, but agy itself keeps the network for inference, so a prompt-injected agent can still pass on what it reads in a model turn. It is the user's choice alone, like the claude-code-sign-in route. Never set it yourself, not even when other choices are delegated; if an Antigravity agent needs run_commands, ask whether the user chooses this mode or another provider, and name the network risk when you ask.
+- Antigravity agents cannot run commands unless the user explicitly chooses runtime.options.commandApproval "sandboxed-blanket": agy then auto-approves every tool request inside Arena's command fence. Each command runs with an emptied home, no credentials and no network, but agy itself keeps the network for inference, so a prompt-injected agent can still pass on what it reads in a model turn. It is the user's choice alone, like the claude-code-sign-in route. Never set it yourself, not even when other choices are delegated; if an Antigravity agent needs run_commands, ask whether the user chooses this mode or another provider, and name the network risk when you ask. Set it only after the user chooses it in their own words; Arena then still saves the draft only when the user types /save allow-blanket.
 - Your own control runtime belongs only to you. Assign it to a worker only when the user names it or says to reuse yours.
 - For everything else (roles, profiles, verdict labels, edges, teams, router fallback, on-call limits, workflow policies) propose sensible values that satisfy the request instead of asking. Ask only when a choice depends on intent you cannot infer, and ask every open question together in one message.
 - Do not ask about worker readiness; Arena checks each runtime when the graph opens and before every run.
@@ -177,6 +187,9 @@ func (s *interviewSession) turn(transcript, mode string, attachments ...Attachme
 		kind: "setup",
 		build: func() (Invocation, Packet, error) {
 			in, packet, err := setupInvocation(s.project, s.settings, transcript)
+			if err != nil {
+				return in, packet, err
+			}
 			switch mode {
 			case setupWalkthrough:
 				in.Prompt += "\n" + walkthroughInstructions

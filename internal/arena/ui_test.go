@@ -59,6 +59,7 @@ func TestPacketAnimationStopsAtRecordedDeliveryOrFailure(t *testing.T) {
 }
 
 func TestRouterBranchesSplitFromStemWithOwnLabels(t *testing.T) {
+	unicodeTerminal(t)
 	w := NewWorkflow("branches", "Branches")
 	w.HeadAgent = "lead"
 	w.Agents = []Agent{{Id: "lead", Level: Int(0), Runtime: Runtime{Provider: "codex", Model: "m"}}}
@@ -226,4 +227,13 @@ func TestSlashMenuSuggestsAndFillsWithoutRunning(t *testing.T) {
 	if len(m.slashSuggestions()) != 0 {
 		t.Fatal("plain text opened the menu")
 	}
+}
+
+// unicodeTerminal pins the terminal a presentation test assumes: a colour,
+// UTF-8, non-dumb terminal. Fallback modes have their own tests.
+func unicodeTerminal(t *testing.T) {
+	t.Helper()
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("NO_COLOR", "")
 }

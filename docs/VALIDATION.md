@@ -79,15 +79,39 @@ not additional live-provider verification.
   background app-server returned a structured question for missing choices,
   preserved the versioned/audited handoff, and saved no workflow or run. This is
   backend inference evidence; the full terminal interaction above uses fixtures.
-- **Claude Code:** installed `2.1.224`; supported flags inspected. No approved API/cloud
-  route was available for inference. Subscription OAuth is refused for Arena.
+- **Claude Code:** the API-key/cloud route has no live evidence (no key or cloud
+  project was available). The `claude-code-sign-in` route is implemented as an
+  explicit user choice under the user's own plan; one-turn probes with CLI 2.1.301
+  confirmed its tool restriction and `structured_output` (see
+  [Providers](PROVIDERS.md)), but no Arena workflow has run on it live. Arena never
+  selects it by default and never reads its credentials.
 - **Gemini:** official Google GenAI SDK v1.75.0 builds. Live API-key/Vertex access has not
   been exercised. Personal Gemini CLI OAuth is excluded.
 - **Local:** HTTP streaming, discovery and mediated tool contracts have fixture coverage.
   A real backend/model has not been selected or exercised.
 
-The owner authorized Codex `gpt-6.1-sol` / `high` and will supply a second approved
-route. **M3 and the adapter-portability part of M6 remain pending that verification.**
+The owner authorized Codex `gpt-6.1-sol` / `high` and, for the production-readiness
+sweep, chose Antigravity under its own sign-in (`gemini-3.8-flash-medium`, agy 1.4.0)
+as the second route. **The M3 live multi-provider exit passed** on 2026-10-16 (Linux
+amd64): see the sweep evidence below. The adapter-portability part of M6 is met for
+Codex and Antigravity; Claude Code, Gemini and local adapters still have fixture or
+probe evidence only.
+
+## Production readiness sweep (2026-10-16)
+
+Evidence kinds: *fixture* tests use fake CLIs and invokers, *live* runs spend real
+provider inference, and earlier sections are historical snapshots of the commits
+named there. The sweep's review team, Claude Fable 5.1 and Codex GPT-6-Astra, each
+reviewed independently in a scratch clone on Linux amd64 (bubblewrap 0.12).
+
+At commit 79c3be7 both reviewers ran the live exits once each, and all passed:
+`TestLiveCodexReadOnlyWorkflow`, `TestLiveCodexMCPBridgeDiscovery`, and
+`TestLiveMultiProviderTeamWorkflow` with Codex `gpt-6.1-sol` / `high` plus
+Antigravity `gemini-3.8-flash-medium`. In the team run agy ran read-only inside the
+write fence, reached its own sign-in and returned a real member position (Fable's
+run: 10.56 s, 0.58 s and 188.14 s). The team test now logs its packet outcome and
+member positions. Review findings and their fixes are recorded in the commits that
+follow; release waits for both reviewers to approve the same commit.
 
 ## Reproduce
 
