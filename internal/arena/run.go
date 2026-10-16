@@ -21,6 +21,9 @@ type Run struct {
 	BaseCommit  string             `json:"baseCommit"`
 	Retention   string             `json:"retention"`
 	Simulated   bool               `json:"simulated"`
+	// FanOutChildren are the worker instances fan-out nodes started in this
+	// run. They stay out of Workflow, which remains the validated static graph.
+	FanOutChildren []FanOutChild `json:"fanOutChildren,omitempty"`
 	// Score caches the arena's grade for the live view; it is never persisted.
 	Score *Scorecard `json:"-"`
 }
@@ -70,7 +73,7 @@ func (p *Project) ReadRun(id string) (Run, error) {
 		return r, e
 	}
 	var current Run
-	if err := ReadJSON(filepath.Join(p.RunDir(id), "current-config.json"), &current); err == nil {
+	if err := ReadJSON(filepath.Join(p.RunDir(id), currentConfigFile), &current); err == nil {
 		r = current
 	} else if !os.IsNotExist(err) {
 		return r, err

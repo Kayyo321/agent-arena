@@ -14,7 +14,7 @@ import (
 const maxInboxWait = 120
 
 func ServeMCP(ctx context.Context, p *Project, r Run, actor string, in io.Reader, out io.Writer) error {
-	agent, ok := agentByID(r.Workflow, actor)
+	agent, ok := r.agent(actor)
 	if !ok {
 		return fmt.Errorf("MCP actor is not in this workflow")
 	}

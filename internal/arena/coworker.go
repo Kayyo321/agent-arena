@@ -44,6 +44,9 @@ func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approv
 	}
 	source, ok := agentByID(w, q.From)
 	if !ok {
+		if f := fanOutChildOf(w, q.From); f != "" {
+			return q, fmt.Errorf("fan-out children cannot request coworkers; fan-out %s caps its own agents with maxChildren", f)
+		}
 		return q, fmt.Errorf("requesting agent is not in the workflow")
 	}
 	if q.ID == "" {
@@ -169,6 +172,11 @@ func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approv
 	for _, team := range w.Teams {
 		if Has(team.Members, source.Id) {
 			parent = team.Id
+		}
+	}
+	for _, f := range w.FanOuts {
+		if f.Planner == source.Id || f.Worker == source.Id {
+			parent = f.Id
 		}
 	}
 	node := Agent{Id: q.AgentID, Level: &level, Profile: ".agents/" + w.Id + "/" + q.AgentID + ".agent.json", Runtime: q.Runtime}
