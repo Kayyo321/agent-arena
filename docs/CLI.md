@@ -301,6 +301,8 @@ shows `Output recorded: N bytes` where the text would be.
 
 ### Running a run in tmux
 
+For SSH devboxes see [DEVBOX](DEVBOX.md).
+
 `arena tmux run WORKFLOW TASK` and `arena tmux resume RUN [--retry-interrupted]` lay a
 run out in your own `tmux` (optional: if it is missing, the command says so and exits;
 Arena never installs it):
