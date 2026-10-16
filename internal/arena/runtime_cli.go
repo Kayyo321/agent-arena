@@ -52,6 +52,8 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		return ServeMCP(ctx, p, r, o.Get("actor"), cli.In, cli.Out)
 	case "run", "resume":
 		return cli.execute(ctx, p, args, o)
+	case "tmux":
+		return cli.tmux(ctx, p, args, o)
 	case "watch":
 		if len(args) != 2 {
 			return fmt.Errorf("watch requires run ID")

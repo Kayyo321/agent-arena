@@ -223,6 +223,11 @@ view's rules: redacted, and without escape or control sequences. Their output is
 building block for panes that mirror a run; see [CLI](CLI.md#structured-terminal-streams)
 for flags and exit behaviour.
 
+`arena tmux run WORKFLOW TASK` arranges these streams in tmux: the supervisor in pane 0
+(ending it interrupts the run), an event feed beside it, and one agent view per agent in
+a second tiled window. Every observer pane is a journal projection and can be closed
+freely; see [CLI](CLI.md#running-a-run-in-tmux).
+
 ## Fit and accessibility
 
 Arena measures terminal dimensions and lays out the graph to fit. It first shortens labels, then hides nonessential decoration, then collapses distant graph sections behind selectable summaries. Users can pan or focus a node to inspect larger graphs: `/pan` moves a camera over the graph with the arrow keys, keeps the graph block's height so the rows below it stay put, and Space snaps back to the centered layout. The `/help` bar and prompt stay visible. At very small sizes, the title and Git tree collapse to compact headers and the graph becomes a navigable list; no agent, edge, pending decision, or provider failure is silently dropped.

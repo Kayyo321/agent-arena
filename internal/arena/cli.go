@@ -974,6 +974,7 @@ arena watch RUN [--plain]
 arena watch RUN --json [--follow]   One journal event per line; --follow tails until the run ends
 arena view AGENT --run RUN [--follow]   One agent's activity as plain text
 arena resume RUN [--retry-interrupted] [--plain]
+arena tmux run WORKFLOW TASK | arena tmux resume RUN   Lay a run out in tmux (pane 0 supervises)
 arena pause|cancel RUN
 arena checkpoint list|show|restore [ID] [--yes]
 arena changes RUN [CHANGE]
