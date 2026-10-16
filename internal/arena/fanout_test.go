@@ -808,3 +808,55 @@ func TestFanOutScoreCountsEveryAllowedChild(t *testing.T) {
 		t.Fatalf("rough cost must count every allowed child: %s", roughCost(w))
 	}
 }
+
+func TestFanOutIsCreatableWithoutHandEditing(t *testing.T) {
+	p := committedProject(t)
+	s, err := p.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The guided builder adds the node to a draft that has its agents.
+	w, profiles := fanOutWorkflow(s, 4, "required")
+	w.FanOuts = nil
+	w.Relationships = nil
+	script := strings.Join([]string{
+		"fanout", "split", "Parallel fixes", "planner", "fixer", "3", "auto-within-cap",
+		"link", "delegates", "lead", "split",
+		"link", "delegates", "split", "reviewer",
+		"finish", ""}, "\n")
+	var out strings.Builder
+	cli := NewCLI(strings.NewReader(script), &out, &out)
+	built, builtProfiles, err := cli.buildWorkflow(context.Background(), p, w, profiles)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if err := ValidateWorkflow(built, builtProfiles, s); err != nil {
+		t.Fatalf("guided fan-out does not validate: %v", err)
+	}
+	if len(built.FanOuts) != 1 || built.FanOuts[0] != (FanOut{Id: "split", Name: "Parallel fixes", Planner: "planner", Worker: "fixer", MaxChildren: 3, Approval: "auto-within-cap"}) {
+		t.Fatalf("built %+v", built.FanOuts)
+	}
+	if !strings.Contains(out.String(), "[fan-out split] planner planner, worker fixer, max 3 children; approval auto-within-cap") {
+		t.Fatalf("summary does not show the fan-out:\n%s", out.String())
+	}
+	// Editing an existing fan-out keeps its values as defaults.
+	cli = NewCLI(strings.NewReader("fanout\nsplit\n\n\n\n9\n"), &out, &out)
+	if _, _, err := cli.buildWorkflow(context.Background(), p, built, builtProfiles); err == nil || !strings.Contains(err.Error(), "between 1 and 8") {
+		t.Fatalf("maxChildren above the project limit must be refused: %v", err)
+	}
+
+	// workflow create --input takes the same node from a builder request.
+	full, fullProfiles := fanOutWorkflow(s, 4, "required")
+	request := filepath.Join(t.TempDir(), "request.json")
+	if err := os.WriteFile(request, JSON(WorkflowDraft{Workflow: full, Profiles: fullProfiles}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cli = NewCLI(strings.NewReader(""), &out, &out)
+	if err := cli.Run(context.Background(), []string{"workflow", "create", full.Id, "--input", request, "--yes", "--project", p.Root}); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	saved, _, err := p.Load(full.Id)
+	if err != nil || len(saved.FanOuts) != 1 || saved.FanOuts[0].MaxChildren != 4 {
+		t.Fatalf("saved %+v %v", saved.FanOuts, err)
+	}
+}
