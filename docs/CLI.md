@@ -418,7 +418,41 @@ transaction if its paths still match the recorded before/after versions.
 `arena history RUN retire --including-checkpoints --yes` moves run history and its
 checkpoints to recoverable local retired storage. This is retirement, not secure
 erasure or Git-object garbage collection. Review retention before exporting source
-or prompts. Audit export/import and automatic permanent deletion are not implemented.
+or prompts. Automatic permanent deletion is not implemented.
+
+### Audit export and import
+
+```sh
+arena history RUN export FILE     # write one run's redacted audit bundle
+arena history import FILE         # verify a bundle and land it read-only
+arena history --json              # [{"id": ..., "imported": true|false}, ...]
+arena history IMPORTED_RUN [--json]   # imported events; --json adds "imported": true
+```
+
+`export` writes `FILE` (private permissions; it never overwrites) in the
+`arena.audit.v1` format, described by
+[`audit-bundle.schema.json`](../schemas/audit-bundle.schema.json). The bundle holds the
+run's journal events, change records and patches, retained packets and checkpoint
+metadata (id, commit, head, tree, time, reason), all as Arena already redacted them.
+It never holds provider credentials, environment values, the run manifest, project
+settings, shared context, attachments, worktree contents, staged or working diffs, or
+raw process output the run's retention excluded. A run whose retention is not
+`full-local` exports journal events, change records and checkpoint metadata only; the
+manifest lists `omitted` packets and patches. Patch text is passed through secret
+redaction again, which is best-effort. Bundles are limited to 256 MiB.
+
+The manifest lists each file with its size and SHA-256, and the checksum covers the
+run ID, retention, journal head and file list. `import` checks the schema, every file
+against the manifest, the checksum and the journal's hash chain (each event's
+sequence, previous hash and hash), and that no event keeps raw output the run's
+retention excluded. It refuses a run ID that already exists here, live, retired or
+imported. A verified bundle lands under `.arena/.state/imported/RUN/` as read-only
+files and a `history.imported` event is journaled in the project history. Import
+never merges into live state, never creates a resumable run and never touches
+worktrees, checkpoints or Git refs. Imported runs are absent from the plain
+`arena history` list and from `status`, `watch` and `resume`; `arena history --json`
+marks them `imported: true`. A checksum proves the file is unchanged since export and
+internally consistent; it does not identify who exported it.
 
 ## Skills and compatibility
 

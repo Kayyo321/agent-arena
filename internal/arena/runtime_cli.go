@@ -161,6 +161,9 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		return engine.onCall(ctx, args[3], event, true)
 
 	case "history":
+		if done, err := cli.historyAudit(p, args, o); done {
+			return err
+		}
 		if len(args) == 1 {
 			ids, e := p.Runs()
 			if e != nil {

@@ -166,8 +166,9 @@ Normal checks use local fixtures and temporary Git repositories, without paid
 inference. Live tests require explicit opt-in runtime choices; see
 [validation evidence](docs/VALIDATION.md). Submodules/nested Git repositories are
 refused rather than incompletely checkpointed. Worktrees and recovery objects are
-retained for inspection; audit export/import and permanent garbage collection are
-not implemented.
+retained for inspection. `arena history RUN export FILE` and `arena history import FILE`
+move a redacted audit bundle between projects, read-only; permanent garbage collection
+is not implemented.
 
 ## License
 
