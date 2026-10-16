@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "reviewer",
+  "name": "Reviewer",
+  "role": "review",
+  "description": "Reviews every fan-out proposal together against the scoped task.",
+  "objective": "Return an evidence-backed verdict on the combined fan-out changes.",
+  "instructions": "Inspect each child's change and the combined result at the stated base revision, run the project's checks, and return a review-result using the arena.review-verdict.v1 contract. You cannot edit files.",
+  "capabilities": ["read", "research", "review", "run_commands"],
+  "reviewContract": {
+    "format": "arena.review-verdict.v1",
+    "outcomes": ["Approved", "ChangesRequested", "Deny", "NeedsMoreInformation"]
+  }
+}
