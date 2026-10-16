@@ -105,7 +105,13 @@ alongside disabled slash commands, and auto-denies terminal commands. Arena
 therefore wraps it in a write fence (bubblewrap on Linux; `sandbox-exec` on macOS, not yet exercised there):
 the project is read-only and only a writer's own worktree is writable again. The
 fence confines writes, not reads or networking. Agents with `run_commands` are
-refused, and `agy` reads MCP servers only from user-level configuration, so
+refused unless the user opts the runtime into `commandApproval: "sandboxed-blanket"`:
+Arena then adds `--sandbox --dangerously-skip-permissions` and swaps the write fence
+for its stricter command fence (Linux only; see
+[Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)).
+`agy` 1.3.6 keeps its sign-in in the desktop keyring (Secret Service over the
+session bus), which the command fence reaches only through a filtering relay.
+`agy` reads MCP servers only from user-level configuration, so
 Antigravity workers have no live Arena MCP bridge; they still return structured
 results and packets.
 

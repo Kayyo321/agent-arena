@@ -220,7 +220,11 @@ func (m LiveModel) chatBody(width int, color bool) []string {
 		if m.DraftScore != nil {
 			preview = append(preview, m.DraftScore.Summary())
 		}
-		preview = append(append(preview, m.Draft.Notes...), GraphSummary(m.Draft.Workflow))
+		preview = append(preview, m.Draft.Notes...)
+		if note := blanketApprovalNote(m.Draft.Workflow, m.Draft.Profiles); note != "" && m.Draft.Source != "share-import" {
+			preview = append(preview, note)
+		}
+		preview = append(preview, GraphSummary(m.Draft.Workflow))
 		preview = append(preview, "Review runtimes and policy above. /save applies this draft; typing revises it.")
 		lines = append(lines, plainUILines(preview, width)...)
 	}

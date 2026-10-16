@@ -203,7 +203,7 @@ func checkShareOptions(r Runtime, path string) error {
 	allowed := map[string][]string{
 		"codex":       {"config"},
 		"claude-code": {"authMethod"},
-		"antigravity": {},
+		"antigravity": {"commandApproval"},
 		"gemini":      {"authMethod", "generation"},
 		"local":       {"backend", "endpoint", "generation"},
 	}[r.Provider]
@@ -212,7 +212,7 @@ func checkShareOptions(r Runtime, path string) error {
 			return refuse(key, "an option "+r.Provider+" does not document; share codes carry documented options only")
 		}
 		switch key {
-		case "authMethod", "backend":
+		case "authMethod", "backend", "commandApproval":
 			if _, ok := value.(string); !ok {
 				return refuse(key, "a non-text value")
 			}

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Background provider CLIs that own their sign-in, as Codex does: Claude Code
@@ -180,8 +181,9 @@ func invokeClaudeNative(ctx context.Context, in Invocation) (map[string]any, err
 }
 
 func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, error) {
-	if in.Commands { // adapterLimits records this for scoring and validation.
-		return nil, fmt.Errorf("Antigravity headless mode refuses command permissions without blanket approval; remove run_commands from this agent or use another provider")
+	blanket := in.Commands && antigravityBlanket(in.Runtime)
+	if in.Commands && !blanket { // adapterLimits records this for scoring and validation.
+		return nil, fmt.Errorf("Antigravity headless mode refuses command permissions without blanket approval; remove run_commands from this agent, opt in with runtime.options.commandApproval %q, or use another provider", antigravityBlanketApproval)
 	}
 	prompt, err := nativePrompt(in)
 	if err != nil {
@@ -193,6 +195,13 @@ func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, erro
 	}
 	if in.Schema != nil {
 		args = append(args, "--json-schema", compactJSON(in.Schema))
+	}
+	note := antigravityToolNote
+	if blanket {
+		// agy's own terminal sandbox, every tool request approved; Arena's
+		// command fence below is the boundary that does not depend on agy.
+		args = append(args, "--sandbox", "--dangerously-skip-permissions")
+		note = antigravityFencedNote
 	}
 	cmd := exec.Command("agy", args...)
 	cmd.Dir = in.Dir
@@ -214,17 +223,29 @@ func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, erro
 			}
 		}()
 	}
-	send(nativeWorkerInstructions+" "+antigravityToolNote+"\n"+prompt, false)
 	followUps := 0
 	stderr := &cappedBuffer{}
 	cmd.Stderr = stderr
-	writable := []string{}
-	if in.Write {
-		writable = append(writable, in.Dir)
+	var relay *keyringRelay
+	if blanket {
+		var cleanup func()
+		if relay, cleanup, err = commandFenceCommand(cmd, in.ProjectRoot, in.Dir, in.Write); err != nil {
+			return nil, err
+		}
+		defer cleanup()
+	} else {
+		writable := []string{}
+		if in.Write {
+			writable = append(writable, in.Dir)
+		}
+		if err := writeFence(cmd, []string{in.ProjectRoot, in.Dir}, writable); err != nil {
+			return nil, err
+		}
 	}
-	if err := writeFence(cmd, []string{in.ProjectRoot, in.Dir}, writable); err != nil {
-		return nil, err
-	}
+	go func() {
+		awaitKeyring(relay, antigravityKeyringWait)
+		send(nativeWorkerInstructions+" "+note+"\n"+prompt, false)
+	}()
 	var final map[string]any
 	responses := map[float64]*strings.Builder{}
 	err = streamNative(ctx, in, cmd, func(event map[string]any) error {
@@ -273,7 +294,7 @@ func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, erro
 			_, structured := final["structured_output"].(map[string]any)
 			if followUps < antigravityFollowUps && !structured && len(denied) > 0 && strings.TrimSpace(str(final["response"])) == "" {
 				followUps++
-				send("Arena refused that tool: "+antigravityToolNote+" Continue the task and return the requested result.", followUps == antigravityFollowUps)
+				send("Arena refused that tool: "+note+" Continue the task and return the requested result.", followUps == antigravityFollowUps)
 				return nil
 			}
 			_ = stdin.Close()
@@ -304,7 +325,15 @@ func invokeAntigravity(ctx context.Context, in Invocation) (map[string]any, erro
 // of times when a turn ends empty after a refusal.
 const antigravityToolNote = "Terminal commands and reads outside your current working directory (the assigned workspace) are refused in this headless run. Inspect files only inside it, with list_dir, find_by_name, grep_search and view_file."
 
+// antigravityFencedNote replaces antigravityToolNote under sandboxed blanket
+// approval, so the agent does not waste turns on paths the fence hides.
+const antigravityFencedNote = "Terminal commands run inside a sandbox: the root filesystem and home directory are read-only, credential directories are hidden, /tmp is private, and only the assigned workspace is writable (when your role may write). Work only inside the assigned workspace."
+
 const antigravityFollowUps = 2
+
+// antigravityKeyringWait bounds how long the first turn waits for agy to read
+// its sign-in through the keyring relay (about 200 ms with agy 1.3.6).
+var antigravityKeyringWait = 10 * time.Second
 
 // streamNative runs one headless CLI turn and hands each NDJSON frame to handle.
 func streamNative(ctx context.Context, in Invocation, cmd *exec.Cmd, handle func(map[string]any) error) error {
@@ -509,6 +538,13 @@ func probeAntigravity(ctx context.Context, r Runtime, result Readiness) Readines
 		result.Detail = "Antigravity workers need bubblewrap (Linux) or sandbox-exec (macOS) for Arena's write fence"
 		return result
 	}
+	if str(r.Options["commandApproval"]) == antigravityBlanketApproval {
+		if err := commandFenceAvailable(); err != nil {
+			result.State = "unsupported"
+			result.Detail = err.Error()
+			return result
+		}
+	}
 	models, err := antigravityCatalog(ctx)
 	if err != nil {
 		result.State = "signed out"
@@ -522,6 +558,9 @@ func probeAntigravity(ctx context.Context, r Runtime, result Readiness) Readines
 			result.ModelState = "advertised; inference access unverified"
 			result.CanStart = true
 			result.Detail = "catalog discovery does not prove model access; headless runs cannot execute commands"
+			if str(r.Options["commandApproval"]) == antigravityBlanketApproval {
+				result.Detail = "catalog discovery does not prove model access; commands: sandboxed blanket approval (opt-in)"
+			}
 			return result
 		}
 	}

@@ -84,7 +84,10 @@ needs. The score sheet is [docs/ARENA-SCORING.md](ARENA-SCORING.md).
 `workflow validate` and `workflow create` also print a `warning:` line for each
 capability an agent's provider adapter cannot exercise, such as `run_commands` on
 Antigravity, whose headless mode cannot execute commands. Such an agent fails when it
-starts, and the score gives the grant no credit.
+starts, and the score gives the grant no credit. `--command-approval sandboxed-blanket`
+on an Antigravity runtime opts it into blanket command approval inside Arena's command
+fence (Linux only); `workflow create` then names each agent that uses it before asking
+to save. See [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval).
 
 ### Sharing arenas and shaders
 

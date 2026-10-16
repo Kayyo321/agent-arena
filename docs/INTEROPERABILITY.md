@@ -226,6 +226,8 @@ The orchestrator applies `approvalPolicies.arena-subagent-modification-inquiry` 
 - `ask-user` presents the complete proposal and waits for the user's decision.
 - `auto-accept` applies a complete proposal only when provider readiness, project limits, graph validation, and adapter capability checks pass.
 
+A coworker request cannot set `runtime.options.commandApproval`: blanket command approval for Antigravity is only ever the user's own edit (see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)).
+
 If a request is missing a required value, the orchestrator asks the user for it instead of inventing it, except when `auto-refuse` has already declined that agent-originated request. A direct request from the user to create an agent always gets clarification when required details are missing. All accepted changes are written through the CLI as a reversible configuration transaction.
 
 ## Shared-context packets
@@ -287,6 +289,8 @@ The MVP local adapter connects only to same-machine loopback services. It does n
 Use the provider's supported local sign-in or an approved integration, such as the configured Gemini API-key or Vertex AI route. The CLI checks readiness without reading or displaying secrets. Arena stores no passwords, session cookies, API-key values, or reusable provider tokens and does not relay credentials between agent processes.
 
 Provider plans, supported integrations, and terms change. Release checks must verify the exact supported sign-in and automation path. For OpenAI, an integration that uses ChatGPT plan usage must follow [Sign in with ChatGPT terms](https://openai.com/policies/sign-in-with-chatgpt-terms/) and current [partner-app guidance](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites), including user authorization and app-specific use. For Claude Code, use Anthropic's [documented setup and authentication options](https://docs.anthropic.com/en/docs/claude-code/getting-started). Gemini CLI's published FAQ says third-party tools must not harvest or piggyback on its OAuth session; it points third-party coding agents to Vertex AI or Google AI Studio API keys. Arena must therefore reject Gemini CLI OAuth as an Arena-managed auth path and guide setup only through a currently approved API-key or Vertex adapter. Do not infer that because a human can use a consumer plan in one CLI, a third-party scheduler may use it through any method.
+
+Background CLIs keep their own permission model. Antigravity's headless mode refuses terminal commands, so Arena refuses `run_commands` on Antigravity unless the user opts that runtime into `commandApproval: "sandboxed-blanket"`. Arena then runs `agy --sandbox --dangerously-skip-permissions` inside its command fence (Linux only), which allows writes only to the agent's worktree, hides credentials and other agents' worktrees, and relays only agy's own keyring item from the session bus. The network stays open; see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval) for what the fence allows and blocks. Like the `claude-code-sign-in` route, the mode is the user's explicit choice and is never selected on their behalf.
 
 ## Current adapter references
 

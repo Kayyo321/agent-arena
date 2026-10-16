@@ -44,7 +44,7 @@
     },
     {
       "id": "antigravity",
-      "interface": "agy headless stream-json input/output with --json-schema, inside Arena's write fence",
+      "interface": "agy headless stream-json input/output with --json-schema, inside Arena's write fence; with commandApproval sandboxed-blanket, also --sandbox --dangerously-skip-permissions inside Arena's command fence (Linux only)",
       "observedVersions": [
         "1.3.6"
       ],
@@ -55,7 +55,7 @@
         "--disable-slash-commands"
       ],
       "auth": "Antigravity-owned sign-in",
-      "verification": "1.3.6 headless stream-json and structured output inspected with one-turn probes; headless mode writes files without asking and denies commands; Arena workflows not yet verified live",
+      "verification": "1.3.6 headless stream-json and structured output inspected with one-turn probes; headless mode writes files without asking and denies commands; a sandboxed-blanket probe on Linux ran commands that could write the worktree but not the home directory, saw no other providers' credentials, and could not reach other session-bus services; Arena workflows not yet verified live",
       "source": "agy --help"
     },
     {

@@ -88,6 +88,9 @@ func ValidateRuntime(r Runtime) error {
 	if (r.Provider == "codex" || r.Provider == "claude-code") && r.ReasoningEffort == "" {
 		return fmt.Errorf("%s: select reasoning effort explicitly (status shows verifiable choices)", r.Provider)
 	}
+	if _, ok := r.Options["commandApproval"]; ok && r.Provider != "antigravity" {
+		return fmt.Errorf("commandApproval is an Antigravity option; %s has its own command sandbox", r.Provider)
+	}
 	switch r.Provider {
 	case "codex":
 	case "claude-code":
@@ -95,8 +98,13 @@ func ValidateRuntime(r Runtime) error {
 			return fmt.Errorf("Claude Code authMethod must be api-key-or-cloud or %s", claudeSignInAuth)
 		}
 	case "antigravity":
-		if len(r.Options) > 0 {
-			return fmt.Errorf("antigravity takes no provider options; its CLI owns sign-in and model settings")
+		for key, value := range r.Options {
+			if key != "commandApproval" {
+				return fmt.Errorf("antigravity takes only the commandApproval option; its CLI owns sign-in and model settings")
+			}
+			if value != antigravityBlanketApproval {
+				return fmt.Errorf("antigravity commandApproval must be %q (or omit it to keep commands refused)", antigravityBlanketApproval)
+			}
 		}
 	case "gemini":
 		a, _ := r.Options["authMethod"].(string)

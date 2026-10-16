@@ -43,7 +43,7 @@ Other useful settings include:
 
 - `approvalPolicies.agent-workflow-edit`: `auto-refuse`, `ask-user`, or `auto-accept` for graph edits proposed by agents.
 - `approvalPolicies.cross-provider-context-sharing`: `deny`, `ask-user`, or `task-scoped` for forwarding selected task context across providers. `ask-user` asks once per route (one source provider to one recipient agent) per run; see [Cross-provider data boundary](INTEROPERABILITY.md#cross-provider-data-boundary).
-- `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode.
+- `approvalPolicies.shell-command-execution`: `adapter-default`, `ask-user`, or `auto-refuse`; Arena never weakens the provider CLI's own permission mode. The one exception is a runtime the user opts into [Antigravity sandboxed blanket approval](#antigravity-command-approval), which needs `adapter-default` like every background CLI.
 - `approvalPolicies.change-integration`: `human-review` or `auto-if-clean` for eligible patches.
 - `approvalPolicies.workflow-deletion`: `auto-refuse`, `ask-user`, or `auto-accept` for agent-originated deletion requests.
 - `approvalPolicies.orchestrator-stall-recovery` (optional): `answer-routing` (default when absent) lets the permanent orchestrator answer a stalled router fallback itself, choosing only among that router's declared branches or `stop`; `recommend-only` makes it suggest an answer for `/accept`. Agent questions and permission approvals are never answered by the orchestrator.
@@ -118,6 +118,69 @@ Example Gemini runtime fragment (the model ID must come from the selected adapte
   }
 }
 ```
+
+### Antigravity command approval
+
+Antigravity's headless mode has no per-command approval: `agy` either refuses
+terminal commands or approves every tool request. By default Arena refuses to
+start an Antigravity agent whose profile has `run_commands`. The user can opt a
+runtime into the second behaviour:
+
+```json
+{
+  "provider": "antigravity",
+  "model": "<model-id-reported-by-agy-models>",
+  "options": {
+    "commandApproval": "sandboxed-blanket"
+  }
+}
+```
+
+`commandApproval` is the only Antigravity option and `sandboxed-blanket` its only
+value; validation rejects anything else, and the option on any other provider.
+It is never a default, the builder never asks for it, and neither the setup
+interview nor the orchestrator chooses it, even when the user delegates other
+choices. It is set by an explicit `--command-approval sandboxed-blanket` flag or
+by editing the runtime, and coworker requests from agents cannot carry it. The
+share-code import preview, `workflow create` and the interview's draft preview
+name every agent that uses it.
+
+With the option set and `run_commands` granted, Arena runs
+`agy --sandbox --dangerously-skip-permissions` inside its *command fence*, which
+is Linux only (bubblewrap 0.11 or newer). On macOS Arena refuses the mode: agy
+keeps its sign-in in the Keychain, and `sandbox-exec` cannot let it reach that
+item while keeping commands away from every other Keychain item.
+
+The command fence allows and blocks the following for agy and every command it runs:
+
+| | Command fence |
+| --- | --- |
+| Root filesystem | read-only (`--ro-bind / /`) |
+| Writable | the assigned worktree, for writers only; a private `/tmp`; agy's state directory (`~/.gemini/antigravity-cli`) through a throwaway overlay, so nothing written there survives the run |
+| Hidden (empty tmpfs, or `/dev/null` for files) | the reviewed table `hiddenCredentialPaths` in `internal/arena/antigravity_sandbox.go`: other providers' sign-ins (`~/.codex`, `~/.claude`, `~/.claude.json`, Gemini CLI credentials, `~/.config/gcloud`, `~/.aws`, `~/.azure`, `~/.config/gh` …), keys and agents (`~/.ssh`, `~/.gnupg`, keyrings, password stores), registry and cluster tokens (`~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.kube`, `~/.npmrc`, `~/.pypirc` …), browser and mail profiles, and shell history; the sensitive `/etc` files the mediated sandbox also hides; `$XDG_RUNTIME_DIR` (agent sockets, display auth cookies, the real session bus); the project's `.arena/.state` except the agent's own worktree (other agents' worktrees, journals, attachments) |
+| Session bus | a relay that forwards only the Secret Service calls for agy's own keyring item; other bus services (`systemd-run --user`, portals) and other keyring items are refused |
+| Environment | locale, terminal, `PATH`, home and toolchain locations, and `AGY_*`/`ANTIGRAVITY_*`; credentials, agent sockets and display variables are dropped |
+| Processes | new PID and IPC namespaces, a new session, killed with Arena (`--unshare-pid`, `--unshare-ipc`, `--new-session`, `--die-with-parent`) |
+| Network | **open**: agy needs it for inference |
+
+agy stores its sign-in in the desktop keyring through the D-Bus Secret Service.
+The relay learns which keyring service agy uses from agy's own search while it
+starts, before Arena sends the first turn, and then accepts searches and reads
+for that service only. Arena never reads, copies or logs a keyring item; it parses
+messages only for the service attribute and object paths.
+
+Residual risks, stated plainly: the fence cannot unshare the network, so a
+prompt-injected command can send anything it can read to anywhere. What stays
+readable is the rest of the home directory and the filesystem outside the hidden
+table (source trees, documents, the project), agy's own sign-in (reachable through
+the relay, as agy itself needs it; a command can also overwrite or delete that one
+item, which the relay allows so agy can save refreshed tokens), and abstract Unix sockets, which live in the
+shared network namespace (X11 refused connections without the hidden auth cookie
+when this was tested). The hidden table is a denylist: a credential stored
+somewhere it does not list stays readable. Arena does not rely on whatever agy's
+own `--sandbox` restricts; the command fence is the boundary. Use the mode for
+agents whose inputs you trust, or accept that anything readable may leave the
+machine.
 
 Example local runtime fragment:
 
@@ -194,6 +257,7 @@ Runtime options must be ones the adapter documents, with plain values:
 - Codex `config.model_reasoning_effort`/`service_tier`;
 - Gemini `authMethod` and generation settings;
 - local `backend`, a loopback `endpoint` and generation settings;
+- Antigravity `commandApproval` (the import preview names every agent that uses it);
 - no options for Claude Code.
 
 Values are never redacted inside a code: the receiver gets exactly what the

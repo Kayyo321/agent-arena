@@ -139,11 +139,21 @@ type arenaGraph struct {
 func has(p Profile, capability string) bool { return Has(p.Capabilities, capability) }
 
 // adapterLimits are capabilities a provider adapter cannot exercise, with the
-// reason. They are fixed per adapter, unlike readiness, so scores stay a pure
-// function of the arena. Antigravity's headless mode has no per-command
-// approval, so invokeAntigravity refuses run_commands.
+// reason. They are fixed per adapter and runtime options, unlike readiness, so
+// scores stay a pure function of the arena. Antigravity's headless mode has no
+// per-command approval, so invokeAntigravity refuses run_commands unless the
+// runtime opts into sandboxed blanket approval (antigravityBlanket).
 var adapterLimits = map[string]map[string]string{
-	"antigravity": {"run_commands": "headless runs cannot execute commands"},
+	"antigravity": {"run_commands": "headless runs cannot execute commands without commandApproval \"" + antigravityBlanketApproval + "\""},
+}
+
+// adapterLimit is the reason r's adapter cannot exercise capability, if any.
+func adapterLimit(r Runtime, capability string) (string, bool) {
+	reason, limited := adapterLimits[r.Provider][capability]
+	if limited && capability == "run_commands" && antigravityBlanket(r) {
+		return "", false
+	}
+	return reason, limited
 }
 
 // unusableCapabilities lists the profile capabilities a's adapter cannot
@@ -151,7 +161,7 @@ var adapterLimits = map[string]map[string]string{
 func unusableCapabilities(a Agent, p Profile) []string {
 	out := []string{}
 	for _, capability := range p.Capabilities {
-		if _, limited := adapterLimits[a.Runtime.Provider][capability]; limited {
+		if _, limited := adapterLimit(a.Runtime, capability); limited {
 			out = append(out, capability)
 		}
 	}
@@ -164,7 +174,8 @@ func WorkflowWarnings(w Workflow, profiles map[string]Profile) []string {
 	warnings := []string{}
 	for _, a := range w.Agents {
 		for _, capability := range unusableCapabilities(a, profiles[a.Id]) {
-			warnings = append(warnings, fmt.Sprintf("warning: %s has %s, but %s %s; the agent fails when it starts. Remove %s or choose another provider.", a.Id, capability, a.Runtime.Provider, adapterLimits[a.Runtime.Provider][capability], capability))
+			reason, _ := adapterLimit(a.Runtime, capability)
+			warnings = append(warnings, fmt.Sprintf("warning: %s has %s, but %s %s; the agent fails when it starts. Remove %s or choose another provider.", a.Id, capability, a.Runtime.Provider, reason, capability))
 		}
 	}
 	return warnings
@@ -675,7 +686,8 @@ func ScoreArena(w Workflow, profiles map[string]Profile) Scorecard {
 			add("C3", "", 1, 0, []string{a.Id}, "%s has a generic name", a.Id)
 		}
 		for _, capability := range unusable[a.Id] {
-			add("C6", "", 2, 0, []string{a.Id}, "%s has %s, but %s %s", a.Id, capability, a.Runtime.Provider, adapterLimits[a.Runtime.Provider][capability])
+			reason, _ := adapterLimit(a.Runtime, capability)
+			add("C6", "", 2, 0, []string{a.Id}, "%s has %s, but %s %s", a.Id, capability, a.Runtime.Provider, reason)
 		}
 	}
 	if profiles[w.HeadAgent].Role == "review" {

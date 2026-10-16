@@ -73,6 +73,9 @@ func (p *Project) RequestCoworker(ctx context.Context, q CoworkerRequest, approv
 	if e := ValidateRuntime(q.Runtime); e != nil {
 		return q, e
 	}
+	if _, ok := q.Runtime.Options["commandApproval"]; ok {
+		return q, fmt.Errorf("a coworker request cannot select blanket command approval; only the user sets commandApproval, by editing the workflow")
+	}
 	if q.WorkspaceMode != "read-only" && q.WorkspaceMode != "write" {
 		return q, fmt.Errorf("explicit workspaceMode is required")
 	}

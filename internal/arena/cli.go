@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -248,6 +248,11 @@ func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Opti
 			}
 		}
 		r.Options["authMethod"] = v
+	}
+	// Blanket approval is never asked for or defaulted: only an explicit flag
+	// (or an edited runtime) selects it.
+	if v := o.Get("command-approval"); v != "" {
+		r.Options["commandApproval"] = v
 	}
 	if r.Provider == "gemini" {
 		v := o.Get("auth-method")
@@ -465,6 +470,9 @@ func (cli *CLI) workflow(ctx context.Context, p *Project, args []string, o Optio
 		fmt.Fprintln(cli.Out, GraphSummary(w))
 		for _, warning := range WorkflowWarnings(w, profiles) {
 			fmt.Fprintln(cli.Out, warning)
+		}
+		if note := blanketApprovalNote(w, profiles); note != "" {
+			fmt.Fprintln(cli.Out, note)
 		}
 		fmt.Fprintln(cli.Out, ScoreArena(w, profiles).Summary())
 		if o.Bool("dry-run") {

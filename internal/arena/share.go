@@ -412,6 +412,9 @@ func importNotes(ctx context.Context, p *Project, w Workflow, profiles map[strin
 	if len(runners) > 0 {
 		notes = append(notes, "Runs commands: "+strings.Join(runners, ", ")+".")
 	}
+	if note := blanketApprovalNote(w, profiles); note != "" {
+		notes = append(notes, note+" The author chose this; keep it only if you choose it too.")
+	}
 	if w.Settings.Integration.Policy == "auto-if-clean" {
 		notes = append(notes, "Integration policy auto-if-clean: clean changes integrate without your review.")
 	}
