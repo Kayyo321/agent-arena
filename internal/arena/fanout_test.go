@@ -35,7 +35,9 @@ func fanOutWorkflow(s Settings, maxChildren int, approval string) (Workflow, map
 	return w, profiles
 }
 
-func TestFanOutExampleFixtureValidates(t *testing.T) {
+// exampleFanOut loads the parallel-fixes example arena.
+func exampleFanOut(t *testing.T) (Workflow, map[string]Profile, Settings) {
+	t.Helper()
 	base := "../../examples/project/.arena"
 	var w Workflow
 	var s Settings
@@ -60,8 +62,51 @@ func TestFanOutExampleFixtureValidates(t *testing.T) {
 		}
 		profiles[a.Id] = p
 	}
+	return w, profiles, s
+}
+
+func TestFanOutExampleFixtureValidates(t *testing.T) {
+	w, profiles, s := exampleFanOut(t)
 	if err := ValidateWorkflow(w, profiles, s); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFanOutCardFollowsTheJournal(t *testing.T) {
+	unicodeTerminal(t)
+	w, _, _ := exampleFanOut(t)
+	view := func(events []Event) string {
+		return strings.Join(wideGraph(w, RunState{Agents: map[string]string{}}, events, 140, false, ""), "\n")
+	}
+	idle := view(nil)
+	for _, part := range []string{"FAN-OUT", "planner → fixer ×4", "max 4 · approval required"} {
+		if !strings.Contains(idle, part) {
+			t.Fatalf("idle card misses %q:\n%s", part, idle)
+		}
+	}
+	if strings.Contains(idle, "╭─ fixer") || strings.Contains(idle, "role planner") {
+		t.Fatalf("planner and worker must stay inside the fan-out card:\n%s", idle)
+	}
+	event := func(kind string, data map[string]any) Event {
+		data["fanOutId"] = "split"
+		return Event{AgentID: "split", Type: kind, Data: data}
+	}
+	events := []Event{event("fanout.started", map[string]any{}), event("decision.requested", map[string]any{})}
+	if !strings.Contains(view(events), "waiting for you") {
+		t.Fatal("pending approval not shown")
+	}
+	events = append(events, event("fanout.approved", map[string]any{"count": 3, "dropped": 1}), event("fanout.child.completed", map[string]any{"childId": "split.1"}), event("fanout.child.failed", map[string]any{"childId": "split.2"}))
+	if running := view(events); !strings.Contains(running, "1/3 done · 1 failed · 1 dropped") {
+		t.Fatalf("progress not shown:\n%s", running)
+	}
+	// A child's task packet moves along the edge into the fan-out card.
+	sent := Event{Type: "message.sent", Data: map[string]any{"messageId": "m1", "kind": "task", "from": map[string]any{"agentId": "coordinator"}, "to": map[string]any{"agentId": "split.3"}}}
+	if a, b := wideGraph(w, RunState{Agents: map[string]string{}}, append(events, sent), 140, false, "", 0), wideGraph(w, RunState{Agents: map[string]string{}}, append(events, sent), 140, false, "", 1); strings.Join(a, "\n") == strings.Join(b, "\n") {
+		t.Fatal("a child's packet does not animate on the fan-out edge")
+	}
+	lines := renderGraph(w, RunState{Agents: map[string]string{}}, events, nil, 120, false, false)
+	if text := strings.Join(lines, "\n"); !strings.Contains(text, "[FAN-OUT split] fanout.approved; planner planner, worker fixer, max 4") || strings.Contains(text, "fixer · claude-code") {
+		t.Fatalf("text graph:\n%s", text)
 	}
 }
 
