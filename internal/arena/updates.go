@@ -39,11 +39,16 @@ func (e *Engine) writeConfig(next Run) error {
 	for _, id := range sortedKeys(e.children) {
 		next.FanOutChildren = append(next.FanOutChildren, e.children[id])
 	}
-	if next.Retention != "full-local" {
-		// As in run.json, a redacted run keeps no objective on disk.
-		next.Objective = ""
+	return Atomic(filepath.Join(e.Project.RunDir(next.ID), currentConfigFile), SafeJSON(retainedRun(next)), 0600)
+}
+
+// retainedRun is what a run may keep on disk beyond run.json: as there, a
+// redacted run keeps no objective.
+func retainedRun(r Run) Run {
+	if r.Retention != "full-local" {
+		r.Objective = ""
 	}
-	return Atomic(filepath.Join(e.Project.RunDir(next.ID), currentConfigFile), SafeJSON(next), 0600)
+	return r
 }
 
 // Apply approved additions only between waves. Existing run roles/settings retain
@@ -73,7 +78,7 @@ func (e *Engine) applyCoworkers() (map[string]string, error) {
 			return nil, fmt.Errorf("approved coworker cannot fit the recorded run; configuration preserved for the next run: %w", err)
 		}
 		revision := filepath.Join(e.Project.RunDir(e.Run.ID), "config-revisions", update.RequestID+".json")
-		if err := Atomic(revision, SafeJSON(next), 0600); err != nil {
+		if err := Atomic(revision, SafeJSON(retainedRun(next)), 0600); err != nil {
 			return nil, err
 		}
 		if _, err := e.event("arena-orchestrator", "workflow.config-updated", map[string]any{"requestId": update.RequestID, "parent": update.Parent, "agentId": update.Agent.Id, "revision": revision, "configHash": Hash(JSON(next.Workflow)), "transaction": update.Transaction}); err != nil {
