@@ -139,6 +139,12 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		}
 		return cli.setup(ctx, dir, o)
 	}
+	if pos[0] == "doctor" {
+		if len(pos) != 1 {
+			return fmt.Errorf("arena doctor [--project PATH] [--json]")
+		}
+		return cli.doctor(ctx, dir, o)
+	}
 	p, e := Open(dir)
 	if e != nil {
 		return e
@@ -931,6 +937,7 @@ arena share import [CODE|-] [--clipboard] [--as ID] [--into ID] [--dry-run] [--y
 arena settings show|edit [--set /pointer=JSON-value] [--yes]
 arena status [--workflow ID] [--json]
 arena auth status
+arena doctor [--json]             Read-only preflight: git, provider CLIs, sandbox, WSL2, tmux
 arena adapters
 arena context list|search|show|add|revise|archive|restore WORKFLOW [ENTRY|QUERY]
 arena skill targets

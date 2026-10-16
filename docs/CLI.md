@@ -123,6 +123,26 @@ and project settings are never part of a code. The format is described in
 `settings edit --set /pointer=JSON-value` is repeatable and validates every workflow
 against the proposed settings. Runtime IDs/options retain provider-specific meaning.
 
+### Preflight
+
+`arena doctor [--project PATH] [--json]` checks the machine before you run anything. It
+needs no Arena project, makes no network calls, reads no credentials and never prints
+environment values (it only notices that `WSL_DISTRO_NAME` is set). Each line is `OK`,
+`WARN` or `FAIL`; only `FAIL` makes the command exit non-zero.
+
+| Check | What it looks at | Fails when |
+| --- | --- | --- |
+| `platform` | Linux or macOS | any other OS (Windows uses WSL2) |
+| `git`, `git-repo` | Git version; the project is a work tree with a commit; uncommitted path count | Git is missing, the directory is not a repository, or there is no commit |
+| `provider-codex`, `provider-claude-code`, `provider-antigravity` | CLI on PATH, its version, and drift from `providers/compatibility.json` | never (warns: needed only by arenas that use it; sign-in is `arena status`) |
+| `bubblewrap` (Linux) | `bwrap` 0.11 or newer, needed for the Antigravity command fence | never (warns) |
+| `sandbox-exec` (macOS) | present for sandboxed commands | never (warns) |
+| `wsl`, `wsl-filesystem` | WSL2 detected from `WSL_DISTRO_NAME` or `/proc/version`; warns when the project is under `/mnt/` (a Windows drive) | never (warns) |
+| `tmux` | optional, for `arena tmux` | never (warns) |
+
+`--json` prints `{"ok": bool, "checks": [{"id", "status", "detail"}]}`. A passing
+doctor does not verify a provider; it only says the prerequisites are present.
+
 ## Running and inspecting
 
 ```sh
