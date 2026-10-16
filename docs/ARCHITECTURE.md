@@ -40,7 +40,7 @@ flowchart LR
 - **Message router:** Persists and delivers task, result, question, and peer-message envelopes. Agents communicate through Arena; no cross-provider session sharing is assumed.
 - **Shared context manager:** Serves durable per-workflow context entries across runs, accepts typed agent proposals, enforces project policy and size limits, and versions every mutation.
 - **Terminal layout:** Renders the A2rena wordmark, required-provider status, live graph, packet activity, and a colored Git worktree tree while adapting to terminal dimensions.
-- **Workspace manager:** Creates one Git worktree per writing agent/task, tracks branch and base commit, captures checkpoints, and prepares changes for integration.
+- **Workspace manager:** Creates one Git worktree per writing agent/task, tracks branch, base commit, and gitdir, captures checkpoints, and prepares changes for integration. It runs host Git on worker worktrees only through the recorded gitdir with executable config disabled, and rejects a worktree whose `.git` was replaced (see [Audit and rollback](AUDIT-AND-ROLLBACK.md#host-git-on-worker-worktrees)).
 - **Integration manager:** Reviews changes in an Arena-owned queue, checks for conflicts and stale bases, and applies a selected change according to workflow policy.
 - **Event journal:** Stores ordered state events and (according to retention settings) message bodies, process output, diffs, and checkpoint references under `.arena/.state/`.
 
