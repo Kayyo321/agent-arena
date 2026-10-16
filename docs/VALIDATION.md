@@ -141,6 +141,67 @@ in the provider-approved environment or credential manager. The test passes one
 task through a Codex head and a two-provider team, verifies real member positions
 and one valid consensus/no-consensus packet. Do not run it with an unapproved route.
 
+### Not yet run: Claude Code, Gemini and local live tests
+
+**Nothing in this subsection has been run against a real provider, so it is not
+evidence.** These opt-in tests exist in `internal/arena/live_test.go`, compile
+under `go vet`, and skip unless their own variables are set. Their plumbing was
+only exercised against throwaway fake CLIs and a fake loopback server, which says
+nothing about any provider. Until someone runs a test below with their own
+sign-in or credentials and it passes, the Claude Code, Gemini and local entries in
+[Real provider evidence](#real-provider-evidence) stay as written.
+
+Each test sends one read-only task through the real adapter (a reader agent reads
+`base.txt` in its pinned worktree and must report its actual `baseline` content in
+a validated result) with retries off, so a provider failure ends the test. Run
+these with your own sign-in or credentials; they can spend your plan or cloud
+usage. Credentials stay in the provider-approved environment, keychain or
+sign-in: the tests read only the `ARENA_*` selections below, never a key,
+token or credential file, and log only redacted events. Do not paste a key into
+the command line; have it configured the way the provider documents.
+
+| Test | Route | Required variables | Also needs |
+| --- | --- | --- | --- |
+| `TestLiveClaudeCodeSignInReadOnlyWorkflow` | Claude Code under its own sign-in (`options.authMethod` `claude-code-sign-in`, `invokeClaudeNative`) | `ARENA_LIVE_CLAUDE_SIGNIN_MODEL`, `ARENA_LIVE_CLAUDE_SIGNIN_EFFORT` | `claude` installed and signed in with its own login, an explicit choice under your plan's terms |
+| `TestLiveClaudeCodeAPIRouteReadOnlyWorkflow` | Claude API-key or cloud route (`api-key-or-cloud`, `invokeClaude`, bare mode) | `ARENA_LIVE_CLAUDE_API_MODEL`, `ARENA_LIVE_CLAUDE_API_EFFORT` | `claude` installed and `ANTHROPIC_API_KEY`, or a documented cloud route (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` set to `1` with that cloud's own credentials), already in your environment |
+| `TestLiveGeminiReadOnlyWorkflow` | Google GenAI SDK (`invokeGemini`) | `ARENA_LIVE_GEMINI_MODEL`, `ARENA_LIVE_GEMINI_AUTH` (`google-ai-studio-api-key` or `vertex-ai`) | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for AI Studio, or `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` and Google-managed ADC for Vertex, already in your environment. Gemini takes no reasoning effort |
+| `TestLiveLocalBackendReadOnlyWorkflow` | Backend on this machine over loopback HTTP (`invokeLocal`) | `ARENA_LIVE_LOCAL_BACKEND` (`ollama`, `lm-studio`, `llama.cpp`, `vllm` or `openai-compatible`), `ARENA_LIVE_LOCAL_MODEL` | The backend already running with that model. Set `ARENA_LIVE_LOCAL_ENDPOINT` (a loopback `http://` URL) unless you use the `ollama` or `lm-studio` default; Arena refuses non-loopback addresses |
+
+```sh
+# Claude Code under its own sign-in
+ARENA_LIVE_CLAUDE_SIGNIN_MODEL='YOUR_SELECTED_MODEL' \
+ARENA_LIVE_CLAUDE_SIGNIN_EFFORT='YOUR_SELECTED_EFFORT' \
+go test ./internal/arena -run '^TestLiveClaudeCodeSignInReadOnlyWorkflow$' -v -count=1
+
+# Claude API-key or cloud route
+ARENA_LIVE_CLAUDE_API_MODEL='YOUR_SELECTED_MODEL' \
+ARENA_LIVE_CLAUDE_API_EFFORT='YOUR_SELECTED_EFFORT' \
+go test ./internal/arena -run '^TestLiveClaudeCodeAPIRouteReadOnlyWorkflow$' -v -count=1
+
+# Gemini (API key or Vertex)
+ARENA_LIVE_GEMINI_MODEL='YOUR_SELECTED_MODEL' \
+ARENA_LIVE_GEMINI_AUTH='google-ai-studio-api-key' \
+go test ./internal/arena -run '^TestLiveGeminiReadOnlyWorkflow$' -v -count=1
+
+# Local backend on loopback
+ARENA_LIVE_LOCAL_BACKEND='ollama' \
+ARENA_LIVE_LOCAL_MODEL='YOUR_LOADED_MODEL' \
+go test ./internal/arena -run '^TestLiveLocalBackendReadOnlyWorkflow$' -v -count=1
+```
+
+Run `make build` and add `ARENA_INTEGRATION_BINARY="$PWD/bin/arena"` to the
+sign-in command to also require a real call to Arena's `arena_context_search` MCP
+tool through Claude Code; without it the bridge is not attached. The sign-in test
+also fails if a read-only worker uses any tool beyond Read, Glob, Grep and the
+Arena bridge.
+
+A pass logs a `REAL ... VERIFIED` line with the route, model and effort, and means
+only that one read-only task completed on that route. Writers, commands, teams,
+attachments and the effort control are not covered. Record a real pass here, with
+the date, versions and the exact selection, before changing any status in
+[Providers](PROVIDERS.md) or the roadmap; a failure is also worth recording as
+found.
+
 ## Limits
 
 Linux amd64/arm64 and macOS amd64 are cross-build targets; native local execution
