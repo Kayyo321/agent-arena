@@ -149,3 +149,12 @@ func TestDoctorCommandTextAndJSON(t *testing.T) {
 		t.Fatalf("json: %v\n%s", e, out.String())
 	}
 }
+
+func TestDoctorTmuxVersionStates(t *testing.T) {
+	for version, want := range map[string]string{"tmux 1.9a": "warn", "tmux 2.0": "ok", "tmux 3.4": "ok", "tmux next-3.5": "warn", "tmux master": "warn"} {
+		r := Doctor(context.Background(), fakeHost("linux", "/p", nil, "", with(goodGit, map[string]string{"tmux -V": version})))
+		if status(r, "tmux") != want || !r.OK {
+			t.Errorf("%s: %s, ok=%v", version, status(r, "tmux"), r.OK)
+		}
+	}
+}

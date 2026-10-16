@@ -133,7 +133,14 @@ func Doctor(ctx context.Context, h doctorHost) DoctorReport {
 		add("tmux", "warn", "tmux not found; optional, only for arena tmux and the devbox workflow (docs/DEVBOX.md)")
 	} else {
 		v, _ := h.Output(ctx, h.Dir, "tmux", "-V")
-		add("tmux", "ok", "%s (optional)", v)
+		switch ok, parsed := tmuxVersionSupported(v); {
+		case ok:
+			add("tmux", "ok", "%s (optional)", v)
+		case parsed:
+			add("tmux", "warn", "%s is older than %d.0; arena tmux needs a tmux that runs multi-argument commands without a shell", v, tmuxMinMajor)
+		default:
+			add("tmux", "warn", "cannot parse the tmux version %q; arena tmux needs a released tmux %d.0 or newer", v, tmuxMinMajor)
+		}
 	}
 
 	report := DoctorReport{OK: true, Checks: checks}

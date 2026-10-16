@@ -326,6 +326,9 @@ belongs to another workflow. This keeps one code path for starting a run and nee
 polling to discover the id. A reserved run whose tmux layout never started stays
 `created` and harmless.
 
+Requires tmux 2.0 or newer (checked with `tmux -V` before anything is created; see
+[DEVBOX](DEVBOX.md#tmux-version)).
+
 Safety: every pane command is passed to tmux as separate exec arguments, never a
 shell string, and workflow, task, agent and run text sits after a `--` terminator. Text
 such as `$(cmd)` or `; rm -rf x` reaches Arena as plain data.
