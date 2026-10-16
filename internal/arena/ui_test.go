@@ -130,6 +130,17 @@ func TestPanMovesGraphCameraAndSpaceRecenters(t *testing.T) {
 	if strings.Join(moved, "\n") == strings.Join(centered, "\n") {
 		t.Fatal("panned graph did not move")
 	}
+	legend := func(lines []string) string {
+		for _, line := range lines {
+			if strings.Contains(line, "dotted peer links") {
+				return line
+			}
+		}
+		return ""
+	}
+	if legend(centered) == "" || legend(moved) != legend(centered) {
+		t.Fatalf("legend moved with the graph: %q", legend(moved))
+	}
 	m = press(m, tea.KeySpace)
 	if m.PanX != 0 || m.PanY != 0 || !m.Panning {
 		t.Fatalf("space did not recenter: %d,%d", m.PanX, m.PanY)
@@ -161,5 +172,58 @@ func TestPanLinesClampsAndKeepsHeight(t *testing.T) {
 		if len(got) != len(lines) || strings.TrimSpace(strings.Join(got, "")) == "" {
 			t.Fatalf("clamped pan lost the graph: %q", got)
 		}
+	}
+}
+
+func TestSlashMenuSuggestsAndFillsWithoutRunning(t *testing.T) {
+	w, profiles, s := fixture(t)
+	m := LiveModel{Run: Run{Workflow: w, Profiles: profiles, Settings: s}, Width: 120, Height: 30, State: RunState{Agents: map[string]string{}}}
+	press := func(m LiveModel, key tea.KeyPressMsg) LiveModel {
+		next, _ := m.Update(key)
+		return next.(LiveModel)
+	}
+	for _, char := range "/re" {
+		m = press(m, tea.KeyPressMsg{Code: char, Text: string(char)})
+	}
+	options := m.slashSuggestions()
+	if len(options) != 2 || options[0].text != "/resume" || options[1].text != "/refresh" {
+		t.Fatalf("unexpected matches for /re: %+v", options)
+	}
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "› /resume") || !strings.Contains(view, "/refresh  Required-provider readiness") {
+		t.Fatalf("menu missing above prompt:\n%s", view)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.Prompt != "/re" || m.suggestion(2) != 1 {
+		t.Fatalf("down did not move the highlight: %q %d", m.Prompt, m.suggestion(2))
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.suggestion(2) != 0 {
+		t.Fatal("highlight did not wrap")
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.Prompt != "/refresh " || m.Error != "" {
+		t.Fatalf("enter did not fill the highlight: %q %q", m.Prompt, m.Error)
+	}
+	// A partial command never runs, even when it uniquely names one.
+	m.setPrompt("/canc", 5)
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.Prompt != "/cancel " {
+		t.Fatalf("partial command ran or was lost: %q", m.Prompt)
+	}
+	if usage := slashUsage["/detach"][0]; usage != "/detach N|all" || slashUsage["/attachments"][0] != "/attachments" {
+		t.Fatalf("grouped usage misassigned arguments: %q", usage)
+	}
+	m.setPrompt("/view ", 6)
+	if options := m.slashSuggestions(); len(options) != len(w.Agents)+1 || options[0].usage != "arena-orchestrator" {
+		t.Fatalf("agent suggestions after /view: %+v", options)
+	}
+	m = press(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.Prompt != "/view arena-orchestrator " {
+		t.Fatalf("tab did not complete the agent: %q", m.Prompt)
+	}
+	m.setPrompt("hello /re", 9)
+	if len(m.slashSuggestions()) != 0 {
+		t.Fatal("plain text opened the menu")
 	}
 }

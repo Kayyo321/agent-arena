@@ -41,7 +41,7 @@ var slashHelp = []string{
 	"Alt+←/→ move by word; Ctrl+W deletes a word; Ctrl+U/K clear before/after.",
 	"Enter sends; Shift+Enter inserts a newline. Alt+Enter/Ctrl+J work on legacy terminals.",
 	"PgUp/PgDn scroll; Ctrl+Home/End: first/latest; Alt+↑/↓ select events/changes.",
-	"Tab completes /commands. In a mini-window: Tab context/activity,",
+	"Typing / suggests commands: ↑/↓ pick, Tab/Enter fill in. In a mini-window: Tab context/activity,",
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
@@ -383,29 +383,123 @@ func readinessLines(results []Readiness) []string {
 	return lines
 }
 
-func (m *LiveModel) completePrompt() {
-	parts := strings.Fields(m.Prompt)
-	if len(parts) == 0 {
-		return
-	}
-	options := []string{}
-	if strings.HasPrefix(m.Prompt, "/view ") || strings.HasPrefix(m.Prompt, "/context ") {
-		options = append(options, parts[0]+" arena-orchestrator")
-		for _, a := range m.Run.Workflow.Agents {
-			options = append(options, parts[0]+" "+a.Id)
+type slashSuggestion struct{ text, usage, about string }
+
+// slashUsage maps each command to the usage and summary shown in /help.
+var slashUsage = func() map[string][2]string {
+	usage := map[string][2]string{}
+	for _, line := range slashHelp {
+		split := strings.Index(line, "  ")
+		if !strings.HasPrefix(line, "/") || split < 0 {
+			continue
 		}
-	} else {
-		options = append(options, slashCommands...)
+		// Grouped lines such as "/attachments /detach N|all" give each
+		// command the arguments that follow it.
+		about, name := strings.TrimSpace(line[split:]), ""
+		for _, field := range strings.Fields(line[:split]) {
+			if _, seen := usage[field]; strings.HasPrefix(field, "/") && !seen {
+				name = field
+				usage[name] = [2]string{name, about}
+			} else if name != "" && !strings.HasPrefix(field, "/") {
+				usage[name] = [2]string{usage[name][0] + " " + field, about}
+			}
+		}
 	}
-	matches := []string{}
+	return usage
+}()
+
+// slashSuggestions lists the commands, or the /view and /context agent IDs,
+// that extend the single-line prompt.
+func (m LiveModel) slashSuggestions() []slashSuggestion {
+	if !strings.HasPrefix(m.Prompt, "/") || strings.Contains(m.Prompt, "\n") || m.PopupAgent != "" {
+		return nil
+	}
+	options := []slashSuggestion{}
+	if command, _, spaced := strings.Cut(m.Prompt, " "); !spaced {
+		for _, name := range slashCommands {
+			usage := slashUsage[name]
+			if usage[0] == "" {
+				usage[0] = name
+			}
+			options = append(options, slashSuggestion{name, usage[0], usage[1]})
+		}
+	} else if command == "/view" || command == "/context" {
+		options = append(options, slashSuggestion{command + " arena-orchestrator", "arena-orchestrator", "permanent project control"})
+		for _, a := range m.Run.Workflow.Agents {
+			about := a.Runtime.Provider + " / " + a.Runtime.Model
+			if p, ok := m.Run.Profiles[a.Id]; ok && p.Role != "" {
+				about = p.Role + " · " + about
+			}
+			options = append(options, slashSuggestion{command + " " + a.Id, a.Id, about})
+		}
+	}
+	matches := []slashSuggestion{}
 	for _, option := range options {
-		if strings.HasPrefix(option, m.Prompt) {
+		if strings.HasPrefix(option.text, m.Prompt) {
 			matches = append(matches, option)
 		}
 	}
-	if len(matches) == 1 {
-		m.Prompt = matches[0] + " "
-	} else if len(matches) > 1 {
-		m.Error = "Complete: " + strings.Join(matches, ", ")
+	return matches
+}
+
+// suggestion returns the highlighted entry; editing the prompt resets it.
+func (m LiveModel) suggestion(count int) int {
+	if m.SuggestFor != m.Prompt || count == 0 {
+		return 0
 	}
+	return (m.SuggestIndex%count + count) % count
+}
+
+// moveSuggestion steps the highlight, wrapping at either end.
+func (m *LiveModel) moveSuggestion(step int) {
+	count := len(m.slashSuggestions())
+	m.SuggestIndex, m.SuggestFor = m.suggestion(count)+step, m.Prompt
+	m.SuggestIndex = m.suggestion(count)
+}
+
+// completePrompt fills in the highlighted suggestion and a trailing space.
+func (m *LiveModel) completePrompt() {
+	options := m.slashSuggestions()
+	if len(options) == 0 {
+		return
+	}
+	text := options[m.suggestion(len(options))].text + " "
+	m.setPrompt(text, len(text))
+}
+
+// suggestionLines draws the menu above the prompt, keeping the highlight in
+// view when there are more matches than rows.
+func (m LiveModel) suggestionLines(width, rows int, color bool) []string {
+	options := m.slashSuggestions()
+	if len(options) == 0 || rows < 1 {
+		return nil
+	}
+	selected := m.suggestion(len(options))
+	rows = min(rows, len(options))
+	start := min(max(0, selected-rows+1), len(options)-rows)
+	column := 0
+	for _, option := range options {
+		column = max(column, displayWidth(option.usage))
+	}
+	column = min(column, max(8, width/2))
+	lines := []string{}
+	for i := start; i < start+rows; i++ {
+		option, marker := options[i], "  "
+		if i == selected {
+			marker = "› "
+		}
+		usage := pad(option.usage, column)
+		if i == selected && color {
+			usage = "\x1b[1;" + sgrBrand + "m" + usage + "\x1b[0m"
+		}
+		line := marker + usage
+		if room := width - 2 - column - 2; option.about != "" && room > 3 {
+			line += "  " + muted(short(option.about, room), color)
+		}
+		lines = append(lines, line)
+	}
+	if more := len(options) - rows; more > 0 && rows < len(options) {
+		lines[len(lines)-1] += muted(fmt.Sprintf("  +%d more", more), color)
+	}
+	return lines
 }

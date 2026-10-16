@@ -177,6 +177,11 @@ func (m LiveModel) promptTextView(width, height int, color bool) ([]string, int,
 
 func (m LiveModel) promptView(width, height int, color bool) ([]string, int, int) {
 	rows, x, y := m.promptTextView(width, height, color)
+	if height >= 8 {
+		menu := m.suggestionLines(width, min(8, (height-6)/2), color)
+		rows = append(menu, rows...)
+		y += len(menu)
+	}
 	if len(m.Attachments) > 0 && height > 5 {
 		rows = append([]string{muted(short(m.attachmentSummary(), width), color)}, rows...)
 		y++

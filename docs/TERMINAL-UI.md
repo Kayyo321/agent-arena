@@ -84,7 +84,7 @@ provider readiness stay in the graph and `/status`, with pending questions in `/
 
 ## Prompt commands and agent windows
 
-`/help` lists commands, and Tab completes command names and agent IDs. Ordinary
+`/help` lists commands. Typing `/` shows matching commands, or agent IDs after `/view` and `/context`, in a menu above the prompt; ↑/↓ move the highlight and Tab or Enter fills it in without running a partial command. Ordinary
 text is an answer in the setup interview or a task in the loaded workflow. Letter
 keys remain text input; Ctrl+E/G/T open events/Git/teams, `/changes` opens the review queue,
 and Ctrl+V pastes clipboard images or text, and Ctrl+Q or

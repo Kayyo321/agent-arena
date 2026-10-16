@@ -137,7 +137,10 @@ Slash commands are available in setup and the graph:
 | `/integrate CHANGE_ID` | Integrate a reviewed change |
 | `/clear`, `/close`, `/quit` | Reset scroll/errors, close a panel, or exit |
 
-Tab completes slash commands and agent IDs. In the mini-window, Tab switches
+Typing `/` opens a suggestion menu above the prompt with each matching command's
+usage and summary, or the agent IDs after `/view ` and `/context `. ↑/↓ move the
+highlight, and Tab or Enter fills it in; Enter on a partial command never runs it.
+In the mini-window, Tab switches
 activity/context, PageUp/PageDown scroll, Home/End jump, and Esc closes it. Activity
 shows public progress summaries, tool activity and results; private chain-of-thought
 is not displayed or retained. Context distinguishes the actual retained task from

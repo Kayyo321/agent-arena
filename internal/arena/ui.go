@@ -48,6 +48,8 @@ type LiveModel struct {
 	Offset, Selected   int
 	Panning            bool
 	PanX, PanY         int
+	SuggestIndex       int
+	SuggestFor         string
 	Prompt, Error      string
 	Events             []Event
 	State              RunState
@@ -432,6 +434,13 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					m.PopupOffset = min(m.scrollEnd(true), m.PopupOffset+1)
 				}
+			} else if m.input.recalled == 0 && len(m.slashSuggestions()) > 0 {
+				// The menu owns ↑/↓ unless history is being browsed.
+				if s == "up" {
+					m.moveSuggestion(-1)
+				} else {
+					m.moveSuggestion(1)
+				}
 			} else if strings.Contains(m.Prompt, "\n") || displayWidth(m.Prompt) > max(1, m.Width-3) && m.Width > 0 {
 				if s == "up" {
 					m.movePromptVertical(-1)
@@ -522,6 +531,12 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+enter", "alt+enter", "ctrl+j":
 			m.insertPrompt("\n")
 		case "enter":
+			// A partial command fills in the highlighted suggestion rather
+			// than running, so a typo like /ca never cancels a run.
+			if command := strings.TrimSpace(m.Prompt); !strings.Contains(command, " ") && !Has(slashCommands, command) && command != "/exit" && len(m.slashSuggestions()) > 0 {
+				m.completePrompt()
+				return m, nil
+			}
 			input := m.Prompt
 			next, cmd := m.submit(input)
 			value := next.(LiveModel)
@@ -719,19 +734,22 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 			frame = -1
 		}
 		wide := width >= 100 && !m.Expanded
-		graph := []string{}
+		graph, legend := []string{}, []string{}
 		if wide {
 			graph = graphView(m.Run.Workflow, m.State, m.Events, m.agentDiffs(), width, color, m.spinner(false), frame)
+			// The legend is the wide graph's last row; it stays put while the canvas pans.
+			graph, legend = graph[:len(graph)-1], graph[len(graph)-1:]
 		} else {
 			graph = renderGraph(m.Run.Workflow, m.State, m.Events, m.Trees, width, color, m.Expanded, m.spinner(false))
 		}
-		// While panning, the legend takes the wide graph's spacer row.
+		// While panning, the key hint takes the wide graph's spacer row.
 		if m.Panning {
 			body = append(body, fmt.Sprintf("Pan · ←↑↓→ move · Space center · Esc done · offset %+d,%+d", m.PanX, m.PanY))
 		} else if wide {
 			body = append(body, "")
 		}
 		body = append(body, panLines(graph, m.PanX, m.PanY, width)...)
+		body = append(body, legend...)
 		body = append(body, packetActivity(m.Events, frame)...)
 		pending := 0
 		for _, change := range m.Changes {
