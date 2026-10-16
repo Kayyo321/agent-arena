@@ -277,7 +277,7 @@ func TestAuditImportRefusesExistingRun(t *testing.T) {
 	if _, err := p.ImportAudit(dest); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("imported over retired history: %v", err)
 	}
-	retired, _ := filepath.Glob(filepath.Join(p.Path(".state", "retired"), r.ID+"-*"))
+	retired, _ := p.retiredDirs(r.ID)
 	if got, err := os.ReadFile(filepath.Join(retired[0], "events.ndjson")); err != nil || !bytes.Contains(got, []byte(live[0].Hash)) {
 		t.Fatalf("retired history disturbed: %v", err)
 	}

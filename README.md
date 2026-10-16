@@ -174,8 +174,9 @@ inference. Live tests require explicit opt-in runtime choices; see
 [validation evidence](docs/VALIDATION.md). Submodules/nested Git repositories are
 refused rather than incompletely checkpointed. Worktrees and recovery objects are
 retained for inspection. `arena history RUN export FILE` and `arena history import FILE`
-move a redacted audit bundle between projects, read-only; permanent garbage collection
-is not implemented.
+move a redacted audit bundle between projects, read-only, and `arena history RUN purge --yes`
+permanently deletes a retired run's worktrees, branches and checkpoint refs (Git objects
+are left for `git gc`).
 
 ## License
 
