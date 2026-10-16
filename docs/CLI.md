@@ -123,6 +123,26 @@ and project settings are never part of a code. The format is described in
 `settings edit --set /pointer=JSON-value` is repeatable and validates every workflow
 against the proposed settings. Runtime IDs/options retain provider-specific meaning.
 
+### Preflight
+
+`arena doctor [--project PATH] [--json]` checks the machine before you run anything. It
+needs no Arena project, makes no network calls, reads no credentials and never prints
+environment values (it only notices that `WSL_DISTRO_NAME` is set). Each line is `OK`,
+`WARN` or `FAIL`; only `FAIL` makes the command exit non-zero.
+
+| Check | What it looks at | Fails when |
+| --- | --- | --- |
+| `platform` | Linux or macOS | any other OS (Windows uses WSL2) |
+| `git`, `git-repo` | Git version; the project is a work tree with a commit; uncommitted path count | Git is missing, the directory is not a repository, or there is no commit |
+| `provider-codex`, `provider-claude-code`, `provider-antigravity` | CLI on PATH, its version, and drift from `providers/compatibility.json` | never (warns: needed only by arenas that use it; sign-in is `arena status`) |
+| `bubblewrap` (Linux) | `bwrap` 0.11 or newer, needed for the Antigravity command fence | never (warns) |
+| `sandbox-exec` (macOS) | present for sandboxed commands | never (warns) |
+| `wsl`, `wsl-filesystem` | WSL2 detected from `WSL_DISTRO_NAME` or `/proc/version`; warns when the project is under `/mnt/` (a Windows drive) | never (warns) |
+| `tmux` | optional, for `arena tmux` | never (warns) |
+
+`--json` prints `{"ok": bool, "checks": [{"id", "status", "detail"}]}`. A passing
+doctor does not verify a provider; it only says the prerequisites are present.
+
 ## Running and inspecting
 
 ```sh
@@ -294,6 +314,45 @@ same JSON as `status --json`, `history RUN --json`, `changes`, `score --json` an
 `workflow show --json`. `arena_run_start` applies `arena run`'s readiness, policy
 and budget checks, and the run is supervised by the server process only while the
 MCP session stays open.
+
+### Running a run in tmux
+
+For SSH devboxes see [DEVBOX](DEVBOX.md).
+
+`arena tmux run WORKFLOW TASK` and `arena tmux resume RUN [--retry-interrupted]` lay a
+run out in your own `tmux` (optional: if it is missing, the command says so and exits;
+Arena never installs it):
+
+- **Window 0, pane 0 is the supervisor**: the process that executes the run
+  (`arena run` or `arena resume`). Supervision is attached, so ending that pane, or
+  killing the tmux session, interrupts the run exactly as quitting `arena run` does
+  (resume it with `arena resume`).
+- Pane 1 of window 0 is the event feed (`arena watch RUN --json --follow`).
+- Window 1 tiles one `arena view AGENT --run RUN --follow` per agent.
+- The observers only read the journal. Closing one never stops the run. When the run
+  ends the followers exit and the panes stay open (`remain-on-exit`) so the final
+  output is still readable.
+
+Run-id handoff: the observer panes must name the run, so `tmux run` first reserves it
+with the same readiness, policy and baseline checks as `arena run` (failures print
+before any tmux session exists), then starts the supervisor as
+`arena run --run RUN -- WORKFLOW TASK`. `--run` on `arena run` adopts that reserved,
+still unstarted run instead of creating one; it refuses a run that has started or
+belongs to another workflow. This keeps one code path for starting a run and needs no
+polling to discover the id. A reserved run whose tmux layout never started stays
+`created` and harmless.
+
+Requires tmux 2.0 or newer (checked with `tmux -V` before anything is created; see
+[DEVBOX](DEVBOX.md#tmux-version)).
+
+Safety: every pane command is passed to tmux as separate exec arguments, never a
+shell string, and workflow, task, agent and run text sits after a `--` terminator. Text
+such as `$(cmd)` or `; rm -rf x` reaches Arena as plain data.
+
+Inside tmux (`$TMUX` set) Arena does not nest: it creates the session detached and runs
+`tmux switch-client` to it. Outside tmux it runs `tmux attach-session`. Either way the
+session is named `arena-RUN`; detach with your usual key and return with
+`tmux attach -t arena-RUN`.
 
 ## Code review, recovery, and context
 
