@@ -946,6 +946,7 @@ arena agent request WORKFLOW --from ID --id ID --role ROLE --objective TEXT --re
   --provider ID --model ID [--effort VALUE] --capabilities LIST --workspace-mode read-only|write
 arena agent resolve REQUEST --approve
 arena history [RUN] [--json] | arena history repair RUN
+arena history RUN export FILE | arena history import FILE   Redacted audit bundle; imports are read-only
 arena run WORKFLOW TASK [--plain]
 arena watch RUN [--plain]
 arena watch RUN --json [--follow]   One journal event per line; --follow tails until the run ends

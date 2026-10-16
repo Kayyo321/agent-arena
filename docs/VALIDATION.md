@@ -216,7 +216,7 @@ Submodules/nested repositories and network filesystems are refused/unsupported.
 Ignored files are excluded from checkpoints. Retained worktrees/refs need owner
 cleanup; retirement is recoverable local storage, not secure deletion. Reduced
 retention cannot replay omitted packets; pending operational decision text can
-remain after a crash. Audit export/import, native Windows, and skill-only host
+remain after a crash. Audit export/import is covered by local tests only (round trip, tampered event and manifest, ID collision, reduced retention, oversized and malformed bundles); bundles are not signed. Native Windows and skill-only host
 execution adapters are not implemented.
 
 ## Background shaders

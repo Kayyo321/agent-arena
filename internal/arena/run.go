@@ -191,6 +191,9 @@ type RunHistory struct {
 	// when none did.
 	Usage  RunUsage `json:"usage"`
 	Events []Event  `json:"events"`
+	// Imported marks a run that came from an audit bundle: read-only history
+	// that cannot be resumed.
+	Imported bool `json:"imported,omitempty"`
 }
 
 // terminalStatuses are the run statuses set by workflow.succeeded,
