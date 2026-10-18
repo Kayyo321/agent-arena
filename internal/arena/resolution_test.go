@@ -411,9 +411,16 @@ func TestResolutionApplyStopsAndJournalsAppliedPrefix(t *testing.T) {
 	b := propose(t, p, r, "b", map[string]string{"b.txt": "b\n"})
 	c := propose(t, p, r, "c", map[string]string{"c.txt": "c\n"})
 	succeedRun(t, p, r)
-	// Prepare accepts all three, but integrate cannot create b's branch, as if
-	// the target changed between preview and apply.
-	resolutionGit(t, p.Root, "branch", "codex/arena/integrate/"+b.ID, "HEAD")
+	// Prepare accepts all three, but integrate cannot create b's worktree
+	// because its directory is occupied, as if the target changed between
+	// preview and apply.
+	occupied := filepath.Join(p.RunDir(r.ID), "integrations", b.ID)
+	if e := os.MkdirAll(occupied, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(occupied, "keep"), []byte("x"), 0600); e != nil {
+		t.Fatal(e)
+	}
 
 	res, e := p.PrepareResolution(r.ID, nil)
 	if e != nil || !res.Ready {

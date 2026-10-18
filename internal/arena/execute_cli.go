@@ -99,20 +99,22 @@ func (cli *CLI) announceResolution(p *Project, run string) {
 	if err != nil || len(resolution.Items) == 0 {
 		return
 	}
-	ready, blocked := 0, 0
+	ready, blocked, conflict := 0, 0, 0
 	for _, item := range resolution.Items {
 		switch item.Status {
 		case "ready":
 			ready++
-		case "blocked", "conflict":
+		case "blocked":
 			blocked++
+		case "conflict":
+			conflict++
 		}
 	}
-	if !resolution.Ready {
-		fmt.Fprintf(cli.Out, "Resolution not ready: %d ready, %d blocked · %s · arena integrate %s --all --dry-run\n", ready, blocked, resolution.Reason, run)
+	if resolution.Ready {
+		fmt.Fprintf(cli.Out, "Resolution ready: %d changes · arena integrate %s --all\n", ready, run)
 		return
 	}
-	fmt.Fprintf(cli.Out, "Resolution ready: %d changes, %d blocked · arena integrate %s --all\n", ready, blocked, run)
+	fmt.Fprintf(cli.Out, "Resolution not ready: %d ready, %d blocked, %d conflict · %s · arena integrate %s --all --dry-run\n", ready, blocked, conflict, resolution.Reason, run)
 }
 
 // Both CLI and TUI starts use the same readiness, policy and isolation checks.

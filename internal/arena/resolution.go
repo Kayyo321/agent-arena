@@ -71,6 +71,13 @@ func (p *Project) PrepareResolution(run string, skip []string) (Resolution, erro
 	case "new", "created", "running", "paused", "interrupted":
 		res.Reason = fmt.Sprintf("run is %s; resolve its changes after it ends", state.Status)
 		return res, nil
+	case "cancelled":
+		// A cancelled run can still be draining its agents, whose last
+		// proposals have not landed yet.
+		if RunAlive(p, run) {
+			res.Reason = "run is still stopping; wait for it to finish, then run /integrate again"
+			return res, nil
+		}
 	}
 	if headErr != nil {
 		return res, headErr
@@ -115,6 +122,9 @@ func (p *Project) PrepareResolution(run string, skip []string) (Resolution, erro
 		item := ResolutionItem{ChangeID: c.ID, AgentID: c.AgentID, Order: i + 1, Paths: append([]string{}, c.Paths...), Status: "ready"}
 		if reason := resolutionBlock(byID, outcome, isCandidate, skipped, c); reason != "" {
 			item.Status, item.Reason = "blocked", reason
+		} else if branch := integrateBranch(c.ID); gitRefExists(p.Root, "refs/heads/"+branch) {
+			item.Status = "blocked"
+			item.Reason = fmt.Sprintf("stale integration branch %s from an earlier attempt; inspect it and delete it before retrying", branch)
 		} else {
 			patch := filepath.Join(p.RunDir(run), "changes", c.ID+".patch")
 			if _, err := gitEnv(p.Root, env, "apply", "--cached", "--check", patch); err != nil {
@@ -138,6 +148,15 @@ func (p *Project) PrepareResolution(run string, skip []string) (Resolution, erro
 		res.Ready = true
 	}
 	return res, nil
+}
+
+// integrateBranch is the branch integrate creates for a change.
+func integrateBranch(changeID string) string { return "codex/arena/integrate/" + changeID }
+
+// gitRefExists reports whether ref exists. It is read-only.
+func gitRefExists(dir, ref string) bool {
+	_, err := Git(dir, "show-ref", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 // resolutionBlock explains why c cannot apply because of a prerequisite, or
@@ -201,8 +220,10 @@ func orderResolution(candidates []Change, isCandidate map[string]bool) ([]Change
 	return out, nil
 }
 
-// ApplyResolution integrates every ready item in order through integrate. It
-// refuses, and applies nothing, unless PrepareResolution reports Ready.
+// ApplyResolution integrates every ready item in order through integrate. The
+// gate is all-or-nothing: it refuses, and applies nothing, unless
+// PrepareResolution reports Ready. If an integrate fails partway, the changes
+// already committed stay in place (each reversible with rollback).
 func (p *Project) ApplyResolution(run, actor string, skip []string) (Resolution, error) {
 	res, err := p.PrepareResolution(run, skip)
 	if err != nil {
@@ -269,7 +290,7 @@ func (r Resolution) readyData() map[string]any {
 			conflict++
 		}
 	}
-	return map[string]any{"ready": ready, "blocked": blocked, "conflict": conflict, "changeIds": ids}
+	return map[string]any{"ready": ready, "blocked": blocked, "conflict": conflict, "changeIds": ids, "applicable": r.Ready, "reason": r.Reason}
 }
 
 // journalResolution is the end-of-run hook: when the run left proposed changes
@@ -278,6 +299,7 @@ func (r Resolution) readyData() map[string]any {
 func (e *Engine) journalResolution() {
 	changes, err := e.Project.Changes(e.Run.ID)
 	if err != nil {
+		_, _ = e.event("", "resolution.error", map[string]any{"reason": Redact(err.Error())})
 		return
 	}
 	proposed := false

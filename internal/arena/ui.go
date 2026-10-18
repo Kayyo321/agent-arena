@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -17,6 +18,10 @@ import (
 
 type uiTick struct{ RunID string }
 type uiCommandResult struct{ Err error }
+type resolutionPanelMsg struct {
+	lines []string
+	err   error
+}
 type uiReadinessResult struct {
 	Required string
 	Results  []Readiness
@@ -269,6 +274,12 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Panel, m.PanelText, m.Offset = "Shell · "+status, lines, 1<<30
 		m.ChatMode = false
+	case resolutionPanelMsg:
+		if v.err != nil {
+			m.Error = v.err.Error()
+			return m, nil
+		}
+		m.Panel, m.PanelText = "Resolution", v.lines
 	case uiReadinessResult:
 		if v.Required == string(JSON(Required([]Workflow{m.Run.Workflow}, m.Run.Settings))) {
 			m.Readiness = v.Results
@@ -801,8 +812,10 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 				pending++
 			}
 		}
-		if ready, ok := latestResolutionReady(m.Events); ok {
+		if ready, applicable, ok := latestResolutionReady(m.Events); ok && applicable {
 			body = append(body, fmt.Sprintf("Resolution prepared: %d ready · /integrate to review, /integrate all to apply", ready))
+		} else if ok {
+			body = append(body, "Resolution not ready · /integrate to see why")
 		} else {
 			body = append(body, fmt.Sprintf("Review queue: %d pending · /changes for patches and integration", pending))
 		}
@@ -1007,20 +1020,21 @@ func resolutionSkip(rest []string) ([]string, error) {
 
 // latestResolutionReady reports the ready count when the newest resolution
 // event is resolution.ready, meaning nothing has been applied or stopped since.
-func latestResolutionReady(events []Event) (int, bool) {
+func latestResolutionReady(events []Event) (ready int, applicable bool, ok bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		switch events[i].Type {
 		case "resolution.ready":
-			return eventCount(events[i].Data["ready"]), true
+			applicable, _ = events[i].Data["applicable"].(bool)
+			return eventCount(events[i].Data["ready"]), applicable, true
 		case "resolution.applied", "resolution.stopped":
-			return 0, false
+			return 0, false, false
 		}
 	}
-	return 0, false
+	return 0, false, false
 }
 
-// eventCount reads a count from journal data, which decodes as float64 but may
-// be an int when the event was built in process.
+// eventCount reads a count from journal data. Journal reads use UseNumber, so
+// counts arrive as json.Number; float64, int and int64 cover in-process events.
 func eventCount(v any) int {
 	switch n := v.(type) {
 	case int:
@@ -1029,12 +1043,18 @@ func eventCount(v any) int {
 		return int(n)
 	case float64:
 		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(i)
 	}
 	return 0
 }
 
 // resolutionLines describes the prepared resolution for the /integrate panel.
-// It runs Git, so it is called from the command path and never from View().
+// It runs Git, so it is called from a tea.Cmd and never from View() or Update.
 func (m LiveModel) resolutionLines() ([]string, error) {
 	resolution, err := m.Project.PrepareResolution(m.Run.ID, nil)
 	if err != nil {

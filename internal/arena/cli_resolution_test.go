@@ -52,8 +52,12 @@ func TestSingleChangeIntegrateRejectsSkipAndDryRun(t *testing.T) {
 }
 
 func TestIntegrateAllWithRepeatedSkipAppliesTheRest(t *testing.T) {
-	p, r, alpha, beta := cliResolutionSetup(t)
-	if err := runCLI(p, "integrate", r.ID, "--all", "--skip", alpha.ID, "--yes"); err != nil {
+	p, r := resolutionRun(t)
+	alpha := propose(t, p, r, "alpha", map[string]string{"a.txt": "a\n"})
+	beta := propose(t, p, r, "beta", map[string]string{"b.txt": "b\n"})
+	gamma := propose(t, p, r, "gamma", map[string]string{"c.txt": "c\n"})
+	succeedRun(t, p, r)
+	if err := runCLI(p, "integrate", r.ID, "--all", "--skip", alpha.ID, "--skip", gamma.ID, "--yes"); err != nil {
 		t.Fatal(err)
 	}
 	if s := changeState(t, p, r, alpha.ID); s != "proposed" {
@@ -61,5 +65,8 @@ func TestIntegrateAllWithRepeatedSkipAppliesTheRest(t *testing.T) {
 	}
 	if s := changeState(t, p, r, beta.ID); s != "integrated" {
 		t.Fatalf("beta state = %s, want integrated", s)
+	}
+	if s := changeState(t, p, r, gamma.ID); s != "proposed" {
+		t.Fatalf("gamma state = %s, want proposed", s)
 	}
 }

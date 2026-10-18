@@ -268,8 +268,9 @@ Each change lands as its own commit, so `arena rollback RUN_ID CHANGE_ID --yes` 
 one change. A failed or cancelled run gets no automatic resolution, but
 `arena integrate RUN_ID --all --dry-run` still plans one.
 
-The resolution is all-or-nothing. Nothing applies unless every item is `ready` and the
-checkout is clean. A change is `blocked` when a dependency was superseded or skipped, and
+The gate is all-or-nothing. Nothing applies unless every item is `ready` and the
+checkout is clean. If an apply fails partway, the changes already committed stay in place,
+and each one can be reverted with `arena rollback RUN_ID CHANGE_ID --yes`. A change is `blocked` when a dependency was superseded or skipped, and
 `conflict` when the dry run fails to apply. A run that has not ended cannot be applied.
 If the checkout moves after preparation, apply stops, journals `resolution.stopped` with
 the changes already applied, and keeps those commits. A successful apply journals

@@ -419,13 +419,12 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			m.Error = "no run yet; enter run TASK to start this arena, or q to quit"
 			return m, nil
 		}
-		lines, err := m.resolutionLines()
-		if err != nil {
-			m.Error = err.Error()
-			return m, nil
+		m.Error = ""
+		snapshot := m // Value copy: the Git work must not read the live model.
+		return m, func() tea.Msg {
+			lines, err := snapshot.resolutionLines()
+			return resolutionPanelMsg{lines: lines, err: err}
 		}
-		m.Panel, m.PanelText = "Resolution", lines
-		return m, nil
 	}
 	if parts[0] == "run" {
 		if len(parts) < 2 {
