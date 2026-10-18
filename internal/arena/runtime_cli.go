@@ -92,7 +92,10 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		fmt.Fprint(cli.Out, Redact(string(patch)))
 		return nil
 	case "integrate":
-		if len(args) == 2 && o.Bool("all") {
+		if o.Bool("all") {
+			if len(args) != 2 {
+				return fmt.Errorf("integrate RUN --all takes no change IDs; leave one out with --skip CHANGE, repeating the flag for each change")
+			}
 			resolution, err := p.PrepareResolution(args[1], o["skip"])
 			if err != nil {
 				return err
@@ -116,6 +119,9 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			applied, err := p.ApplyResolution(args[1], "user", o["skip"])
 			cli.print(applied)
 			return err
+		}
+		if len(o["skip"]) > 0 || o.Bool("dry-run") {
+			return fmt.Errorf("--skip and --dry-run apply only to integrate RUN --all")
 		}
 		if len(args) != 3 {
 			return fmt.Errorf("integrate RUN CHANGE [--yes]")
