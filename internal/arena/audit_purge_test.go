@@ -24,7 +24,11 @@ type purgeFixture struct {
 
 func newPurgeFixture(t *testing.T, integrateAll bool) purgeFixture {
 	t.Helper()
-	p := committedProject(t)
+	return newPurgeFixtureIn(t, committedProject(t), integrateAll)
+}
+
+func newPurgeFixtureIn(t *testing.T, p *Project, integrateAll bool) purgeFixture {
+	t.Helper()
 	f := purgeFixture{p: p}
 	f.run = testRun(t, p)
 	if _, err := Git(p.Root, "add", ".arena"); err != nil {
@@ -89,6 +93,16 @@ func (f purgeFixture) retire(t *testing.T) {
 	}
 }
 
+// realPath resolves symlinks the way Git does when it registers a worktree.
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
+}
+
 func gitHas(p *Project, ref string) bool {
 	_, err := Git(p.Root, "show-ref", "--verify", "--quiet", ref)
 	return err == nil
@@ -139,8 +153,11 @@ func TestPurgeRemovesOnlyTheRetiredRunsOwnState(t *testing.T) {
 	if err != nil || len(plan.Unintegrated) != 0 || len(plan.Worktrees) < 3 || len(plan.Branches) < 3 || len(plan.Checkpoints) < 3 {
 		t.Fatalf("plan %+v %v", plan, err)
 	}
+	// Git, and so the plan, spell worktrees by their real path; on macOS the
+	// temporary directory is reached through a symlink, so p.Root is not it.
+	live := filepath.Join(realPath(t, p.Root), ".arena", ".state", f.run.ID)
 	for _, path := range plan.Worktrees {
-		if !underRun(p.RunDir(f.run.ID), path) {
+		if !underRun(live, path) {
 			t.Fatalf("plan names %s outside the run's state", path)
 		}
 	}
@@ -189,7 +206,7 @@ func TestPurgeRemovesOnlyTheRetiredRunsOwnState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.otherTree, "three.txt")); err != nil {
 		t.Fatal("other run's worktree touched")
 	}
-	if list, _ := Git(p.Root, "worktree", "list", "--porcelain"); !strings.Contains(list, f.otherTree) {
+	if list, _ := Git(p.Root, "worktree", "list", "--porcelain"); !strings.Contains(list, realPath(t, f.otherTree)) {
 		t.Fatal("other run's worktree unregistered")
 	}
 	if left, _ := Git(p.Root, "branch", "--list", "codex/arena/"+f.other.ID+"/*"); left == "" {
@@ -302,6 +319,58 @@ func TestPurgeBlocksOnUncommittedWorktreeFiles(t *testing.T) {
 	}
 }
 
+// A run's records spell its worktrees' paths the way the project was reached
+// when they were written, while Git registers a worktree by its real path and
+// `arena history` opens the project by its real path. On macOS the temporary
+// directory is behind a symlink (/var is /private/var), so the two spellings
+// differ; a purge has to match them or it leaves the registrations behind and
+// Git then refuses to delete their branches.
+func TestPurgeFindsWorktreesRecordedUnderAnotherSpellingOfTheRoot(t *testing.T) {
+	dir := symlinkedTempDir(t)
+	f := newPurgeFixtureIn(t, committedProjectIn(t, dir), true)
+	f.userWork(t)
+	p := f.p
+	if p.Root == realPath(t, p.Root) {
+		t.Fatalf("fixture root %s is not behind a symlink", p.Root)
+	}
+	w, err := p.Workspaces(f.run.ID)
+	if err != nil || len(w) == 0 || !strings.HasPrefix(w[0].Path, p.Root) {
+		t.Fatalf("fixture records do not use the unresolved root: %+v %v", w, err)
+	}
+	f.retire(t)
+	// `arena history` opens the project by its real path.
+	opened, err := Open(p.Root)
+	if err != nil || opened.Root != realPath(t, p.Root) {
+		t.Fatalf("opened %+v %v", opened, err)
+	}
+	plan, err := opened.PlanPurge(f.run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two writers and two integration worktrees, none holding unproposed work.
+	if len(plan.Worktrees) != 4 || len(plan.Unintegrated) != 0 {
+		t.Fatalf("plan %+v", plan)
+	}
+	live := filepath.Join(realPath(t, p.Root), ".arena", ".state", f.run.ID)
+	for _, path := range plan.Worktrees {
+		if !underRun(live, path) {
+			t.Fatalf("plan names %s outside the run's state", path)
+		}
+	}
+	if out, err := purgeCLI(p, f.run.ID, "purge", "--yes"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if list, _ := Git(p.Root, "worktree", "list", "--porcelain"); strings.Contains(list, f.run.ID) || !strings.Contains(list, realPath(t, f.otherTree)) {
+		t.Fatalf("purge left the run's worktrees or removed another run's:\n%s", list)
+	}
+	if left, _ := Git(p.Root, "branch", "--list", "codex/arena/*"); strings.Contains(left, f.run.ID) || strings.Contains(left, f.integrated.ID) || !strings.Contains(left, f.other.ID) {
+		t.Fatalf("branches after the purge:\n%s", left)
+	}
+	if retired, _ := p.retiredDirs(f.run.ID); len(retired) != 0 {
+		t.Fatalf("retired history remains: %v", retired)
+	}
+}
+
 // A retired run's records name paths and branches; a purge follows only the
 // ones inside Arena's own state and naming.
 func TestPurgeIgnoresRecordsThatPointOutsideArenaState(t *testing.T) {
@@ -372,7 +441,7 @@ func TestPurgeIgnoresRecordsThatPointOutsideArenaState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.otherTree, "three.txt")); err != nil {
 		t.Fatal("other run's worktree deleted")
 	}
-	if list, _ := Git(p.Root, "worktree", "list", "--porcelain"); !strings.Contains(list, f.otherTree) {
+	if list, _ := Git(p.Root, "worktree", "list", "--porcelain"); !strings.Contains(list, realPath(t, f.otherTree)) {
 		t.Fatal("other run's worktree unregistered")
 	}
 	if _, err := os.Stat(f.userFile); err != nil {

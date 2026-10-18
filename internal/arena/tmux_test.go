@@ -82,6 +82,15 @@ func TestTmuxHostileValuesStayWholeArgvElements(t *testing.T) {
 	}
 }
 
+func indexOf(a []string, s string) int {
+	for i, v := range a {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
 func contains(a []string, s string) bool {
 	for _, v := range a {
 		if v == s {
@@ -106,9 +115,21 @@ func TestTmuxResumeRunsLayoutThroughFakeTmux(t *testing.T) {
 	if first[0] != "new-session" {
 		t.Fatalf("first call: %q", first)
 	}
-	wantTail := []string{"--", exe, "--project", p.Root, "resume", r.ID, "--retry-interrupted"}
+	// The command resolves --project to the project's real path (Open follows
+	// symlinks), and on macOS t.TempDir() is reached through one (/var is
+	// /private/var), so the panes are told the resolved root, not p.Root. The
+	// executable is os.Executable() as is.
+	root := realPath(t, p.Root)
+	wantTail := []string{"--", exe, "--project", root, "resume", r.ID, "--retry-interrupted"}
 	if !reflect.DeepEqual(first[len(first)-len(wantTail):], wantTail) {
 		t.Fatalf("supervisor command: %q", first)
+	}
+	i := indexOf(first, "-c")
+	if i < 0 || i+1 >= len(first) {
+		t.Fatalf("new-session must pass -c followed by the project's real path %s: %q", root, first)
+	}
+	if first[i+1] != root {
+		t.Fatalf("new-session must start in the project's real path %s: %q", root, first)
 	}
 	last := got[len(got)-1]
 	if !reflect.DeepEqual(last, []string{"attach-session", "-t", "arena-" + r.ID}) {

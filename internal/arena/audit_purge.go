@@ -53,7 +53,31 @@ func (p *Project) retiredDirs(id string) ([]string, error) {
 	return dirs, nil
 }
 
-// underRun is whether path is strictly inside the run's state directory.
+// resolvedPath is path with the symlinks in its longest existing prefix
+// resolved and the rest appended as written. Git records a worktree by its real
+// path, and on macOS the temporary and home directories sit behind symlinks
+// (/var is /private/var), so the same worktree can be spelled two ways. A
+// retired run's worktree directories no longer exist, which rules out
+// filepath.EvalSymlinks on the whole path: resolving what is left of it is what
+// lets a purge recognise the registration Git still holds.
+func resolvedPath(path string) string {
+	path = filepath.Clean(path)
+	rest := ""
+	for current := path; ; {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(current), rest)
+		current = parent
+	}
+}
+
+// underRun is whether path is strictly inside the run's state directory. Both
+// are compared as written, so callers resolve them first (see resolvedPath).
 func underRun(live, path string) bool {
 	path = filepath.Clean(path)
 	return path != live && within(path, live)
@@ -76,7 +100,14 @@ func (p *Project) PlanPurge(id string) (PurgePlan, error) {
 		return plan, fmt.Errorf("no retired history for %s; purge only deletes runs already retired with arena history %s retire", id, id)
 	}
 	plan.Retired = dirs
-	live := p.RunDir(id)
+	// Records may spell a path differently from this process (they were written
+	// through another spelling of the project root), and Git registers worktrees
+	// by their real path. Every path below is compared and handed to Git in its
+	// resolved form.
+	// The run directory was just checked absent, so its own name is never
+	// resolved (a symlink appearing there would redirect every record path
+	// into another run); only the real .arena/.state parent is.
+	live := filepath.Join(resolvedPath(p.Path(".state")), id)
 	paths, branches, checkpoints := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	workers := map[string]Workspace{}
 	for _, dir := range dirs {
@@ -105,10 +136,11 @@ func (p *Project) PlanPurge(id string) (PurgePlan, error) {
 			}
 			// The records are Arena's own, but a purge still only follows
 			// paths and branches that sit where Arena puts them.
-			if underRun(live, w.Path) {
-				paths[filepath.Clean(w.Path)] = true
+			if resolved := resolvedPath(w.Path); underRun(live, resolved) {
+				paths[resolved] = true
 				if w.Write {
-					workers[filepath.Clean(w.Path)] = w
+					w.Path = resolved
+					workers[resolved] = w
 				}
 			}
 			if w.Branch != "" && strings.HasPrefix(w.Branch, "codex/arena/"+id+"/") {
@@ -131,8 +163,11 @@ func (p *Project) PlanPurge(id string) (PurgePlan, error) {
 				checkpoints[change.Checkpoint] = true
 			}
 			for _, w := range []string{change.Workspace, change.IntegrationWorkspace} {
-				if w != "" && underRun(live, w) {
-					paths[filepath.Clean(w)] = true
+				if w == "" {
+					continue
+				}
+				if resolved := resolvedPath(w); underRun(live, resolved) {
+					paths[resolved] = true
 				}
 			}
 			if change.IntegrationWorkspace != "" {
@@ -155,8 +190,8 @@ func (p *Project) PlanPurge(id string) (PurgePlan, error) {
 		return plan, err
 	}
 	for path := range paths {
-		if registered[path] {
-			plan.Worktrees = append(plan.Worktrees, path)
+		if git, ok := registered[path]; ok {
+			plan.Worktrees = append(plan.Worktrees, git)
 		}
 	}
 	for branch := range branches {
@@ -202,11 +237,11 @@ func (p *Project) unproposedFiles(w Workspace, tree string) string {
 	admins, _ := filepath.Glob(filepath.Join(common, "worktrees", "*"))
 	admin := ""
 	for _, candidate := range admins {
-		if b, err := os.ReadFile(filepath.Join(candidate, "gitdir")); err == nil && filepath.Clean(strings.TrimSpace(string(b))) == filepath.Join(w.Path, ".git") {
+		if b, err := os.ReadFile(filepath.Join(candidate, "gitdir")); err == nil && resolvedPath(strings.TrimSpace(string(b))) == filepath.Join(resolvedPath(w.Path), ".git") {
 			admin = candidate
 		}
 	}
-	if pointer, err := readGitPointer(tree); admin == "" || err != nil || pointer != admin {
+	if pointer, err := readGitPointer(tree); admin == "" || err != nil || !sameDir(pointer, admin) {
 		return unknown
 	}
 	scratch, err := os.MkdirTemp(p.Path(".state"), "purge-index-")
@@ -241,15 +276,17 @@ func (p *Project) unproposedFiles(w Workspace, tree string) string {
 	return "files beyond its last proposal: " + strings.Join(files, ", ")
 }
 
-func (p *Project) registeredWorktrees() (map[string]bool, error) {
+// registeredWorktrees maps each worktree Git has registered, by its resolved
+// path, to the path as Git spells it, which is what Git accepts back.
+func (p *Project) registeredWorktrees() (map[string]string, error) {
 	out, err := Git(p.Root, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
-	registered := map[string]bool{}
+	registered := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		if path, ok := strings.CutPrefix(line, "worktree "); ok {
-			registered[filepath.Clean(path)] = true
+			registered[resolvedPath(path)] = filepath.Clean(path)
 		}
 	}
 	return registered, nil

@@ -8,7 +8,13 @@ import (
 )
 
 func committedProject(t *testing.T) *Project {
-	p := testProject(t)
+	t.Helper()
+	return committedProjectIn(t, t.TempDir())
+}
+
+func committedProjectIn(t *testing.T, dir string) *Project {
+	t.Helper()
+	p := testProjectIn(t, dir)
 	if e := os.WriteFile(filepath.Join(p.Root, ".gitignore"), []byte(".arena/.state/\n.arena/locks/\n.arena-root\n"), 0644); e != nil {
 		t.Fatal(e)
 	}

@@ -18,10 +18,15 @@ const followInterval = 150 * time.Millisecond
 // last sequence it delivered, which is what keeps a poll from repeating or
 // reordering events.
 //
-// It ends once the run is terminal and a poll finds nothing new (a cancelled
-// run's agents still record agent.cancelled after workflow.cancelled), when the
-// events do not replay, or when the journal no longer holds what was already
-// delivered. It also ends when the run is interrupted while it is attached: the
+// It ends once the run is terminal, its supervisor has stopped and a last read
+// finds nothing new, when the events do not replay, or when the journal no
+// longer holds what was already delivered. The supervisor is what keeps writing
+// after a terminal event (a cancelled run's agents still record agent.cancelled
+// after workflow.cancelled, and a finished run's resolution.ready or
+// resolution.error follows workflow.succeeded once the combined resolution is
+// prepared, which takes as long as Git takes), so a quiet poll alone does not
+// end the run: while the run's lock is still held the follower keeps polling.
+// It also ends when the run is interrupted while it is attached: the
 // supervisor stopped, so nothing more arrives until a person resumes the run.
 // A follower that starts on a run that is already interrupted does not quit,
 // because `arena tmux resume` starts its observers beside the supervisor, which
@@ -32,28 +37,35 @@ func (p *Project) followEvents(ctx context.Context, runID string, follow bool, e
 	ticker := time.NewTicker(followInterval)
 	defer ticker.Stop()
 	last := 0
-	// interruptedWhileAttached is set when this follower saw the run become
-	// interrupted, not when the backlog it started with already ended that way.
-	interruptedWhileAttached, firstPoll := false, true
-	for {
-		events, err := p.Events(runID)
-		if err != nil {
-			return err
+	// poll delivers every event beyond the last one delivered and reports
+	// whether there were any.
+	poll := func() (events []Event, fresh bool, err error) {
+		if events, err = p.Events(runID); err != nil {
+			return nil, false, err
 		}
 		// Events checks that the journal is contiguous, so the newest sequence
 		// is the event count.
 		if len(events) < last {
-			return fmt.Errorf("run %s history shrank from %d to %d events; it may have been retired", runID, last, len(events))
+			return nil, false, fmt.Errorf("run %s history shrank from %d to %d events; it may have been retired", runID, last, len(events))
 		}
-		fresh := false
 		for _, e := range events {
 			if e.Sequence <= last {
 				continue
 			}
 			if err := emit(e); err != nil {
-				return err
+				return nil, false, err
 			}
 			last, fresh = e.Sequence, true
+		}
+		return events, fresh, nil
+	}
+	// interruptedWhileAttached is set when this follower saw the run become
+	// interrupted, not when the backlog it started with already ended that way.
+	interruptedWhileAttached, firstPoll := false, true
+	for {
+		events, fresh, err := poll()
+		if err != nil {
+			return err
 		}
 		if !follow {
 			return nil
@@ -69,8 +81,19 @@ func (p *Project) followEvents(ctx context.Context, runID string, follow bool, e
 			interruptedWhileAttached = true
 		}
 		firstPoll = false
-		if !fresh && (Has(terminalStatuses, state.Status) || interruptedWhileAttached) {
-			return nil
+		if !fresh {
+			if interruptedWhileAttached {
+				return nil
+			}
+			if Has(terminalStatuses, state.Status) && !RunAlive(p, runID) {
+				// The supervisor is gone, so it writes no more. It may have
+				// written its last events after the read above and before it
+				// stopped, so read once more before ending.
+				if _, fresh, err = poll(); err != nil || !fresh {
+					return err
+				}
+				continue
+			}
 		}
 		select {
 		case <-ctx.Done():

@@ -277,9 +277,14 @@ can still be verified. Without `--follow` it prints the journal once and exits.
 `--follow` keeps tailing: each line is flushed as it is written, every event
 appears once in `sequence` order, and the command exits 0 when the run is
 terminal (`succeeded`, `failed` or `cancelled`, the `terminal` flag of
-`history --json`) and a poll finds nothing new. That last poll lets
-`agent.cancelled` events that follow `workflow.cancelled` still arrive; an event
-recorded later than one poll after the run ended is only in `history`. It also
+`history --json`), its supervisor has stopped and a last read finds nothing new.
+The supervisor records events after the terminal one (`agent.cancelled` after
+`workflow.cancelled`, `resolution.ready` or `resolution.error` after
+`workflow.succeeded`), so the follow stays attached until the supervisor has
+released the run lock or the process is no longer reachable from this machine
+(for example it runs on another host or cannot be signalled). Events written by
+other commands after the supervisor stops, such as an `integrate` run from
+another shell, are not followed and appear only in `history`. It also
 exits 0 when the run becomes `interrupted` while it is attached (its supervisor
 stopped, so nothing more arrives until `arena resume`; the follow ends and a
 resume needs a new one). A follow that starts on a run that is already

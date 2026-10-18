@@ -3,6 +3,7 @@ package arena
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,11 @@ type gauge struct {
 	perRunPeak  map[string]int
 	holdTime    time.Duration
 	invocations int
+	// release, when set, holds every worker (an agent whose ID starts with
+	// "worker-") until it is closed, instead of for holdTime. A test then looks
+	// at the slots while they are known to be full, whatever the machine's speed.
+	release chan struct{}
+	held    int
 }
 
 func newGauge() *gauge {
@@ -38,12 +44,37 @@ func (g *gauge) invoke(ctx context.Context, in Invocation) (map[string]any, erro
 		g.perRun[in.RunID]--
 		g.mu.Unlock()
 	}()
+	// Exactly one of these is non-nil: a nil channel never receives.
+	var timeout <-chan time.Time
+	var release <-chan struct{}
+	if g.release != nil && strings.HasPrefix(in.AgentID, "worker-") {
+		release = g.release
+		g.mu.Lock()
+		g.held++
+		g.mu.Unlock()
+		defer func() {
+			g.mu.Lock()
+			g.held--
+			g.mu.Unlock()
+		}()
+	} else {
+		timeout = time.After(g.holdTime)
+	}
 	select {
-	case <-time.After(g.holdTime):
+	case <-timeout:
+	case <-release:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 	return ordinaryResult(), nil
+}
+
+// counts reports the agents active and workers held right now, and the highest
+// number of agents that were ever active at once.
+func (g *gauge) counts() (active, held, peak int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.active, g.held, g.peak
 }
 
 // fanOutRun saves a workflow whose head delegates to `workers` read-only
@@ -118,10 +149,18 @@ func TestProjectSlotsBoundAgentsAcrossRuns(t *testing.T) {
 	if a.Settings.Limits.MaxConcurrentAgents != 4 {
 		t.Fatalf("project cap %d, want the default 4", a.Settings.Limits.MaxConcurrentAgents)
 	}
+	// Workers are held until the test releases them, so the slots stay full for
+	// as long as the test looks at them. Whether two runs' agents overlap on
+	// their own depends on how fast the machine is, so the test does not rely on
+	// it: it waits for the slots to fill and checks what happens to the rest.
 	g := newGauge()
+	g.release = make(chan struct{})
+	// If the test fails early, stop the runs and wait for them before the
+	// project's directory is removed.
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for _, r := range []Run{a, b} {
 		wg.Add(1)
@@ -130,6 +169,24 @@ func TestProjectSlotsBoundAgentsAcrossRuns(t *testing.T) {
 			errs <- NewEngine(p, r, testInvoker(g.invoke)).Execute(ctx, false, false)
 		}()
 	}
+	// 6 workers are wanted (3 per run) and nothing releases them, so the 4
+	// slots fill and stay full.
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		_, held, _ := g.counts()
+		if held >= 4 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the project's 4 slots to fill; %d workers are running", held)
+		}
+	}
+	// The other 2 workers have to wait for a slot. Give them many polls of the
+	// slot lock (every 50ms) in which to start if the cap were not enforced.
+	time.Sleep(10 * 50 * time.Millisecond)
+	if active, held, peak := g.counts(); active != 4 || held != 4 || peak != 4 {
+		t.Fatalf("with 6 workers wanted and 4 slots: %d agents active, %d workers held, peak %d; want 4, 4, 4", active, held, peak)
+	}
+	close(g.release)
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -140,8 +197,8 @@ func TestProjectSlotsBoundAgentsAcrossRuns(t *testing.T) {
 	if g.invocations != 18 {
 		t.Fatalf("%d invocations", g.invocations)
 	}
-	if g.peak != 4 {
-		t.Fatalf("peak %d active agents across both runs; the project has 4 slots and 6 were wanted", g.peak)
+	if _, _, peak := g.counts(); peak != 4 {
+		t.Fatalf("peak %d active agents across both runs; the project has 4 slots", peak)
 	}
 	for id, peak := range g.perRunPeak {
 		if peak > 3 {

@@ -427,6 +427,45 @@ func TestWatchFollowOfAnAlreadyInterruptedRunWaitsForItToBeResumed(t *testing.T)
 	}
 }
 
+// The supervisor keeps writing after a run's terminal event: it prepares the
+// combined resolution, which takes as long as Git takes, and journals
+// resolution.ready or resolution.error. While the supervisor still holds the
+// run, quiet polls do not mean the feed is over; the follower ends only once
+// the supervisor has stopped and has nothing further to say.
+func TestWatchFollowOutlastsTheEventsASupervisorWritesAfterTheTerminalOne(t *testing.T) {
+	p := committedProject(t)
+	r := testRun(t, p)
+	appendEvents(t, p, r, "", "workflow.started")
+	supervisor, err := p.Lock("run-" + r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close()
+	out := &syncBuffer{}
+	done := startCLI(context.Background(), out, "watch", r.ID, "--follow", "--json", "--project", p.Root)
+	waitFor(t, "the backlog", func() bool { return out.lines() == 2 })
+	appendEvents(t, p, r, "", "workflow.succeeded")
+	waitFor(t, "the terminal event", func() bool { return out.lines() == 3 })
+	// Well beyond the extra poll the follower used to allow after the terminal event.
+	time.Sleep(6 * followInterval)
+	select {
+	case err := <-done:
+		t.Fatalf("quit while the supervisor still held the run: %v", err)
+	default:
+	}
+	appendEvents(t, p, r, "", "resolution.ready")
+	if err := supervisor.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitDone(t, done); err != nil {
+		t.Fatal(err)
+	}
+	events := streamed(t, out.String())
+	if out.String() != mirror(t, p, r) || len(events) != 4 || events[3].Type != "resolution.ready" {
+		t.Fatalf("the follower missed what the supervisor wrote after the run ended:\n%s", out.String())
+	}
+}
+
 // A real run is interrupted under both kinds of follower, then resumed. Followers
 // attached when the supervisor stops exit with nothing missing; one started
 // while the run is interrupted rides through the resume to completion.
