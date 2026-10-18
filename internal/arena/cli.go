@@ -37,7 +37,7 @@ func (o Options) Bool(k string) bool { return o.Get(k) == "true" }
 func parseArgs(args []string) ([]string, Options, error) {
 	o := Options{}
 	pos := []string{}
-	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow", "control", "discard-unintegrated"}
+	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow", "control", "discard-unintegrated", "check", "force"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -97,7 +97,17 @@ func (cli *CLI) confirm(label string, o Options) error {
 	}
 	return nil
 }
+
+// Run executes one command. After a successful one it may print a one-line
+// notice that a newer release exists (selfupdate.go).
 func (cli *CLI) Run(ctx context.Context, args []string) error {
+	if e := cli.run(ctx, args); e != nil {
+		return e
+	}
+	cli.noticeUpdate(ctx, args)
+	return nil
+}
+func (cli *CLI) run(ctx context.Context, args []string) error {
 	if len(args) > 0 && (args[0] == "--help" || args[0] == "help") {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
@@ -120,7 +130,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip,follow,control,discard-unintegrated")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip,follow,control,discard-unintegrated,check,to,force")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -144,6 +154,19 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 			return fmt.Errorf("arena doctor [--project PATH] [--json]")
 		}
 		return cli.doctor(ctx, dir, o)
+	}
+	if pos[0] == "update" || pos[0] == "uninstall" {
+		if len(pos) != 1 {
+			return fmt.Errorf("arena update [--check] [--to VERSION] [--yes] | arena uninstall [--yes] [--dry-run] [--force]")
+		}
+		exe, e := runningExecutable()
+		if e != nil {
+			return e
+		}
+		if pos[0] == "update" {
+			return cli.update(ctx, exe, dir, o)
+		}
+		return cli.uninstall(ctx, exe, dir, o)
 	}
 	p, e := Open(dir)
 	if e != nil {
@@ -720,6 +743,11 @@ func (cli *CLI) skill(p *Project, args []string, o Options) error {
 			if e := os.Remove(path); e != nil {
 				return e
 			}
+			if o.Bool("user") {
+				if e := forgetUserSkill(path); e != nil {
+					return e
+				}
+			}
 		default:
 			return fmt.Errorf("unknown skill command")
 		}
@@ -938,6 +966,8 @@ arena settings show|edit [--set /pointer=JSON-value] [--yes]
 arena status [--workflow ID] [--json]
 arena auth status
 arena doctor [--json]             Read-only preflight: git, provider CLIs, sandbox, WSL2, tmux
+arena update [--check] [--to VERSION] [--yes]   Install a newer release (installs made by the installer only)
+arena uninstall [--yes] [--dry-run] [--force]   Remove arena; project .arena/ directories are never touched
 arena adapters
 arena context list|search|show|add|revise|archive|restore WORKFLOW [ENTRY|QUERY]
 arena skill targets

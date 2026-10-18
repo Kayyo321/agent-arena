@@ -34,6 +34,9 @@ func claudeSignIn(r Runtime) bool { return str(r.Options["authMethod"]) == claud
 // when the invocation is not part of a run (setup) or runs inside go test.
 func arenaMCPCommand(in Invocation) (exe string, argv []string, ok bool) {
 	exe, err := os.Executable()
+	if err == nil {
+		exe = pinnableExecutable(exe)
+	}
 	if selected := os.Getenv("ARENA_INTEGRATION_BINARY"); selected != "" {
 		exe = selected
 	}

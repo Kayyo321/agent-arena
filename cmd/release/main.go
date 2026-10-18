@@ -72,6 +72,9 @@ func copyPaths(target string, roots []string) error {
 			if d.Name() == ".DS_Store" {
 				return nil
 			}
+			if d.IsDir() && path == filepath.Join(".claude", "worktrees") {
+				return filepath.SkipDir
+			}
 			to := filepath.Join(target, path)
 			if d.IsDir() {
 				return os.MkdirAll(to, 0755)

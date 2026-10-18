@@ -1,0 +1,43 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check tag format
+        run: |
+          if ! printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "tag $GITHUB_REF_NAME must match vMAJOR.MINOR.PATCH with an optional -PRERELEASE" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make check
+      - run: make dist VERSION=${GITHUB_REF_NAME#v}
+      - name: Verify archive binary version
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          tmp="$(mktemp -d)"
+          tar -xzf "dist/arena_${V}_linux_amd64.tar.gz" -C "$tmp"
+          out="$("$tmp/arena" version)"
+          echo "$out"
+          [ "$out" = "arena $V" ] || { echo "expected 'arena $V', got '$out'" >&2; exit 1; }
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*.tar.gz'
+      - name: Create draft release
+        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "arena $GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS scripts/install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}

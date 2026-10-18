@@ -5,6 +5,36 @@ installs the standalone binary locally. Add that directory to PATH before bootst
 so the selected agent can invoke `arena`. No language runtime is needed to run a
 packaged executable. Git and the selected provider CLI/backend remain prerequisites.
 
+## Install, update and uninstall
+
+```sh
+arena update [--check] [--to VERSION] [--yes]
+arena uninstall [--yes] [--dry-run] [--force]
+```
+
+`arena update` is forward-only unless `--to VERSION` is given. A downgrade can be unsafe
+once a newer version has written project state. `--check` only reports the installed and
+latest versions and changes nothing; it cannot be combined with `--to`.
+
+`arena uninstall` removes the binary, the store, the install manifest, and the state files
+`user-skills.json` and `update-check.json`. It removes user-level skill copies that are
+unmodified. A modified copy is kept unless `--force` is
+given; with `--force` it is backed up to `<state>/skill-backups/` and then removed. `--force`
+also bypasses the refusal when the current project has live runs, and it is the only way
+past that refusal; uninstall does not stop those runs. `--dry-run` prints the same plan
+without changing anything. `<state>` is `$XDG_STATE_HOME/arena`, or `~/.local/state/arena`
+when `XDG_STATE_HOME` is unset or not an absolute path. Uninstall never touches project
+`.arena/` directories, `.gitignore` lines or `~/.gemini/antigravity-cli`. It prints a
+checklist of what is left.
+
+`update` and `uninstall` act only on installs made by `scripts/install.sh`, which writes
+the install manifest they check. Any other install is refused with a message, and nothing
+is changed.
+
+Release archives install with the script in the [README](../README.md#build-and-install).
+Source builds can use `make install` and `make uninstall` instead. The synopsis lines
+above list each command's flags; the paragraphs above describe what they do.
+
 ## Setup and authoring
 
 Run `arena` in an empty directory to start `arena setup`, or use an explicit path:

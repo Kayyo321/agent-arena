@@ -139,7 +139,7 @@ Profiles with `role: "review"` must declare `reviewContract` with `format: "aren
 
 For same-machine local inference, use `provider: "local"` and set `options.backend` to `ollama`, `lm-studio`, `llama.cpp`, `vllm`, or `openai-compatible`. The model ID is required; `options.endpoint` may identify a loopback server when the adapter cannot discover its configured endpoint. If the backend, model, or endpoint is ambiguous or unavailable, the builder asks instead of choosing a model or server. The local adapter verifies the selected model and advertises its actual tool, streaming, and reasoning controls. Local agents use the same task envelopes, graph links, teams, context, worktree isolation, review, and rollback as other agents. Their model servers must stay on the same machine for the local adapter; a remote inference service requires a separately configured provider integration.
 
-For Gemini, use `provider: "gemini"` and explicitly select `options.authMethod` as `google-ai-studio-api-key` or `vertex-ai`. The selected model ID is still required. Arena checks the selected route without collecting or writing the key or cloud credentials into project files; credential values stay in the provider-supported environment or Google Application Default Credentials. Gemini CLI personal OAuth is not a supported Arena-managed auth path; the setup flow must guide the user through Google's documented API-key or Vertex AI setup and verify readiness. If neither route is supported by the installed Arena adapter, update Arena through its supported installer before creating a Gemini agent.
+For Gemini, use `provider: "gemini"` and explicitly select `options.authMethod` as `google-ai-studio-api-key` or `vertex-ai`. The selected model ID is still required. Arena checks the selected route without collecting or writing the key or cloud credentials into project files; credential values stay in the provider-supported environment or Google Application Default Credentials. Gemini CLI personal OAuth is not a supported Arena-managed auth path; the setup flow must guide the user through Google's documented API-key or Vertex AI setup and verify readiness. If neither route is supported by the installed Arena adapter, update Arena through its supported installer before creating a Gemini agent. See [installing and updating Arena](../README.md#build-and-install).
 
 Example Gemini runtime fragment (the model ID must come from the selected adapter or the user):
 
@@ -263,6 +263,8 @@ The placeholder model ID is intentional: Arena must use the model the local back
 - On-call entries reference on-call agents exactly once, include at least one valid trigger, and enforce the per-run invocation cap. On-call agents cannot be the head, team members, or relationship endpoints.
 - A delegation edge may target a team ID. Communication edges may target only path-agent IDs. Internal team deliberation does not require normal graph edges.
 - Fan-outs have distinct planner and worker path agents at one shared level, neither in a team or another fan-out, and `maxChildren` within `limits.maxFanOutChildrenPerRun`. A fan-out ID is at most 55 characters, and no other ID may take the shape `<fanOutId>.<n>` that its children use. An `agent.failed` trigger cannot name a fan-out worker, because the worker only runs as children.
+
+Arena has no migration code yet. Once a newer arena has written project state, running an older arena against that state is unsafe, so `arena update` is forward-only unless `--to` is given.
 
 ## Per-arena background shader
 

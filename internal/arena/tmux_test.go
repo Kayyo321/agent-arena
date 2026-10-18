@@ -118,8 +118,10 @@ func TestTmuxResumeRunsLayoutThroughFakeTmux(t *testing.T) {
 	// The command resolves --project to the project's real path (Open follows
 	// symlinks), and on macOS t.TempDir() is reached through one (/var is
 	// /private/var), so the panes are told the resolved root, not p.Root. The
-	// executable is os.Executable() as is.
+	// executable is pinned to its resolved path (pinnableExecutable) the same
+	// way, so a symlinked test binary location is expected resolved too.
 	root := realPath(t, p.Root)
+	exe = pinnableExecutable(exe)
 	wantTail := []string{"--", exe, "--project", root, "resume", r.ID, "--retry-interrupted"}
 	if !reflect.DeepEqual(first[len(first)-len(wantTail):], wantTail) {
 		t.Fatalf("supervisor command: %q", first)
