@@ -274,3 +274,153 @@ func TestLiveMultiProviderTeamWorkflow(t *testing.T) {
 	}
 	t.Log("REAL MULTI-PROVIDER WORKFLOW VERIFIED", model, effort, second.Provider, second.Model)
 }
+
+// liveEnv returns the named ARENA_LIVE_* selections and skips unless every one
+// is set. Tests read only these selections: credentials stay in the provider's
+// own environment, keychain or sign-in, and only the adapters under test touch
+// them.
+func liveEnv(t *testing.T, names ...string) []string {
+	t.Helper()
+	values := make([]string, len(names))
+	for i, name := range names {
+		if values[i] = os.Getenv(name); values[i] == "" {
+			t.Skip("set " + strings.Join(names, ", ") + " to explicitly authorize a real invocation; credentials stay in the provider-supported environment or sign-in")
+		}
+	}
+	return values
+}
+
+// liveReadOnlyWorkflow runs one read-only task through the real adapter for
+// runtime, as TestLiveCodexReadOnlyWorkflow does for Codex, and returns the
+// run's events after checking that the result reports base.txt's actual
+// content. The retry budget is zero so a provider failure ends the test
+// instead of waiting for a retry decision.
+func liveReadOnlyWorkflow(t *testing.T, runtime Runtime, timeout time.Duration, extraInstructions string) []Event {
+	t.Helper()
+	if err := ValidateRuntime(runtime); err != nil {
+		t.Fatal(err)
+	}
+	p := committedProject(t)
+	s := DefaultSettings(runtime)
+	s.Limits.MaxRetriesPerAgent = 0
+	if _, e := p.Commit("live test settings", map[string][]byte{"settings.arena.json": JSON(s)}); e != nil {
+		t.Fatal(e)
+	}
+	w := NewWorkflow("live-read", "Live read test")
+	w.HeadAgent = "reader"
+	w.Agents = []Agent{{Id: "reader", Profile: ".agents/live-read/reader.agent.json", Level: Int(0), Runtime: runtime}}
+	profiles := map[string]Profile{"reader": NewProfile("reader", "research", "Verify read-only handoff", "Read base.txt in the assigned workspace. Return a concise structured result mentioning its actual content. Do not write or run validation commands; use empty validation and changedFiles arrays, and an empty packets array."+extraInstructions, []string{"read"})}
+	if _, e := p.Save(w, profiles, ""); e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	r, _, e := prepareNewExecution(ctx, p, w.Id, "Read base.txt and report its content without changing files.")
+	if e != nil {
+		t.Fatal(e)
+	}
+	engine := NewEngine(p, r, Providers{})
+	engine.Observe = func(e Event) {
+		t.Log(e.Sequence, e.Type, e.AgentID)
+		if strings.HasPrefix(e.Type, "provider.") {
+			t.Log(string(SafeJSON(e.Data)))
+		}
+	}
+	if e := engine.Execute(ctx, false, false); e != nil {
+		t.Fatal(e)
+	}
+	state, e := p.State(r.ID)
+	if e != nil || state.Status != "succeeded" {
+		t.Fatalf("state %v %v", state, e)
+	}
+	events, e := p.Events(r.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type != "node.completed" {
+			continue
+		}
+		packet, e := p.ReadPacket(r.ID, str(event.Data["messageId"]))
+		if e != nil {
+			t.Fatal(e)
+		}
+		payload, _ := packet["payload"].(map[string]any)
+		t.Log("real result", string(SafeJSON(payload)))
+		if !strings.Contains(strings.ToLower(str(payload["summary"])), "baseline") {
+			t.Fatalf("provider did not report actual workspace content: %v", payload)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("no retained provider result")
+	}
+	return events
+}
+
+// Opt-in: spends the user's own Claude Code plan under its own sign-in. This is
+// the explicit-choice route, never a default; Arena never reads the CLI's
+// credentials and the test only reads the selection variables below.
+func TestLiveClaudeCodeSignInReadOnlyWorkflow(t *testing.T) {
+	sel := liveEnv(t, "ARENA_LIVE_CLAUDE_SIGNIN_MODEL", "ARENA_LIVE_CLAUDE_SIGNIN_EFFORT")
+	runtime := Runtime{Provider: "claude-code", Model: sel[0], ReasoningEffort: sel[1], Options: map[string]any{"authMethod": claudeSignInAuth}}
+	extra, viaMCP := "", os.Getenv("ARENA_INTEGRATION_BINARY") != ""
+	if viaMCP {
+		extra = " Before returning, call Arena's arena_context_search MCP tool with query baseline to verify the live workflow context channel. An empty context result is valid."
+	}
+	events := liveReadOnlyWorkflow(t, runtime, 3*time.Minute, extra)
+	searched := false
+	for _, event := range events {
+		if event.Type == "context.searched" {
+			searched = true
+		}
+		// The route's contract: read-only workers get Read/Glob/Grep and the Arena bridge.
+		if event.Type == "provider.activity" && event.Data["type"] == "toolCall" {
+			if tool := str(event.Data["tool"]); !Has([]string{"Read", "Glob", "Grep"}, tool) && !strings.HasPrefix(tool, "mcp__arena__") {
+				t.Fatalf("read-only Claude Code worker used %q", tool)
+			}
+		}
+	}
+	if viaMCP && !searched {
+		t.Fatal("real Claude Code invocation did not exercise the Arena MCP context tool")
+	}
+	t.Log("REAL CLAUDE CODE SIGN-IN INFERENCE VERIFIED", sel[0], sel[1], "mcp bridge:", viaMCP)
+}
+
+// Opt-in: the API-key or supported cloud route (invokeClaude, bare mode with
+// Arena-mediated tools). The key or cloud variables stay in the environment the
+// Claude CLI documents; this test never reads them, and Arena's readiness gate
+// refuses the run when none is configured.
+func TestLiveClaudeCodeAPIRouteReadOnlyWorkflow(t *testing.T) {
+	sel := liveEnv(t, "ARENA_LIVE_CLAUDE_API_MODEL", "ARENA_LIVE_CLAUDE_API_EFFORT")
+	runtime := Runtime{Provider: "claude-code", Model: sel[0], ReasoningEffort: sel[1], Options: map[string]any{"authMethod": "api-key-or-cloud"}}
+	liveReadOnlyWorkflow(t, runtime, 3*time.Minute, " Use Arena's read_file tool to read it.")
+	t.Log("REAL CLAUDE CODE API/CLOUD ROUTE INFERENCE VERIFIED", sel[0], sel[1])
+}
+
+// Opt-in: Gemini through the official Google GenAI SDK. ARENA_LIVE_GEMINI_AUTH
+// is google-ai-studio-api-key or vertex-ai; GEMINI_API_KEY, or the Vertex
+// project/location and ADC, stay in the provider-supported environment and are
+// never read here. Gemini takes no reasoning effort.
+func TestLiveGeminiReadOnlyWorkflow(t *testing.T) {
+	sel := liveEnv(t, "ARENA_LIVE_GEMINI_MODEL", "ARENA_LIVE_GEMINI_AUTH")
+	runtime := Runtime{Provider: "gemini", Model: sel[0], Options: map[string]any{"authMethod": sel[1]}}
+	liveReadOnlyWorkflow(t, runtime, 3*time.Minute, " Use Arena's read_file tool to read it.")
+	t.Log("REAL GEMINI INFERENCE VERIFIED", sel[0], sel[1])
+}
+
+// Opt-in: a backend already running on this machine (invokeLocal over loopback
+// HTTP). ARENA_LIVE_LOCAL_BACKEND is one of ollama, lm-studio, llama.cpp, vllm
+// or openai-compatible; ARENA_LIVE_LOCAL_ENDPOINT is required except for the
+// ollama and lm-studio defaults, and Arena refuses any non-loopback address.
+func TestLiveLocalBackendReadOnlyWorkflow(t *testing.T) {
+	sel := liveEnv(t, "ARENA_LIVE_LOCAL_BACKEND", "ARENA_LIVE_LOCAL_MODEL")
+	options := map[string]any{"backend": sel[0]}
+	if endpoint := os.Getenv("ARENA_LIVE_LOCAL_ENDPOINT"); endpoint != "" {
+		options["endpoint"] = endpoint
+	}
+	runtime := Runtime{Provider: "local", Model: sel[1], Options: options}
+	liveReadOnlyWorkflow(t, runtime, 5*time.Minute, " Use Arena's read_file tool to read it.")
+	t.Log("REAL LOCAL BACKEND INFERENCE VERIFIED", sel[0], sel[1])
+}

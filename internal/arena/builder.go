@@ -12,7 +12,7 @@ func (cli *CLI) buildWorkflow(ctx context.Context, p *Project, w Workflow, profi
 	fmt.Fprintln(cli.Out, "Guided builder. Changes stay in memory until the graph validates and you confirm its preview.")
 	for {
 		fmt.Fprintln(cli.Out, GraphSummary(w))
-		action, e := cli.ask("Action (agent, remove-agent, head, team, router, link, remove-link, on-call, policy, finish)", "", true)
+		action, e := cli.ask("Action (agent, remove-agent, head, team, fanout, router, link, remove-link, on-call, policy, finish)", "", true)
 		if e != nil {
 			return w, profiles, e
 		}
@@ -169,6 +169,55 @@ func (cli *CLI) buildWorkflow(ctx context.Context, p *Project, w Workflow, profi
 			if !found {
 				w.Teams = append(w.Teams, t)
 			}
+		case "fanout":
+			id, e := cli.ask("Fan-out ID (existing ID edits it)", "", true)
+			if e != nil {
+				return w, profiles, e
+			}
+			s, e := p.Settings()
+			if e != nil {
+				return w, profiles, e
+			}
+			f := FanOut{Id: id, MaxChildren: min(4, fanOutLimit(s)), Approval: "required"}
+			for _, v := range w.FanOuts {
+				if v.Id == id {
+					f = v
+				}
+			}
+			f.Name, e = cli.ask("Fan-out name", f.Name, true)
+			if e != nil {
+				return w, profiles, e
+			}
+			f.Planner, e = cli.ask("Planner agent ID (splits the task into items; runs read-only)", f.Planner, true)
+			if e != nil {
+				return w, profiles, e
+			}
+			f.Worker, e = cli.ask("Worker agent ID (one copy runs per approved item)", f.Worker, true)
+			if e != nil {
+				return w, profiles, e
+			}
+			f.MaxChildren, e = cli.integer("Maximum children per pass", f.MaxChildren, 1, min(32, fanOutLimit(s)))
+			if e != nil {
+				return w, profiles, e
+			}
+			if f.Approval == "" {
+				f.Approval = "required"
+			}
+			f.Approval, e = cli.ask("Approval (required: you approve each plan; auto-within-cap: plans within the cap start unasked)", f.Approval, true)
+			if e != nil {
+				return w, profiles, e
+			}
+			found := false
+			for i := range w.FanOuts {
+				if w.FanOuts[i].Id == id {
+					w.FanOuts[i] = f
+					found = true
+				}
+			}
+			if !found {
+				w.FanOuts = append(w.FanOuts, f)
+			}
+			fmt.Fprintf(cli.Out, "Delegate work to %s and from %s with link; %s and %s take no links of their own.\n", id, id, f.Planner, f.Worker)
 		case "router":
 			id, e := cli.ask("Router ID (existing ID replaces)", "", true)
 			if e != nil {
@@ -179,7 +228,7 @@ func (cli *CLI) buildWorkflow(ctx context.Context, p *Project, w Workflow, profi
 			if e != nil {
 				return w, profiles, e
 			}
-			r.InputKind, e = cli.ask("Input packet kind (review-result, team-result, result, error, context-result)", "", true)
+			r.InputKind, e = cli.ask("Input packet kind (review-result, team-result, fanout-result, result, error, context-result)", "", true)
 			if e != nil {
 				return w, profiles, e
 			}
@@ -352,6 +401,13 @@ func GraphSummary(w Workflow) string {
 	}
 	for _, t := range w.Teams {
 		fmt.Fprintf(&b, "  [team %s] members %s; unanimous, max %d rounds; verdicts %s\n", t.Id, strings.Join(t.Members, ", "), t.Consensus.MaxRounds, strings.Join(t.OutputContract.Verdicts, ", "))
+	}
+	for _, f := range w.FanOuts {
+		approval := f.Approval
+		if approval == "" {
+			approval = "required"
+		}
+		fmt.Fprintf(&b, "  [fan-out %s] planner %s, worker %s, max %d children; approval %s\n", f.Id, f.Planner, f.Worker, f.MaxChildren, approval)
 	}
 	for _, r := range w.Relationships {
 		arrow := "--delegates-->"

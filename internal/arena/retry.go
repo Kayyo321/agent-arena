@@ -11,6 +11,13 @@ func (e *Engine) invokeAttempts(ctx context.Context, a Agent, in Invocation, tas
 	limit := e.Run.Settings.Limits.MaxRetriesPerAgent
 	delivered := in.Delivered
 	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			// An approved retry starts the provider again, so it passes the run
+			// budgets like the first launch did (agent() gated that one).
+			if err := e.gateRetry(ctx, task); err != nil {
+				return nil, err
+			}
+		}
 		bounded, cancel := inferenceDeadline(ctx, e.Run.Settings.Limits.MaxAgentRunMinutes)
 		slot, err := e.Project.ProviderSlot(bounded, e.Run.Settings.Limits.MaxConcurrentAgents)
 		if err != nil {
@@ -76,4 +83,21 @@ func (e *Engine) invokeAttempts(ctx context.Context, a Agent, in Invocation, tas
 		}
 		in.Prompt += fmt.Sprintf("\nThis is explicitly approved retry %d; inspect existing workspace effects before acting.", attempt+1)
 	}
+}
+
+// gateRetry holds an approved retry back while a run budget is reached. An
+// on-call agent runs beside a paused or failed run and cannot wait for a
+// resume, so its retry is refused outright instead of asking again.
+func (e *Engine) gateRetry(ctx context.Context, task Packet) error {
+	if invocation, _ := task["invocation"].(map[string]any); invocation["mode"] == "on-call" {
+		kind, limit, used, err := e.reachedBudget()
+		if err != nil {
+			return err
+		}
+		if kind != "" {
+			return fmt.Errorf("not retried: run budget %s reached (%d of %d)", kind, used, limit)
+		}
+		return nil
+	}
+	return e.awaitBudget(ctx)
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,5 +87,36 @@ func TestCoworkerControlSlotAndApprovedRunAddition(t *testing.T) {
 	state, err := p.State(r.ID)
 	if err != nil || state.Status != "succeeded" || state.Agents["helper"] != "succeeded" {
 		t.Fatalf("coworker did not complete: %v %v", state, err)
+	}
+}
+
+// A config revision is written when a coworker is approved mid-run. Like
+// run.json and current-config.json, it keeps no objective under redacted
+// retention.
+func TestConfigRevisionKeepsNoObjectiveUnderRedactedRetention(t *testing.T) {
+	for _, retention := range []string{"full-local", "redacted-local"} {
+		p := committedProject(t)
+		s, _ := p.Settings()
+		w, profiles := fanOutWorkflow(s, 2, "required")
+		r := splitRun(t, p, w, profiles)
+		r.Retention, r.Objective = retention, "Ship the parser rewrite"
+		helper := Agent{Id: "helper", Level: Int(2), Profile: ".agents/parallel/helper.agent.json", Runtime: s.DefaultModel}
+		if err := p.QueueCoworker(r.ID, ConfigUpdate{RequestID: "request-1", Parent: "split", Agent: helper, Profile: NewProfile("helper", "research", "Help", "Help", []string{"read"}), Transaction: "tx"}); err != nil {
+			t.Fatal(err)
+		}
+		e := NewEngine(p, r, nil)
+		if _, err := e.applyCoworkers(); err != nil {
+			t.Fatal(err)
+		}
+		revision, err := os.ReadFile(filepath.Join(p.RunDir(r.ID), "config-revisions", "request-1.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kept := strings.Contains(string(revision), "Ship the parser rewrite"); kept != (retention == "full-local") {
+			t.Fatalf("%s: objective in the revision = %v", retention, kept)
+		}
+		if e.Run.Objective != "Ship the parser rewrite" {
+			t.Fatal("the running engine lost its objective")
+		}
 	}
 }

@@ -699,13 +699,13 @@ func (m LiveModel) command(command string) error {
 			if err != nil {
 				return err
 			}
-			_, err = m.Project.ApplyResolution(m.Run.ID, "user", skip)
+			_, err = m.Project.ApplyResolution(m.Run.ID, "user", Approval{Channel: ApprovalTUI}, skip)
 			return err
 		}
 		if len(parts) != 2 {
 			return fmt.Errorf("inspect with /integrate, apply with /integrate all [skip CHANGE_ID...], or /integrate CHANGE_ID")
 		}
-		_, err := m.Project.Integrate(m.Run.ID, parts[1], true)
+		_, err := m.Project.IntegrateBy(m.Run.ID, parts[1], Approval{Channel: ApprovalTUI})
 		return err
 	default:
 		return fmt.Errorf("use /help for commands; /view NAME for activity, /context NAME for inputs, /quit to exit")
@@ -900,6 +900,9 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 			members[id] = true
 		}
 	}
+	for _, f := range w.FanOuts {
+		members[f.Planner], members[f.Worker] = true, true
+	}
 	for _, a := range w.Agents {
 		if a.Activation == "on-call" || members[a.Id] && !expanded {
 			continue
@@ -934,6 +937,15 @@ func renderGraph(w Workflow, state RunState, events []Event, trees []Workspace, 
 			}
 		}
 		lines = append(lines, "[TEAM "+t.Id+"] "+roundState+"; members "+strings.Join(t.Members, ", "))
+	}
+	for _, f := range w.FanOuts {
+		state := "waiting"
+		for _, event := range events {
+			if event.AgentID == f.Id && strings.HasPrefix(event.Type, "fanout.") && !strings.HasPrefix(event.Type, "fanout.child.") {
+				state = event.Type
+			}
+		}
+		lines = append(lines, fmt.Sprintf("[FAN-OUT %s] %s; planner %s, worker %s, max %d", f.Id, state, f.Planner, f.Worker, f.MaxChildren))
 	}
 	for _, r := range w.DecisionRouters {
 		label := "[ROUTER " + r.Id + "] " + r.PayloadPointer

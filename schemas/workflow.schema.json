@@ -23,6 +23,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/decisionRouter" }
     },
+    "fanOuts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fanOut" }
+    },
     "onCall": {
       "type": "array",
       "items": { "$ref": "#/$defs/onCallRule" }
@@ -116,7 +120,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
-        "inputKind": { "enum": ["review-result", "team-result", "result", "error", "context-result"] },
+        "inputKind": { "enum": ["review-result", "team-result", "fanout-result", "result", "error", "context-result"] },
         "payloadPointer": { "type": "string", "pattern": "^/" },
         "routes": {
           "type": "array",
@@ -224,6 +228,20 @@
             }
           }
         }
+      }
+    },
+    "fanOut": {
+      "type": "object",
+      "description": "A node whose planner splits the task into items at run time; one worker instance runs per item, never more than maxChildren.",
+      "additionalProperties": false,
+      "required": ["id", "name", "planner", "worker", "maxChildren"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "planner": { "$ref": "#/$defs/id" },
+        "worker": { "$ref": "#/$defs/id" },
+        "maxChildren": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "approval": { "enum": ["required", "auto-within-cap"] }
       }
     },
     "onCallRule": {

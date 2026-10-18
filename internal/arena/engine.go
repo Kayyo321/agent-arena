@@ -20,17 +20,29 @@ type Engine struct {
 	Invoker      Invoker
 	slots        chan struct{}
 	mu           sync.Mutex
+	budgetMu     sync.Mutex // serializes enforceBudget
 	onCallCounts map[string]int
 	onCallSeen   map[string]bool
 	Observe      func(Event)
+	// Now overrides the clock the minutes budget reads; nil means time.Now.
+	Now func() time.Time
 	// iterations counts how often a node has been restarted by a loop route
 	// (absent means its first pass); loops counts revisions per router/target.
 	iterations map[string]int
 	loops      map[string]int
+	// children are the fan-out worker instances registered so far; guarded by mu.
+	children map[string]FanOutChild
+	// patchApply replaces git in the fan-out conflict check; nil means git.
+	// Only tests set it.
+	patchApply patchApplier
 }
 
 func NewEngine(p *Project, r Run, invoker Invoker) *Engine {
-	return &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}}
+	e := &Engine{Project: p, Run: r, Invoker: invoker, slots: make(chan struct{}, r.Workflow.Settings.MaxConcurrentAgents), onCallCounts: map[string]int{}, onCallSeen: map[string]bool{}, teamConsent: map[string]bool{}, iterations: map[string]int{}, loops: map[string]int{}, children: map[string]FanOutChild{}}
+	for _, child := range r.FanOutChildren {
+		e.children[child.Agent.Id] = child
+	}
+	return e
 }
 
 // iteration is the 1-based pass a node is on; a loop route starts the next one.
@@ -142,6 +154,11 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 			delete(nodes, id)
 		}
 	}
+	for _, f := range e.Run.Workflow.FanOuts {
+		nodes[f.Id] = "pending"
+		delete(nodes, f.Planner)
+		delete(nodes, f.Worker)
+	}
 	for _, r := range e.Run.Workflow.DecisionRouters {
 		nodes[r.Id] = "pending"
 	}
@@ -213,6 +230,9 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 					agents = append(agents, t.Members...)
 				}
 			}
+			if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+				agents = append(agents, append([]string{f.Planner}, e.childIDs(f.Id)...)...)
+			}
 		}
 		for _, id := range body {
 			active[id] = id == l.target
@@ -283,6 +303,7 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 	completed := make(chan completion, len(nodes))
 	running := 0
 	failed := false
+scheduling:
 	for {
 		progressed := false
 		held := map[string]bool{}
@@ -351,6 +372,22 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 				}
 				progressed = true
 				continue
+			}
+			launch, err := e.enforceBudget(ctx)
+			if err != nil {
+				cancel()
+				for running > 0 {
+					<-completed
+					running--
+				}
+				if s, _ := e.Project.State(e.Run.ID); s.Status != "cancelled" {
+					_, _ = e.event("", "workflow.interrupted", map[string]any{"reason": "supervisor stopped; worktrees preserved"})
+				}
+				return err
+			}
+			if !launch {
+				// Paused on a budget: wait for scheduling to resume.
+				continue scheduling
 			}
 			nodes[id] = "running"
 			running++
@@ -448,6 +485,10 @@ func (e *Engine) executeNode(ctx context.Context, id string, parents []Packet, t
 			return packet, targets, err
 		}
 	}
+	if f, ok := fanOutByID(e.Run.Workflow, id); ok {
+		packet, err := e.fanOut(ctx, f, parents)
+		return packet, targets, err
+	}
 	a, ok := agentByID(e.Run.Workflow, id)
 	if !ok {
 		return nil, nil, fmt.Errorf("missing agent %s", id)
@@ -468,15 +509,23 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		if err := e.Project.AwaitScheduling(ctx, e.Run.ID); err != nil {
 			return nil, err
 		}
+		// The scheduler checks budgets per node, but a fan-out node or a team
+		// starts many agents under one launch.
+		if err := e.awaitBudget(ctx); err != nil {
+			return nil, err
+		}
 	}
-	profile := e.Run.Profiles[a.Id]
-	if invocation != nil && invocation["mode"] == "team-composition" {
+	profile := e.profileOf(a.Id)
+	if invocation != nil && (invocation["mode"] == "team-composition" || invocation["mode"] == "fanout-planner") {
 		profile.Capabilities = []string{"read"}
 	}
 	write := Has(profile.Capabilities, "write")
 	node := a.Id
 	if invocation != nil && (invocation["mode"] == "team-member" || invocation["mode"] == "team-composition") {
 		node = str(invocation["teamId"])
+	}
+	if invocation != nil && (invocation["mode"] == "fanout-planner" || invocation["mode"] == "fanout-child") {
+		node = str(invocation["fanOutId"])
 	}
 	iteration := e.iteration(node)
 	taskID := iterationTask(a.Id, iteration)
@@ -708,6 +757,10 @@ func (e *Engine) agent(ctx context.Context, a Agent, parents []Packet, invocatio
 		packet["kind"] = "message"
 		packet["payload"] = map[string]any{"text": string(JSON(result)), "position": result}
 	}
+	if invocation != nil && invocation["mode"] == "fanout-planner" { // Arena checks the plan against the cap itself.
+		packet["kind"] = "message"
+		packet["payload"] = map[string]any{"text": string(JSON(result)), "plan": result}
+	}
 	id, err := e.Project.Deliver(e.Run, packet)
 	if err != nil {
 		event, eventErr := e.event(a.Id, "validation.failed", map[string]any{"error": Redact(err.Error())})
@@ -880,6 +933,14 @@ func (e *Engine) onCall(ctx context.Context, id string, trigger Event, manual bo
 		return fmt.Errorf("on-call trigger is not configured")
 	}
 
+	// An on-call agent is a launch too. It runs beside a paused or failed run, so
+	// it cannot wait for the user's answer: it is skipped while a budget stands.
+	if kind, limit, used, err := e.reachedBudget(); err != nil {
+		return err
+	} else if kind != "" {
+		_, err := e.event(id, "on-call.skipped", map[string]any{"triggerEventId": trigger.ID, "budget": kind, "limit": limit, "used": used})
+		return err
+	}
 	reservation, err := e.Project.WaitLock("oncall-" + Hash([]byte(e.Run.ID))[:20])
 	if err != nil {
 		return err
@@ -918,7 +979,7 @@ func (e *Engine) onCall(ctx context.Context, id string, trigger Event, manual bo
 	}
 	agent, _ := agentByID(e.Run.Workflow, id)
 	sourceProvider := "arena"
-	if source, ok := agentByID(e.Run.Workflow, sourceID(trigger)); ok {
+	if source, ok := e.agentByID(sourceID(trigger)); ok {
 		sourceProvider = source.Runtime.Provider
 	}
 	contextPacket := NewPacket(e.Run.ID, "message", sourceID(trigger), sourceProvider, id, agent.Runtime.Provider, "", map[string]any{"text": "Configured on-call trigger: " + string(SafeJSON(trigger))}, Runtime{Provider: "arena"})
@@ -954,7 +1015,7 @@ func (e *Engine) finishWorkspace(ctx context.Context, w Workspace) error {
 			return err
 		}
 		if e.Run.Settings.ApprovalPolicies.ChangeIntegration == "auto-if-clean" && e.Run.Workflow.Settings.Integration.Policy == "auto-if-clean" {
-			_, err := e.Project.integrate(e.Run.ID, str(event.Data["changeId"]), "policy:auto-if-clean")
+			_, err := e.Project.integrate(e.Run.ID, str(event.Data["changeId"]), "policy:auto-if-clean", Approval{})
 			if err != nil {
 				_, eventErr := e.event(w.AgentID, "change.requires-review", map[string]any{"changeId": event.Data["changeId"], "reason": Redact(err.Error())})
 				return eventErr

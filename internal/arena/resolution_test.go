@@ -119,7 +119,7 @@ func TestResolutionDependencyChainAppliesInOrder(t *testing.T) {
 	if got := res.Items[0].Paths; len(got) != 1 || got[0] != "a.txt" {
 		t.Fatalf("paths: %v", got)
 	}
-	applied, e := p.ApplyResolution(r.ID, "tester", nil)
+	applied, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -153,8 +153,33 @@ func TestResolutionDependencyChainAppliesInOrder(t *testing.T) {
 		t.Fatalf("applied data: %+v", events[0].Data)
 	}
 	// A second apply has nothing left to do and must not silently succeed.
-	if again, e := p.ApplyResolution(r.ID, "tester", nil); e == nil || again.Ready {
+	if again, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil || again.Ready {
 		t.Fatal("second apply should refuse: nothing proposed")
+	}
+}
+
+// The bulk path records the entry point it came through on its own event and on
+// every change it integrates, and claims no verified identity.
+func TestResolutionApplyRecordsApprovalChannel(t *testing.T) {
+	p, r := resolutionRun(t)
+	propose(t, p, r, "a", map[string]string{"a.txt": "a\n"})
+	propose(t, p, r, "b", map[string]string{"b.txt": "b\n"})
+	succeedRun(t, p, r)
+
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalCLINoTerminal}, nil); e != nil {
+		t.Fatal(e)
+	}
+	applied := eventsOf(t, p, r.ID, "resolution.applied")
+	if len(applied) != 1 {
+		t.Fatalf("resolution.applied journaled %d times", len(applied))
+	}
+	requireUnverifiedApproval(t, applied[0].Data, ApprovalCLINoTerminal)
+	integrated := eventsOf(t, p, r.ID, "change.integrated")
+	if len(integrated) != 2 {
+		t.Fatalf("integrated %d times, want 2", len(integrated))
+	}
+	for _, ev := range integrated {
+		requireUnverifiedApproval(t, ev.Data, ApprovalCLINoTerminal)
 	}
 }
 
@@ -176,7 +201,7 @@ func TestResolutionSameFileConflictRefusesAndLeavesCheckoutUntouched(t *testing.
 	if res.Items[1].Reason == "" {
 		t.Fatal("conflict has no reason")
 	}
-	applied, e := p.ApplyResolution(r.ID, "tester", nil)
+	applied, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil)
 	if e == nil || applied.Ready {
 		t.Fatal("apply must refuse")
 	}
@@ -198,7 +223,7 @@ func TestResolutionSameFileConflictRefusesAndLeavesCheckoutUntouched(t *testing.
 		t.Fatal("refused apply journaled a resolution event")
 	}
 	// Skipping the loser lets the clean change land.
-	if _, e := p.ApplyResolution(r.ID, "tester", []string{two.ID}); e != nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, []string{two.ID}); e != nil {
 		t.Fatal(e)
 	}
 	if changeState(t, p, r, one.ID) != "integrated" || changeState(t, p, r, two.ID) != "proposed" {
@@ -220,7 +245,7 @@ func TestResolutionDirtyCheckoutIsNotReadyAndWritesNothing(t *testing.T) {
 	if e != nil || res.Ready || !strings.Contains(res.Reason, "uncommitted") {
 		t.Fatalf("prepare: %+v %v", res, e)
 	}
-	if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 		t.Fatal("apply must refuse a dirty checkout")
 	}
 	if resolutionGit(t, p.Root, "rev-parse", "HEAD") != head || resolutionGit(t, p.Root, "status", "--porcelain") != status {
@@ -256,7 +281,7 @@ func TestResolutionSupersededPrerequisiteBlocksDependent(t *testing.T) {
 			t.Fatalf("reason does not name the prerequisite: %q", item.Reason)
 		}
 	}
-	if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 		t.Fatal("apply must refuse")
 	}
 	if changeState(t, p, r, b.ID) != "proposed" || changeState(t, p, r, c.ID) != "proposed" {
@@ -333,7 +358,7 @@ func TestResolutionNotReadyWhileRunIsActive(t *testing.T) {
 		if e != nil || res.Ready || res.Reason == "" || len(res.Items) != 0 {
 			t.Fatalf("%s: %+v %v", label, res, e)
 		}
-		if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+		if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 			t.Fatalf("%s: apply must refuse", label)
 		}
 		if changeState(t, p, r, a.ID) != "proposed" {
@@ -426,7 +451,7 @@ func TestResolutionApplyStopsAndJournalsAppliedPrefix(t *testing.T) {
 	if e != nil || !res.Ready {
 		t.Fatalf("prepare: %+v %v", res, e)
 	}
-	if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 		t.Fatal("apply should fail at b")
 	}
 	if changeState(t, p, r, a.ID) != "integrated" || changeState(t, p, r, b.ID) != "proposed" || changeState(t, p, r, c.ID) != "proposed" {
@@ -444,6 +469,7 @@ func TestResolutionApplyStopsAndJournalsAppliedPrefix(t *testing.T) {
 	if len(applied) != 1 || applied[0] != a.ID || str(d["failedChange"]) != b.ID || str(d["reason"]) == "" {
 		t.Fatalf("stopped data: %+v", d)
 	}
+	requireUnverifiedApproval(t, d, ApprovalLibrary)
 }
 
 func TestResolutionEngineHookJournalsReadyCounts(t *testing.T) {

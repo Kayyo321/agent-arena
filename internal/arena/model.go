@@ -22,6 +22,7 @@ type Profile = c.Profile
 type Settings = c.ProjectSettings
 type Team = c.WorkflowTeam
 type Router = c.WorkflowDecisionRouter
+type FanOut = c.WorkflowFanOut
 type Relationship = c.WorkflowRelationship
 type Trigger = c.WorkflowOnCallTrigger
 
@@ -61,13 +62,29 @@ func DefaultSettings(r Runtime) Settings {
 		"schemaVersion": 1, "defaultModel": r,
 		"permanentOnCallAgent": map[string]any{"id": "arena-orchestrator", "profile": ".agents/arena-system/arena-orchestrator.agent.json", "runtimeSource": "defaultModel", "skill": "arena-orchestrator", "availability": "permanent-on-call"},
 		"approvalPolicies":     map[string]any{"arena-subagent-modification-inquiry": "ask-user", "agent-workflow-edit": "ask-user", "cross-provider-context-sharing": "ask-user", "shell-command-execution": "adapter-default", "change-integration": "human-review", "workflow-deletion": "ask-user", "orchestrator-stall-recovery": "answer-routing"},
-		"limits":               map[string]any{"maxConcurrentAgents": 4, "maxTeamRounds": 2, "maxOnCallInvocationsPerRun": 3, "maxCoworkerAdditionsPerRun": 1, "maxAgentRunMinutes": 30, "maxRetriesPerAgent": 1},
+		"limits":               map[string]any{"maxConcurrentAgents": 4, "maxTeamRounds": 2, "maxOnCallInvocationsPerRun": 3, "maxCoworkerAdditionsPerRun": 1, "maxAgentRunMinutes": 30, "maxRetriesPerAgent": 1, "maxFanOutChildrenPerRun": defaultFanOutChildren},
 		"context":              map[string]any{"defaultHandoffScope": "task-scoped", "maxFilesPerHandoff": 50},
 		"sharedContext":        map[string]any{"storage": "git-tracked", "agentWritePolicy": "auto-accept", "agentDeletePolicy": "ask-user", "maxEntries": 500, "maxEntryBytes": 32768, "maxTotalBytes": 2097152, "staleAfterDays": 180},
 		"display":              map[string]any{"colorMode": "auto", "animation": "auto", "gitTree": "show", "asciiTitle": "show"},
 		"audit":                map[string]any{"retention": "full-local", "redactSecrets": true, "processOutput": "summary"},
 	})
 }
+
+// defaultFanOutChildren caps fan-out children per run when settings written
+// before limits.maxFanOutChildrenPerRun existed leave it out.
+const defaultFanOutChildren = 8
+
+// fanOutLimit is the most fan-out children one run may start.
+func fanOutLimit(s Settings) int {
+	if n := s.Limits.MaxFanOutChildrenPerRun; n != nil {
+		return *n
+	}
+	return defaultFanOutChildren
+}
+
+// maxFanOutID keeps every child task ID, <id>.<n>-iterN, within 64 characters.
+const maxFanOutID = 55
+
 func NewWorkflow(id, name string) Workflow {
 	return convert[Workflow](map[string]any{"schemaVersion": 1, "id": id, "name": name, "headAgent": "", "agents": []any{}, "relationships": []any{}, "settings": map[string]any{"maxConcurrentAgents": 4, "workspace": map[string]any{"writeIsolation": "git-worktree-per-task"}, "integration": map[string]any{"policy": "human-review"}, "audit": map[string]any{"retention": "full-local"}}})
 }
@@ -228,6 +245,45 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 		}
 		nodes[t.Id] = level
 	}
+	// A fan-out node owns its planner and worker the way a team owns its
+	// members: they run only inside the node, at its level.
+	for _, f := range w.FanOuts {
+		if e := add(f.Id, -1); e != nil {
+			return e
+		}
+		if len(f.Id) > maxFanOutID {
+			return fmt.Errorf("fan-out ID %s is longer than %d characters; its children are named %s.<n>", f.Id, maxFanOutID, f.Id)
+		}
+		if f.Planner == f.Worker {
+			return fmt.Errorf("fan-out %s needs distinct planner and worker agents", f.Id)
+		}
+		if f.MaxChildren > fanOutLimit(s) {
+			return fmt.Errorf("fan-out %s maxChildren %d exceeds project maxFanOutChildrenPerRun %d", f.Id, f.MaxChildren, fanOutLimit(s))
+		}
+		level := -1
+		for _, id := range []string{f.Planner, f.Worker} {
+			a, ok := agents[id]
+			if !ok || a.Activation == "on-call" || a.Level == nil {
+				return fmt.Errorf("fan-out %s has invalid planner or worker %s", f.Id, id)
+			}
+			if owner := members[id]; owner != "" {
+				return fmt.Errorf("agent %s already belongs to %s; a fan-out planner or worker cannot be a team member or serve another fan-out", id, owner)
+			}
+			members[id] = f.Id
+			if level < 0 {
+				level = *a.Level
+			}
+			if level != *a.Level {
+				return fmt.Errorf("fan-out %s planner and worker need the same level", f.Id)
+			}
+		}
+		nodes[f.Id] = level
+	}
+	for id := range nodes {
+		if owner := fanOutChildOf(w, id); owner != "" {
+			return fmt.Errorf("ID %s is reserved for a child of fan-out %s", id, owner)
+		}
+	}
 	for _, r := range w.DecisionRouters {
 		if e := add(r.Id, -1); e != nil {
 			return e
@@ -343,6 +399,9 @@ func ValidateWorkflow(w Workflow, profiles map[string]Profile, s Settings) error
 				if _, ok := agents[t.AgentId]; !ok {
 					return fmt.Errorf("trigger references missing agent %s", t.AgentId)
 				}
+				if f, ok := fanOutByID(w, members[t.AgentId]); ok && f.Worker == t.AgentId {
+					return fmt.Errorf("fan-out worker %s runs only as children of %s, and agent.failed triggers do not fire for fan-out children", t.AgentId, f.Id)
+				}
 			}
 		}
 	}
@@ -433,6 +492,27 @@ func descendants(edges map[string][]string, id string) []string {
 		}
 	}
 	return out
+}
+func fanOutByID(w Workflow, id string) (FanOut, bool) {
+	for _, f := range w.FanOuts {
+		if f.Id == id {
+			return f, true
+		}
+	}
+	return FanOut{}, false
+}
+
+// fanOutChildOf names the fan-out a synthetic child ID <fanOutId>.<n>
+// belongs to, or "" when id is not shaped like one of its children.
+func fanOutChildOf(w Workflow, id string) string {
+	for _, f := range w.FanOuts {
+		n, ok := strings.CutPrefix(id, f.Id+".")
+		if !ok || n == "" || strings.TrimLeft(n, "0123456789") != "" {
+			continue
+		}
+		return f.Id
+	}
+	return ""
 }
 func isTeam(w Workflow, id string) bool {
 	for _, t := range w.Teams {

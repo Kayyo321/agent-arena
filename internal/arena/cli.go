@@ -37,7 +37,7 @@ func (o Options) Bool(k string) bool { return o.Get(k) == "true" }
 func parseArgs(args []string) ([]string, Options, error) {
 	o := Options{}
 	pos := []string{}
-	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard"}
+	bools := []string{"help", "yes", "json", "plain", "no-bootstrap", "dry-run", "all", "replace", "user", "including-checkpoints", "approve", "retry-interrupted", "shader", "copy", "clipboard", "follow", "control", "discard-unintegrated"}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip,follow,control,discard-unintegrated")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -138,6 +138,12 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 			return fmt.Errorf("arena setup [--project PATH] [--provider ID --model ID --effort VALUE]")
 		}
 		return cli.setup(ctx, dir, o)
+	}
+	if pos[0] == "doctor" {
+		if len(pos) != 1 {
+			return fmt.Errorf("arena doctor [--project PATH] [--json]")
+		}
+		return cli.doctor(ctx, dir, o)
 	}
 	p, e := Open(dir)
 	if e != nil {
@@ -630,43 +636,13 @@ func SetPointer(m map[string]any, pointer string, v any) error {
 	return nil
 }
 func (cli *CLI) status(ctx context.Context, p *Project, args []string, o Options) error {
-	s, e := p.Settings()
-	if e != nil {
-		return e
-	}
-	workflows := []Workflow{}
 	id := o.Get("workflow")
 	if len(args) > 0 && args[0] != "status" {
 		id = args[0]
 	}
-	if id != "" {
-		w, _, e := p.Load(id)
-		if e != nil {
-			return e
-		}
-		workflows = append(workflows, w)
-	} else {
-		ids, e := p.List()
-		if e != nil {
-			return e
-		}
-		for _, id := range ids {
-			w, _, e := p.Load(id)
-			if e != nil {
-				return e
-			}
-			workflows = append(workflows, w)
-		}
-	}
-	results := []Readiness{}
-	seen := map[string]bool{}
-	for _, r := range Required(workflows, s) {
-		key := string(JSON(r))
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		results = append(results, Probe(ctx, p.Root, r))
+	results, e := p.readiness(ctx, id)
+	if e != nil {
+		return e
 	}
 	if o.Bool("json") {
 		cli.print(results)
@@ -961,6 +937,7 @@ arena share import [CODE|-] [--clipboard] [--as ID] [--into ID] [--dry-run] [--y
 arena settings show|edit [--set /pointer=JSON-value] [--yes]
 arena status [--workflow ID] [--json]
 arena auth status
+arena doctor [--json]             Read-only preflight: git, provider CLIs, sandbox, WSL2, tmux
 arena adapters
 arena context list|search|show|add|revise|archive|restore WORKFLOW [ENTRY|QUERY]
 arena skill targets
@@ -969,9 +946,14 @@ arena agent request WORKFLOW --from ID --id ID --role ROLE --objective TEXT --re
   --provider ID --model ID [--effort VALUE] --capabilities LIST --workspace-mode read-only|write
 arena agent resolve REQUEST --approve
 arena history [RUN] [--json] | arena history repair RUN
+arena history RUN export FILE | arena history import FILE   Redacted audit bundle; imports are read-only
+arena history RUN purge --yes [--discard-unintegrated]   Permanently delete a retired run
 arena run WORKFLOW TASK [--plain]
 arena watch RUN [--plain]
+arena watch RUN --json [--follow]   One journal event per line; --follow tails until the run ends
+arena view AGENT --run RUN [--follow]   One agent's activity as plain text
 arena resume RUN [--retry-interrupted] [--plain]
+arena tmux run WORKFLOW TASK | arena tmux resume RUN   Lay a run out in tmux (pane 0 supervises)
 arena pause|cancel RUN
 arena checkpoint list|show|restore [ID] [--yes]
 arena changes RUN [CHANGE]

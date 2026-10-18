@@ -45,6 +45,12 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		}
 		return fmt.Errorf("unknown checkpoint command")
 	case "mcp":
+		if o.Bool("control") {
+			if o.Get("run") != "" || o.Get("actor") != "" {
+				return fmt.Errorf("mcp --control serves the whole project; drop --run and --actor")
+			}
+			return ServeControlMCP(ctx, p, cli.In, cli.Out)
+		}
 		r, err := p.ReadRun(o.Get("run"))
 		if err != nil {
 			return err
@@ -52,6 +58,8 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		return ServeMCP(ctx, p, r, o.Get("actor"), cli.In, cli.Out)
 	case "run", "resume":
 		return cli.execute(ctx, p, args, o)
+	case "tmux":
+		return cli.tmux(ctx, p, args, o)
 	case "watch":
 		if len(args) != 2 {
 			return fmt.Errorf("watch requires run ID")
@@ -59,6 +67,12 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		r, err := p.ReadRun(args[1])
 		if err != nil {
 			return err
+		}
+		if o.Bool("follow") && !o.Bool("json") {
+			return fmt.Errorf("watch --follow streams NDJSON; add --json")
+		}
+		if o.Bool("json") {
+			return cli.streamEvents(ctx, p, r.ID, o.Bool("follow"))
 		}
 		if o.Bool("plain") {
 			events, err := p.Events(r.ID)
@@ -69,6 +83,11 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return nil
 		}
 		return Watch(ctx, p, r, nil)
+	case "view":
+		if len(args) != 2 {
+			return fmt.Errorf("view AGENT --run RUN [--follow]")
+		}
+		return cli.viewAgent(ctx, p, args[1], o)
 	case "changes":
 		if len(args) < 2 {
 			return fmt.Errorf("changes RUN [CHANGE]")
@@ -116,7 +135,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			if err := cli.confirm(fmt.Sprintf("Apply %d changes to the checkout", ready), o); err != nil {
 				return err
 			}
-			applied, err := p.ApplyResolution(args[1], "user", o["skip"])
+			applied, err := p.ApplyResolution(args[1], "user", cli.cliApproval(), o["skip"])
 			cli.print(applied)
 			return err
 		}
@@ -134,7 +153,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		if err := cli.confirm("Integrate this reviewed change", o); err != nil {
 			return err
 		}
-		change, err = p.Integrate(args[1], args[2], true)
+		change, err = p.IntegrateBy(args[1], args[2], cli.cliApproval())
 		cli.print(change)
 		return err
 	case "rollback":
@@ -154,7 +173,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			fmt.Fprintln(cli.Out, "Preview only. Use --yes after reviewing affected paths and later commits.")
 			return nil
 		}
-		change, err = p.Rollback(args[1], args[2], true)
+		change, err = p.RollbackBy(args[1], args[2], cli.cliApproval())
 		cli.print(change)
 		return err
 	case "on-call":
@@ -173,6 +192,9 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		return engine.onCall(ctx, args[3], event, true)
 
 	case "history":
+		if done, err := cli.historyAudit(p, args, o); done {
+			return err
+		}
 		if len(args) == 1 {
 			ids, e := p.Runs()
 			if e != nil {
@@ -232,7 +254,17 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			return nil
 		}
 		if args[1] == "answer" && len(args) == 5 {
-			return p.Answer(args[2], args[3], args[4])
+			// Approving an integrate or rollback request executes it here, so it
+			// takes a person at a terminal: a pipe or an agent's command runner
+			// has none. Rejecting needs no terminal, and the TUI is the other route.
+			if args[4] == "approve" && p.executesOnApproval(args[2], args[3]) && !cli.isTerminal() {
+				return fmt.Errorf("approving an integrate or rollback request needs a person at a terminal; run this command in one, or answer in the TUI")
+			}
+			outcome, e := p.AnswerDecision(args[2], args[3], args[4], cli.cliApproval())
+			if outcome != nil {
+				cli.print(outcome)
+			}
+			return e
 		}
 		return fmt.Errorf("invalid decision command")
 	case "agent":

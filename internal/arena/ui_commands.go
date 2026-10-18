@@ -20,6 +20,7 @@ var slashHelp = []string{
 	"/help                       Commands and keyboard controls",
 	"/agents                     Agents, roles and selected runtimes",
 	"/score                      Arena grade (S+ to F) and what costs points",
+	"/usage                      Tokens providers reported, per run and agent",
 	"/view NAME                  Live agent activity mini-window",
 	"/context [NAME]             Profile, task and workflow context",
 	"/chat                       Talk to the project orchestrator",
@@ -52,7 +53,7 @@ var slashHelp = []string{
 	"PageUp/PageDown scroll, Esc closes. No private reasoning is shown.",
 }
 
-var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/view", "/context", "/chat", "/walkthrough", "/consult", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
+var slashCommands = []string{"/paste", "/attach", "/attachments", "/detach", "/shader", "/shader-save", "/shader-off", "/copy", "/copy-shader", "/help", "/agents", "/score", "/usage", "/view", "/context", "/chat", "/walkthrough", "/consult", "/graph", "/pan", "/run", "/pause", "/resume", "/cancel", "/events", "/git", "/changes", "/status", "/refresh", "/teams", "/decisions", "/answer", "/accept", "/integrate", "/save", "/clear", "/close", "/quit"}
 
 func (m LiveModel) resolveAgent(name string) (string, error) {
 	if name == "arena-orchestrator" || name == "orchestrator" {
@@ -145,6 +146,29 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 			default:
 				m.Error = "No arena or draft to score yet"
 			}
+		case "usage":
+			if m.Run.ID == "" {
+				m.Error = "No run is loaded: nothing to total yet"
+				break
+			}
+			usage := SumUsage(m.Events)
+			ids, listed := []string{}, map[string]bool{}
+			// A fan-out worker is only a template: its children (<id>.<n>) run
+			// and report instead, and are not in the workflow's agent list.
+			for _, f := range m.Run.Workflow.FanOuts {
+				listed[f.Worker] = true
+			}
+			for _, a := range m.Run.Workflow.Agents {
+				if !listed[a.Id] {
+					ids, listed[a.Id] = append(ids, a.Id), true
+				}
+			}
+			for id := range usage.Agents {
+				if !listed[id] {
+					ids, listed[id] = append(ids, id), true
+				}
+			}
+			m.Panel, m.PanelText = "Usage · "+m.Run.ID, usage.Report(ids)
 		case "agents":
 			m.Panel, m.PanelText = "Agents", []string{"arena-orchestrator | permanent project control | " + m.Run.Settings.DefaultModel.Provider + " / " + m.Run.Settings.DefaultModel.Model}
 			for _, a := range m.Run.Workflow.Agents {

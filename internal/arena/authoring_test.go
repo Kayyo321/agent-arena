@@ -12,7 +12,28 @@ import (
 
 func testProject(t *testing.T) *Project {
 	t.Helper()
-	dir := t.TempDir()
+	return testProjectIn(t, t.TempDir())
+}
+
+// symlinkedTempDir is a new empty directory whose path runs through a symlink,
+// as macOS reaches t.TempDir() (/var is a symlink to /private/var). The path a
+// test holds is then not the real path that Git, filepath.EvalSymlinks and Open
+// report, which is how the macOS-only failures appear on other systems.
+func symlinkedTempDir(t *testing.T) string {
+	t.Helper()
+	real, link := t.TempDir(), filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot create a symlink: %v", err)
+	}
+	dir := filepath.Join(link, "project")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func testProjectIn(t *testing.T, dir string) *Project {
+	t.Helper()
 	cmd := exec.Command("git", "init", "-q", dir)
 	if b, e := cmd.CombinedOutput(); e != nil {
 		t.Fatalf("git init: %v %s", e, b)

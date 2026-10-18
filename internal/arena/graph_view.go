@@ -60,6 +60,65 @@ func diffSpans(d diffStat) []mdSpan {
 	}
 	return spans
 }
+
+// fanOutCard shows a fan-out's roles and cap, then its latest pass: planning,
+// waiting for approval, children done out of those approved, or the outcome.
+// Children are never drawn as cards of their own.
+func fanOutCard(f FanOut, events []Event, spin string) *graphCard {
+	status, look := "waiting", "waiting"
+	approved, done, failed, dropped, conflicting := 0, 0, 0, 0, 0
+	for _, v := range events {
+		if v.AgentID != f.Id {
+			continue
+		}
+		switch v.Type {
+		case "fanout.started":
+			status, look = "planning", "running"
+			approved, done, failed, dropped, conflicting = 0, 0, 0, 0, 0
+		case "decision.requested":
+			status, look = "waiting for you · see prompt", "attention"
+		case "fanout.approved":
+			approved, dropped = intValue(v.Data["count"]), intValue(v.Data["dropped"])
+			status, look = "running", "running"
+		case "fanout.child.completed":
+			done++
+		case "fanout.child.failed":
+			failed++
+		case "fanout.conflict":
+			conflicting = len(stringSlice(v.Data["children"]))
+		case "fanout.completed":
+			status, look = "succeeded", "succeeded"
+		case "fanout.stopped":
+			status, look = "stopped", "failed"
+		}
+	}
+	times := " ×"
+	arrow := " → "
+	if !unicodeLettering() {
+		times, arrow = " x", " -> "
+	}
+	approval := "approval required"
+	if f.Approval == "auto-within-cap" {
+		approval = "auto within cap"
+	}
+	detail := fmt.Sprintf("max %d · %s", f.MaxChildren, approval)
+	if approved > 0 || look == "succeeded" {
+		detail = fmt.Sprintf("%d/%d done", done, approved)
+		if failed > 0 {
+			detail += fmt.Sprintf(" · %d failed", failed)
+		}
+		if dropped > 0 {
+			detail += fmt.Sprintf(" · %d dropped", dropped)
+		}
+		if conflicting > 0 {
+			detail += fmt.Sprintf(" · %d conflicting", conflicting)
+		}
+	}
+	glyph, sgr := statusLook(look, spin)
+	roles := []mdSpan{{f.Planner, sgrSoft}, {arrow, sgrDim}, {f.Worker, sgrSoft}, {fmt.Sprintf("%s%d", times, f.MaxChildren), sgrDim}}
+	return &graphCard{id: f.Id, kind: "fanout", title: []mdSpan{{f.Name, "38;5;147"}}, tone: look, rows: [3]cardRow{{left: roles}, {left: []mdSpan{{detail, sgrDim}}}, {left: []mdSpan{{glyph + " " + status, sgr}}}}}
+}
+
 func plural(n int) string {
 	if n == 1 {
 		return ""
@@ -126,6 +185,14 @@ func graphView(w Workflow, state RunState, events []Event, diffs map[string]diff
 			rounds = fmt.Sprintf("unanimous · round %d/%d", round, t.Consensus.MaxRounds)
 		}
 		cards[t.Id] = &graphCard{id: t.Id, kind: "team", title: []mdSpan{{t.Name, "38;5;222"}}, tone: status, rows: [3]cardRow{{left: roster}, {left: []mdSpan{{rounds, sgrDim}}}, statusRow(status, spin, "")}}
+	}
+	for _, f := range w.FanOuts {
+		members[f.Planner], members[f.Worker] = true, true
+		ranks[f.Id] = 0
+		if planner, _ := agentByID(w, f.Planner); planner.Level != nil {
+			ranks[f.Id] = *planner.Level * 100
+		}
+		cards[f.Id] = fanOutCard(f, events, spin)
 	}
 	for _, a := range w.Agents {
 		if a.Activation == "on-call" || members[a.Id] {
@@ -559,6 +626,9 @@ func graphView(w Workflow, state RunState, events []Event, diffs map[string]diff
 			aliases[id] = team.Id
 		}
 	}
+	for _, f := range w.FanOuts {
+		aliases[f.Planner], aliases[f.Worker] = f.Id, f.Id
+	}
 	for _, packet := range packetStates(events) {
 		if packet.status != "pending" {
 			continue
@@ -569,6 +639,12 @@ func graphView(w Workflow, state RunState, events []Event, diffs map[string]diff
 		}
 		if aliases[to] != "" {
 			to = aliases[to]
+		}
+		if f := fanOutChildOf(w, from); f != "" {
+			from = f
+		}
+		if f := fanOutChildOf(w, to); f != "" {
+			to = f
 		}
 		path := paths[from+"/"+to]
 		if len(path) == 0 {
@@ -705,7 +781,7 @@ func (p packetState) marker() string {
 	switch p.kind {
 	case "task":
 		return "[T]"
-	case "result", "review-result", "team-result":
+	case "result", "review-result", "team-result", "fanout-result":
 		return "[R]"
 	case "question":
 		return "[?]"

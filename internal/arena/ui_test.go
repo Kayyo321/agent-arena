@@ -11,7 +11,16 @@ import (
 
 func TestLiveLayoutFitsTerminalAndKeepsPrompt(t *testing.T) {
 	w, profiles, s := fixture(t)
+	fw, fprofiles, fs := exampleFanOut(t)
 	for _, size := range [][2]int{{140, 40}, {100, 24}, {60, 18}, {30, 8}, {8, 4}} {
+		testLiveLayout(t, w, profiles, s, size)
+		testLiveLayout(t, fw, fprofiles, fs, size)
+	}
+}
+
+func testLiveLayout(t *testing.T, w Workflow, profiles map[string]Profile, s Settings, size [2]int) {
+	t.Helper()
+	{
 		m := LiveModel{Run: Run{Workflow: w, Profiles: profiles, Settings: s, BaseCommit: "12345678"}, Width: size[0], Height: size[1], State: RunState{Status: "running", Agents: map[string]string{}}, Readiness: []Readiness{{Provider: "codex", State: "unknown"}, {Provider: "claude-code", State: "not configured"}}}
 		content := m.View().Content
 		lines := strings.Split(content, "\n")

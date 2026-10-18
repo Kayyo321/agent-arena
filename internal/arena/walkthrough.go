@@ -108,9 +108,10 @@ func (idea walkthroughIdea) Lines(n int) []string {
 }
 
 // roughCost estimates one run's spend from its agent turns weighted by
-// reasoning effort. A pass runs every path agent and team member once; each
-// loop route can rerun its target's subgraph up to maxIterations more times.
-// On-call agents run only when triggered and are left out.
+// reasoning effort. A pass runs every path agent and team member once, and
+// a fan-out's worker up to maxChildren times; each loop route can rerun its
+// target's subgraph up to maxIterations more times. On-call agents run only
+// when triggered and are left out.
 func roughCost(w Workflow) string {
 	weight := func(effort string) int {
 		switch effort {
@@ -132,9 +133,17 @@ func roughCost(w Workflow) string {
 	for _, t := range w.Teams {
 		members[t.Id] = t.Members
 	}
-	turns, units := len(agents), 0
-	for _, a := range agents {
-		units += weight(a.Runtime.ReasoningEffort)
+	copies := map[string]int{}
+	for _, f := range w.FanOuts {
+		members[f.Id] = []string{f.Planner, f.Worker}
+		copies[f.Worker] = f.MaxChildren
+	}
+	// runs is how many instances of an agent one pass can start.
+	runs := func(id string) int { return max(1, copies[id]) }
+	turns, units := 0, 0
+	for id, a := range agents {
+		turns += runs(id)
+		units += runs(id) * weight(a.Runtime.ReasoningEffort)
 	}
 	// below collects the agents a rerun from id would start again.
 	below := func(id string) map[string]bool {
@@ -163,8 +172,8 @@ func roughCost(w Workflow) string {
 			}
 			for id := range below(route.To) {
 				if a, ok := agents[id]; ok {
-					maxTurns += *route.MaxIterations
-					maxUnits += *route.MaxIterations * weight(a.Runtime.ReasoningEffort)
+					maxTurns += *route.MaxIterations * runs(id)
+					maxUnits += *route.MaxIterations * runs(id) * weight(a.Runtime.ReasoningEffort)
 				}
 			}
 		}
