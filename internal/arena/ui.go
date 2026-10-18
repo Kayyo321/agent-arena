@@ -699,7 +699,7 @@ func (m LiveModel) command(command string) error {
 			if err != nil {
 				return err
 			}
-			_, err = m.Project.ApplyResolution(m.Run.ID, "user", skip)
+			_, err = m.Project.ApplyResolution(m.Run.ID, "user", Approval{Channel: ApprovalTUI}, skip)
 			return err
 		}
 		if len(parts) != 2 {

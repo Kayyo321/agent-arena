@@ -66,7 +66,7 @@ func TestStaleIntegrationBranchBlocksItem(t *testing.T) {
 			t.Fatalf("reason: %q", item.Reason)
 		}
 	}
-	if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 		t.Fatal("apply must refuse")
 	}
 	if changeState(t, p, r, a.ID) != "proposed" || changeState(t, p, r, b.ID) != "proposed" {
@@ -101,7 +101,7 @@ func TestCancelledRunStillDrainingIsNotReady(t *testing.T) {
 	if e != nil || res.Ready || res.Reason != "run is still stopping; wait for it to finish, then run /integrate again" {
 		t.Fatalf("draining run: %+v %v", res, e)
 	}
-	if _, e := p.ApplyResolution(r.ID, "tester", nil); e == nil {
+	if _, e := p.ApplyResolution(r.ID, "tester", Approval{Channel: ApprovalLibrary}, nil); e == nil {
 		t.Fatal("apply must refuse")
 	}
 	if changeState(t, p, r, a.ID) != "proposed" {

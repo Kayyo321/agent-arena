@@ -377,12 +377,23 @@ func TestAuditImportRefusesOversizedAndMalformedBundles(t *testing.T) {
 
 	small := maxAuditBundle
 	t.Cleanup(func() { maxAuditBundle = small })
+	// The file on disk is fixed, so a limit one byte under its size is an exact,
+	// deterministic boundary for import.
 	maxAuditBundle = int64(len(raw)) - 1
 	if _, err := q.ImportAudit(dest); err == nil || !strings.Contains(err.Error(), "limited to") {
 		t.Fatalf("oversized import: %v", err)
 	}
-	if _, err := p.ExportAudit(r.ID, filepath.Join(t.TempDir(), "big.json")); err == nil {
-		t.Fatal("oversized export written")
+	// A fresh export is not byte-identical to the first: ExportedAt is
+	// time.Now() in RFC3339Nano, which drops trailing zeros from the fraction,
+	// so a later export can be a few bytes shorter than raw and slip under
+	// len(raw)-1. Use a limit far below any valid export of this run instead.
+	maxAuditBundle = int64(len(raw)) / 2
+	big := filepath.Join(t.TempDir(), "big.json")
+	if _, err := p.ExportAudit(r.ID, big); err == nil || !strings.Contains(err.Error(), "limited to") {
+		t.Fatalf("oversized export: %v", err)
+	}
+	if _, err := os.Lstat(big); !os.IsNotExist(err) {
+		t.Fatalf("oversized export left a file behind: %v", err)
 	}
 	maxAuditBundle = small
 

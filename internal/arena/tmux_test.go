@@ -213,29 +213,52 @@ func TestTmuxSmokeWithRealTmux(t *testing.T) {
 	dir := t.TempDir()
 	record := filepath.Join(dir, "argv")
 	fake := filepath.Join(dir, "arena")
-	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > " + record + "\nsleep 30\n"
+	// Every pane runs this script, so each one records to its own file (by PID);
+	// the test then looks for the supervisor's argv among them.
+	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > " + record + ".$$\nsleep 30\n"
 	if err := os.WriteFile(fake, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	session := "arena-smoke-" + ID("")
 	t.Cleanup(func() { _ = exec.Command(bin, "kill-session", "-t", session).Run() })
 	task := "$(touch " + dir + "/pwned); echo 'x'\nsecond \"line\""
-	cmds := tmuxCommands(fake, dir, session, []string{"run", "--run", "r", "--", "wf", task}, "r", []string{"head", "$(touch " + dir + "/pwned)"})
+	hostile := "$(touch " + dir + "/pwned)"
+	cmds := tmuxCommands(fake, dir, session, []string{"run", "--run", "r", "--", "wf", task}, "r", []string{"head", hostile})
 	for _, argv := range cmds {
 		if out, err := exec.Command(bin, argv...).CombinedOutput(); err != nil {
 			t.Fatalf("tmux %q: %v: %s", argv, err, out)
 		}
 	}
-	var b []byte
+	want := []string{"--project", dir, "run", "--run", "r", "--", "wf", task}
+	// The layout is four panes: the supervisor, the watch pane and two view
+	// panes. Wait for all four to record, so the pane that gets the hostile
+	// agent name has started before anything is checked. A file that is still
+	// being written reads as short, so the supervisor's and the hostile pane's
+	// argv must also be complete before the wait ends.
+	const panes = 4
+	endsWith := func(argvs [][]string, last string) bool {
+		for _, argv := range argvs {
+			if len(argv) > 0 && argv[len(argv)-1] == last {
+				return true
+			}
+		}
+		return false
+	}
+	var argvs [][]string
 	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		if b, _ = os.ReadFile(record); len(b) > 0 {
+		argvs = recordedArgvs(record)
+		if len(argvs) >= panes && containsArgv(argvs, want) && endsWith(argvs, hostile) {
 			break
 		}
 	}
-	got := strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
-	want := []string{"--project", dir, "run", "--run", "r", "--", "wf", task}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("pane argv %q, want %q", got, want)
+	if len(argvs) < panes {
+		t.Fatalf("%d panes recorded their argv, want %d: %q", len(argvs), panes, argvs)
+	}
+	if !containsArgv(argvs, want) {
+		t.Fatalf("no pane got the supervisor argv %q; panes got %q", want, argvs)
+	}
+	if !endsWith(argvs, hostile) {
+		t.Fatalf("no pane got the agent name %q as its last argument; panes got %q", hostile, argvs)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
 		t.Fatal("a shell interpreted the task")
@@ -243,6 +266,27 @@ func TestTmuxSmokeWithRealTmux(t *testing.T) {
 	if out, err := exec.Command(bin, "list-windows", "-t", session, "-F", "#{window_index}").Output(); err != nil || strings.TrimSpace(string(out)) != "0\n1" {
 		t.Fatalf("windows %q: %v", out, err)
 	}
+}
+
+// recordedArgvs reads the argv each fake pane wrote next to record.
+func recordedArgvs(record string) [][]string {
+	paths, _ := filepath.Glob(record + ".*")
+	argvs := [][]string{}
+	for _, path := range paths {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			argvs = append(argvs, strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00"))
+		}
+	}
+	return argvs
+}
+
+func containsArgv(argvs [][]string, want []string) bool {
+	for _, argv := range argvs {
+		if reflect.DeepEqual(argv, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestTmuxVersionGate(t *testing.T) {

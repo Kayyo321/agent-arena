@@ -224,7 +224,7 @@ func orderResolution(candidates []Change, isCandidate map[string]bool) ([]Change
 // gate is all-or-nothing: it refuses, and applies nothing, unless
 // PrepareResolution reports Ready. If an integrate fails partway, the changes
 // already committed stay in place (each reversible with rollback).
-func (p *Project) ApplyResolution(run, actor string, skip []string) (Resolution, error) {
+func (p *Project) ApplyResolution(run, actor string, by Approval, skip []string) (Resolution, error) {
 	res, err := p.PrepareResolution(run, skip)
 	if err != nil {
 		return res, err
@@ -238,9 +238,9 @@ func (p *Project) ApplyResolution(run, actor string, skip []string) (Resolution,
 	}
 	applied := []string{}
 	for i, item := range res.Items {
-		if _, err := p.integrate(run, item.ChangeID, actor); err != nil {
+		if _, err := p.IntegrateBy(run, item.ChangeID, by); err != nil {
 			res.Items[i].Reason = Redact(err.Error())
-			_, _ = p.Append(run, r.Workflow.Id, actor, "resolution.stopped", map[string]any{"applied": applied, "failedChange": item.ChangeID, "reason": Redact(err.Error())})
+			_, _ = p.Append(run, r.Workflow.Id, actor, "resolution.stopped", map[string]any{"applied": applied, "failedChange": item.ChangeID, "reason": Redact(err.Error()), "approval": by.Record()})
 			return res, err
 		}
 		applied = append(applied, item.ChangeID)
@@ -250,7 +250,7 @@ func (p *Project) ApplyResolution(run, actor string, skip []string) (Resolution,
 		return res, err
 	}
 	res.Head = head
-	_, err = p.Append(run, r.Workflow.Id, actor, "resolution.applied", map[string]any{"changeIds": applied, "head": head})
+	_, err = p.Append(run, r.Workflow.Id, actor, "resolution.applied", map[string]any{"changeIds": applied, "head": head, "approval": by.Record()})
 	return res, err
 }
 

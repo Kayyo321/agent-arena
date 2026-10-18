@@ -135,7 +135,7 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 			if err := cli.confirm(fmt.Sprintf("Apply %d changes to the checkout", ready), o); err != nil {
 				return err
 			}
-			applied, err := p.ApplyResolution(args[1], "user", o["skip"])
+			applied, err := p.ApplyResolution(args[1], "user", cli.cliApproval(), o["skip"])
 			cli.print(applied)
 			return err
 		}
