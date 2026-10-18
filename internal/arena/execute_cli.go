@@ -67,6 +67,9 @@ func (cli *CLI) execute(ctx context.Context, p *Project, args []string, o Option
 		if runErr != nil {
 			return runErr
 		}
+		if watchErr == nil {
+			cli.announceResolution(p, r.ID)
+		}
 		return watchErr
 	}
 	for {
@@ -81,9 +84,37 @@ func (cli *CLI) execute(ctx context.Context, p *Project, args []string, o Option
 				event := <-events
 				fmt.Fprintf(cli.Out, "%04d %s %s\n", event.Sequence, event.AgentID, event.Type)
 			}
+			if err == nil {
+				cli.announceResolution(p, r.ID)
+			}
 			return err
 		}
 	}
+}
+
+// announceResolution prints one line when a finished run has proposed changes
+// ready to apply as a set. A preparation error is ignored so it never fails the run.
+func (cli *CLI) announceResolution(p *Project, run string) {
+	resolution, err := p.PrepareResolution(run, nil)
+	if err != nil || len(resolution.Items) == 0 {
+		return
+	}
+	ready, blocked, conflict := 0, 0, 0
+	for _, item := range resolution.Items {
+		switch item.Status {
+		case "ready":
+			ready++
+		case "blocked":
+			blocked++
+		case "conflict":
+			conflict++
+		}
+	}
+	if resolution.Ready {
+		fmt.Fprintf(cli.Out, "Resolution ready: %d changes · arena integrate %s --all\n", ready, run)
+		return
+	}
+	fmt.Fprintf(cli.Out, "Resolution not ready: %d ready, %d blocked, %d conflict · %s · arena integrate %s --all --dry-run\n", ready, blocked, conflict, resolution.Reason, run)
 }
 
 // Both CLI and TUI starts use the same readiness, policy and isolation checks.

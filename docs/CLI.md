@@ -180,7 +180,7 @@ Slash commands are available in setup and the graph:
 | `/status`, `/refresh` | Inspect required providers or refresh the selected context/status |
 | `/decisions`, `/answer [ID] TEXT`, `/accept` | Inspect and answer pending questions/approvals; apply the orchestrator's stall recommendation |
 | `$ COMMAND` | Run a shell command in the project root and show its output |
-| `/integrate CHANGE_ID` | Integrate a reviewed change |
+| `/integrate`, `/integrate all [skip CHANGE_ID...]`, `/integrate CHANGE_ID` | Show the resolution panel, apply the whole resolution, or integrate one reviewed change |
 | `/clear`, `/close`, `/quit` | Reset scroll/errors, close a panel, or exit |
 
 Typing `/` opens a suggestion menu above the prompt with each matching command's
@@ -243,6 +243,7 @@ when called from another CLI process.
 ```sh
 arena changes RUN_ID
 arena changes RUN_ID CHANGE_ID
+arena integrate RUN_ID --all [--dry-run] [--skip CHANGE_ID]... [--yes]
 arena integrate RUN_ID CHANGE_ID
 arena rollback RUN_ID CHANGE_ID
 arena rollback RUN_ID CHANGE_ID --yes
@@ -258,10 +259,28 @@ snapshots. Checkpoints use an alternate index and include staged, unstaged and
 non-ignored untracked files without changing the user's index. Ignored files are
 not copied. Detected secret-like changes are refused before checkpointing.
 
+When a run succeeds, Arena prepares a resolution of its proposed changes. It dry-runs each
+change in dependency order against the checkout and journals `resolution.ready`. Nothing
+is written to the checkout yet. `arena integrate RUN_ID --all --dry-run` prints the plan
+as JSON. `arena integrate RUN_ID --all` asks for one approval (`--yes` skips the prompt)
+and applies the whole set. `--skip CHANGE_ID` leaves a change out and can be repeated.
+Each change lands as its own commit, so `arena rollback RUN_ID CHANGE_ID --yes` reverts
+one change. A failed or cancelled run gets no automatic resolution, but
+`arena integrate RUN_ID --all --dry-run` still plans one.
+
+The gate is all-or-nothing. Nothing applies unless every item is `ready` and the
+checkout is clean. If an apply fails partway, the changes already committed stay in place,
+and each one can be reverted with `arena rollback RUN_ID CHANGE_ID --yes`. A change is `blocked` when a dependency was superseded or skipped, and
+`conflict` when the dry run fails to apply. A run that has not ended cannot be applied.
+If the checkout moves after preparation, apply stops, journals `resolution.stopped` with
+the changes already applied, and keeps those commits. A successful apply journals
+`resolution.applied`. If preparation fails when a run succeeds, Arena journals `resolution.error` and the run stays `succeeded`.
+
 Integration prepares and commits a patch in an isolated integration worktree before
 fast-forwarding a clean target. Conflicts preserve the integration workspace. A dirty
-or changed target is never overwritten. Both policies must explicitly permit
-`auto-if-clean` for automatic integration; other proposals enter human review.
+or changed target is never overwritten. Automatic integration is opt-in: set
+`approvalPolicies.change-integration` (project) and `settings.integration.policy`
+(workflow) both to `auto-if-clean`. Other proposals enter human review.
 Rollback previews affected paths and later commits, then creates a revert commit or
 isolated recovery tree. It can itself be reverted. Checkpoint restoration recreates
 working and staged content in a separate tree, including untracked additions.

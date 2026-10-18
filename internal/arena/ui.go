@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -17,6 +18,10 @@ import (
 
 type uiTick struct{ RunID string }
 type uiCommandResult struct{ Err error }
+type resolutionPanelMsg struct {
+	lines []string
+	err   error
+}
 type uiReadinessResult struct {
 	Required string
 	Results  []Readiness
@@ -269,6 +274,12 @@ func (m LiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.Panel, m.PanelText, m.Offset = "Shell · "+status, lines, 1<<30
 		m.ChatMode = false
+	case resolutionPanelMsg:
+		if v.err != nil {
+			m.Error = v.err.Error()
+			return m, nil
+		}
+		m.Panel, m.PanelText = "Resolution", v.lines
 	case uiReadinessResult:
 		if v.Required == string(JSON(Required([]Workflow{m.Run.Workflow}, m.Run.Settings))) {
 			m.Readiness = v.Results
@@ -683,8 +694,16 @@ func (m LiveModel) command(command string) error {
 		}
 		return m.Project.Answer(m.Run.ID, parts[1], strings.Join(parts[2:], " "))
 	case "integrate":
+		if len(parts) >= 2 && parts[1] == "all" {
+			skip, err := resolutionSkip(parts[2:])
+			if err != nil {
+				return err
+			}
+			_, err = m.Project.ApplyResolution(m.Run.ID, "user", skip)
+			return err
+		}
 		if len(parts) != 2 {
-			return fmt.Errorf("inspect with /changes, then /integrate CHANGE_ID")
+			return fmt.Errorf("inspect with /integrate, apply with /integrate all [skip CHANGE_ID...], or /integrate CHANGE_ID")
 		}
 		_, err := m.Project.Integrate(m.Run.ID, parts[1], true)
 		return err
@@ -793,7 +812,13 @@ func (m LiveModel) bodyLines(width int, color bool) []string {
 				pending++
 			}
 		}
-		body = append(body, fmt.Sprintf("Review queue: %d pending · /changes for patches and integration", pending))
+		if ready, applicable, ok := latestResolutionReady(m.Events); ok && applicable {
+			body = append(body, fmt.Sprintf("Resolution prepared: %d ready · /integrate to review, /integrate all to apply", ready))
+		} else if ok {
+			body = append(body, "Resolution not ready · /integrate to see why")
+		} else {
+			body = append(body, fmt.Sprintf("Review queue: %d pending · /changes for patches and integration", pending))
+		}
 		body = append(body, foldReadiness(m.Readiness)...)
 	}
 	if !m.ChatMode && m.Panel == "" && !m.Detail && !m.GitDetail && !m.ChangeDetail {
@@ -980,4 +1005,90 @@ func Watch(ctx context.Context, p *Project, r Run, readiness []Readiness) error 
 	program := tea.NewProgram(model, tea.WithContext(ctx))
 	_, err := program.Run()
 	return err
+}
+
+// resolutionSkip parses the optional "skip CHANGE_ID..." tail of /integrate all.
+func resolutionSkip(rest []string) ([]string, error) {
+	if len(rest) == 0 {
+		return nil, nil
+	}
+	if rest[0] != "skip" || len(rest) == 1 {
+		return nil, fmt.Errorf("usage: /integrate all [skip CHANGE_ID...]")
+	}
+	return rest[1:], nil
+}
+
+// latestResolutionReady reports the ready count when the newest resolution
+// event is resolution.ready, meaning nothing has been applied or stopped since.
+func latestResolutionReady(events []Event) (ready int, applicable bool, ok bool) {
+	for i := len(events) - 1; i >= 0; i-- {
+		switch events[i].Type {
+		case "resolution.ready":
+			applicable, _ = events[i].Data["applicable"].(bool)
+			return eventCount(events[i].Data["ready"]), applicable, true
+		case "resolution.applied", "resolution.stopped":
+			return 0, false, false
+		}
+	}
+	return 0, false, false
+}
+
+// eventCount reads a count from journal data. Journal reads use UseNumber, so
+// counts arrive as json.Number; float64, int and int64 cover in-process events.
+func eventCount(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(i)
+	}
+	return 0
+}
+
+// resolutionLines describes the prepared resolution for the /integrate panel.
+// It runs Git, so it is called from a tea.Cmd and never from View() or Update.
+func (m LiveModel) resolutionLines() ([]string, error) {
+	resolution, err := m.Project.PrepareResolution(m.Run.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	ready, blocked, conflict := 0, 0, 0
+	for _, item := range resolution.Items {
+		switch item.Status {
+		case "ready":
+			ready++
+		case "blocked":
+			blocked++
+		case "conflict":
+			conflict++
+		}
+	}
+	lines := []string{fmt.Sprintf("Resolution · %d ready · %d blocked · %d conflict", ready, blocked, conflict)}
+	if !resolution.Ready && resolution.Reason != "" {
+		lines = append(lines, "Not ready: "+resolution.Reason)
+	}
+	if resolution.Ready {
+		lines = append(lines, "Apply the whole set with /integrate all, or /integrate all skip CHANGE_ID to leave one out.")
+	} else {
+		lines = append(lines, "Nothing applies while any change is blocked or conflicting. /integrate all skip CHANGE_ID leaves those out.")
+	}
+	for _, item := range resolution.Items {
+		line := fmt.Sprintf("%d. %s · %s · %s", item.Order, item.ChangeID, item.AgentID, item.Status)
+		if len(item.Paths) > 0 {
+			line += " · " + strings.Join(item.Paths, ", ")
+		}
+		if item.Reason != "" {
+			line += " · " + item.Reason
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
 }

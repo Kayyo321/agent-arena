@@ -120,7 +120,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) error {
 		fmt.Fprint(cli.Out, helpText)
 		return nil
 	}
-	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into")
+	allowed := split("help,project,provider,model,effort,backend,endpoint,auth-method,command-approval,yes,json,plain,no-bootstrap,dry-run,all,replace,user,including-checkpoints,approve,retry-interrupted,name,head,capabilities,input,set,workflow,agent,from,id,role,objective,reason,workspace-mode,files,run,actor,title,content,confidence,tags,evidence,glyphs,shader,copy,clipboard,as,into,skip")
 	for key := range o {
 		if !Has(allowed, key) {
 			return fmt.Errorf("unknown flag --%s", key)
@@ -976,6 +976,7 @@ arena pause|cancel RUN
 arena checkpoint list|show|restore [ID] [--yes]
 arena changes RUN [CHANGE]
 arena integrate RUN CHANGE [--yes]
+arena integrate RUN --all [--dry-run] [--skip CHANGE]... [--yes]
 arena rollback RUN CHANGE [--yes]
 arena on-call invoke RUN AGENT
 arena decision list RUN | arena decision answer RUN ID ANSWER

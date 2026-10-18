@@ -98,6 +98,11 @@ keys remain text input; Ctrl+E/G/T open events/Git/teams, `/changes` opens the r
 and Ctrl+V pastes clipboard images or text, and Ctrl+Q or
 `/quit` exits. The workflow chooser retains its arrow/j/k/Enter/q controls.
 
+When a successful run has proposed changes, the review queue shows `Resolution prepared: N ready · /integrate to review, /integrate all to apply`
+when the resolution is applicable, or `Resolution not ready · /integrate to see why` when it is not, until the resolution is applied or stopped. A single-change `/integrate CHANGE_ID` does not clear it. The line counts only ready changes, so check `/integrate` before applying. `/integrate` alone opens the resolution panel with the prepared plan,
+blocked and conflicting items included. `/integrate all [skip CHANGE_ID...]` applies the whole
+resolution as one approval, and `/integrate CHANGE_ID` still integrates a single change.
+
 The composer has a visible caret. Left/Right move one displayed character,
 including combined accents and emoji; Home/End move to the start/end of the current line.
 Alt+Left/Right (or Ctrl+Left/Right) move by word. Backspace/Delete edit at the caret,

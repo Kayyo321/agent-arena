@@ -88,15 +88,22 @@ arena watch RUN_ID
 arena history RUN_ID --json
 arena changes RUN_ID
 arena changes RUN_ID CHANGE_ID
+arena integrate RUN_ID --all --dry-run
+arena integrate RUN_ID --all --yes
 arena integrate RUN_ID CHANGE_ID
 arena rollback RUN_ID CHANGE_ID
 arena context search development 'project convention'
 ```
 
 Writing workers get isolated worktrees; downstream workers receive pinned snapshots
-of prerequisite proposals. Changes enter an audited review queue. Integration checks
-for conflicts and later user edits. Rollback makes a revert or a separate recovery
-worktree. It never silently resets or discards later work.
+of prerequisite proposals. Changes enter an audited review queue. When a run succeeds,
+Arena prepares a resolution: it dry-runs every proposed change in dependency order
+against the checkout and journals `resolution.ready`. You apply the whole set with one
+approval (`/integrate all` in the TUI, or `arena integrate RUN_ID --all`). Nothing
+applies unless the whole plan is ready. Use `--skip CHANGE_ID` to leave out a change.
+Each change lands as its own commit. Integration checks for conflicts and later user
+edits. Rollback makes a revert or a separate recovery worktree. It never silently
+resets or discards later work.
 
 The live interface opens with a status band: the small purple dotted A2rena wordmark
 at the left, the run's status, active agents, progress and line changes across
