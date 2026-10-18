@@ -35,6 +35,10 @@ const (
 	wordmarkTurn = 8
 )
 
+// blankBraille is the Braille pattern with no dots (U+2800). The wordmark uses
+// it for empty cells and letter gaps instead of an ASCII space.
+const blankBraille = 0x2800
+
 // Braille dots pack the lettering into three rows without a filled background.
 func wordmark(width, height int, mode string, color bool) []string {
 	return spinningWordmark(width, height, mode, color, -1)
@@ -77,7 +81,7 @@ func spinningWordmark(width, height int, mode string, color bool, clock float64)
 		}
 		for i, letter := range letters {
 			if i > 0 {
-				line.WriteByte(' ')
+				line.WriteRune(blankBraille)
 			}
 			for x := range len(letter[0]) {
 				var dots rune
@@ -87,11 +91,9 @@ func spinningWordmark(width, height int, mode string, color bool, clock float64)
 				if y+1 < len(letter) && letter[y+1][x] == '1' {
 					dots |= 0xe4 // Two lower dots in each column.
 				}
-				if dots == 0 {
-					line.WriteByte(' ')
-				} else {
-					line.WriteRune(0x2800 + dots)
-				}
+				// Blank cells are Braille too, so every cell in a row comes
+				// from the same font and keeps the same advance width.
+				line.WriteRune(blankBraille + dots)
 			}
 		}
 		if color {

@@ -58,7 +58,7 @@ func TestStatusBandLeadsWithWordmarkAndRunVitals(t *testing.T) {
 	}
 	logo := strings.Join(wordmark(140, 40, "show", true), "\n")
 	rows := wordmark(140, 40, "show", false)
-	if ansi.StringWidth(rows[0]) != 27 || strings.TrimSpace(string([]rune(rows[0])[11:])) != "" || strings.TrimSpace(string([]rune(rows[1])[12:])) == "" {
+	if ansi.StringWidth(rows[0]) != 27 || trimBlankBraille(string([]rune(rows[0])[11:])) != "" || trimBlankBraille(string([]rune(rows[1])[12:])) == "" {
 		t.Fatal("lowercase rena must be shorter and smaller than A2, aligned to its baseline")
 	}
 	if strings.ContainsAny(logo, "█▀▄") || strings.Contains(logo, "48;") || strings.Contains(logo, "38;5;54") || strings.Contains(logo, "38;5;61") {
@@ -66,6 +66,41 @@ func TestStatusBandLeadsWithWordmarkAndRunVitals(t *testing.T) {
 	}
 	if ansi.Strip(logo) != strings.Join(wordmark(140, 40, "show", false), "\n") {
 		t.Fatal("color added extra geometry behind the lettering")
+	}
+}
+
+// trimBlankBraille trims the wordmark's empty cells, which are U+2800 rather
+// than ASCII spaces, along with any ordinary padding.
+func trimBlankBraille(s string) string {
+	return strings.Trim(s, " \u2800")
+}
+
+func TestWordmarkRowsUseBlankBrailleCells(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("NO_COLOR", "")
+	rows := wordmark(80, 24, "show", false)
+	if len(rows) != 3 {
+		t.Fatalf("static wordmark has %d rows, want 3: %q", len(rows), rows)
+	}
+	if ansi.StringWidth("\u2800") != 1 {
+		t.Fatalf("blank Braille cell is %d columns wide, want 1", ansi.StringWidth("\u2800"))
+	}
+	want := ansi.StringWidth(rows[0])
+	for y, row := range rows {
+		// Padding after the logo is not part of it.
+		row = strings.TrimRight(row, " ")
+		if got := ansi.StringWidth(row); got != want {
+			t.Fatalf("row %d is %d columns wide, row 0 is %d: %q", y, got, want, row)
+		}
+		for x, r := range row {
+			if r < 0x2800 || r > 0x28ff {
+				t.Fatalf("row %d column offset %d is %q, want a Braille cell: %q", y, x, r, row)
+			}
+		}
+		if strings.Contains(row, " ") {
+			t.Fatalf("row %d has an ASCII space inside the logo: %q", y, row)
+		}
 	}
 }
 
@@ -125,7 +160,7 @@ func TestWordmarkSpinsOneLetterAtATimeInPlace(t *testing.T) {
 				t.Fatalf("step %d row %d changed width: %q", step, y, row)
 			}
 			for _, gap := range spans[1:] {
-				if []rune(row)[gap[0]-1] != ' ' {
+				if []rune(row)[gap[0]-1] != blankBraille {
 					t.Fatalf("step %d spilled into the gap before column %d: %q", step, gap[0], row)
 				}
 			}
