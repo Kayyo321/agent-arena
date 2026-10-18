@@ -92,6 +92,31 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		fmt.Fprint(cli.Out, Redact(string(patch)))
 		return nil
 	case "integrate":
+		if len(args) == 2 && o.Bool("all") {
+			resolution, err := p.PrepareResolution(args[1], o["skip"])
+			if err != nil {
+				return err
+			}
+			cli.print(resolution)
+			if o.Bool("dry-run") {
+				return nil
+			}
+			if !resolution.Ready {
+				return fmt.Errorf("resolution not ready: %s", blockingResolutionItems(resolution))
+			}
+			ready := 0
+			for _, item := range resolution.Items {
+				if item.Status == "ready" {
+					ready++
+				}
+			}
+			if err := cli.confirm(fmt.Sprintf("Apply %d changes to the checkout", ready), o); err != nil {
+				return err
+			}
+			applied, err := p.ApplyResolution(args[1], "user", o["skip"])
+			cli.print(applied)
+			return err
+		}
 		if len(args) != 3 {
 			return fmt.Errorf("integrate RUN CHANGE [--yes]")
 		}
@@ -273,4 +298,27 @@ func (cli *CLI) runtimeCommand(ctx context.Context, p *Project, args []string, o
 		return nil
 	}
 	return fmt.Errorf("unknown or not yet implemented command %q; see arena --help", args[0])
+}
+
+// blockingResolutionItems names the items that keep a resolution from being
+// applied as a set, for the error returned by integrate RUN --all.
+func blockingResolutionItems(r Resolution) string {
+	parts := []string{}
+	for _, item := range r.Items {
+		if item.Status == "ready" || item.Status == "skipped" {
+			continue
+		}
+		part := item.ChangeID + " " + item.Status
+		if item.Reason != "" {
+			part += " (" + item.Reason + ")"
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		if r.Reason != "" {
+			return r.Reason
+		}
+		return "no ready changes"
+	}
+	return strings.Join(parts, "; ")
 }

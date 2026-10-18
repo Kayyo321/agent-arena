@@ -428,8 +428,11 @@ func (e *Engine) Execute(ctx context.Context, resume, retry bool) error {
 		}
 	}
 	if !failed {
-		_, err = e.event("", "workflow.succeeded", map[string]any{"nodeCount": len(nodes)})
-		return err
+		if _, err = e.event("", "workflow.succeeded", map[string]any{"nodeCount": len(nodes)}); err != nil {
+			return err
+		}
+		e.journalResolution()
+		return nil
 	}
 	return nil
 }

@@ -36,7 +36,9 @@ var slashHelp = []string{
 	"/answer [ID] TEXT           Answer a pending decision (ID optional when only one)",
 	"/accept                     Apply the orchestrator's recommended answer",
 	"$ COMMAND                   Run a shell command in the project root",
-	"/integrate CHANGE_ID        Integrate a reviewed change",
+	"/integrate                  Show the run's resolution: changes ready to apply as a set",
+	"/integrate all [skip CHANGE_ID...]  Apply the resolution; skip changes you leave out",
+	"/integrate CHANGE_ID        Integrate one reviewed change",
 	"/save [no-commit] [allow-blanket]  Save the previewed draft; allow-blanket confirms Antigravity blanket approval",
 	"/clear                      Clear the current view's scroll/error",
 	"/close                      Close the mini-window or panel",
@@ -411,6 +413,19 @@ func (m LiveModel) submitInput(input string) (tea.Model, tea.Cmd) {
 	if !Has([]string{"run", "pause", "resume", "cancel", "decision", "integrate"}, parts[0]) {
 		text = "run " + text
 		parts = strings.Fields(text)
+	}
+	if parts[0] == "integrate" && len(parts) == 1 {
+		if m.Run.ID == "" || m.Project == nil {
+			m.Error = "no run yet; enter run TASK to start this arena, or q to quit"
+			return m, nil
+		}
+		lines, err := m.resolutionLines()
+		if err != nil {
+			m.Error = err.Error()
+			return m, nil
+		}
+		m.Panel, m.PanelText = "Resolution", lines
+		return m, nil
 	}
 	if parts[0] == "run" {
 		if len(parts) < 2 {
