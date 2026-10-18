@@ -22,6 +22,21 @@ Packaged executables require no language runtime. Git and the selected provider
 CLI or model backend remain prerequisites. Building from source uses the Go
 toolchain selected by `go.mod` (Go 1.27.2 in CI).
 
+Install the latest release (first choice):
+
+```sh
+curl -fsSL https://github.com/Kayyo321/agent-arena/releases/latest/download/install.sh | bash
+```
+
+The installer places the binary at `$PREFIX/lib/arena/<version>/arena` and links it as
+`$PREFIX/bin/arena`, where `PREFIX` is set by `ARENA_PREFIX` and defaults to `$HOME/.local`.
+`ARENA_VERSION` pins a version, `ARENA_RELEASE_BASE_URL` overrides the release host,
+and `ARENA_NO_UPDATE_CHECK=1` turns off the update notice. Verify a downloaded archive
+with `gh attestation verify <archive> --repo Kayyo321/agent-arena`. Update with
+`arena update` and remove with `arena uninstall` ([CLI guide](docs/CLI.md#install-update-and-uninstall)).
+
+To build from source instead:
+
 ```sh
 make build
 ./bin/arena --help

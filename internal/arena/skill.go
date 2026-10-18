@@ -72,6 +72,12 @@ func (p *Project) InstallSkill(agent string, user, replace bool) (string, error)
 	if e := Atomic(path, source, 0644); e != nil {
 		return "", e
 	}
+	if user {
+		// Update and uninstall use the recorded hash to tell an untouched copy from an edited one.
+		if e := recordUserSkill(path, source); e != nil {
+			return "", fmt.Errorf("installed %s but could not record it in the user skill manifest: %w", path, e)
+		}
+	}
 	return path, nil
 }
 func userSkillPath(agent, project string) string {

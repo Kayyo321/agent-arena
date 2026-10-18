@@ -123,6 +123,7 @@ func (cli *CLI) tmux(ctx context.Context, p *Project, args []string, o Options) 
 	if err != nil {
 		return err
 	}
+	exe = pinnableExecutable(exe)
 	var r Run
 	var supervisor []string
 	if args[1] == "run" {
