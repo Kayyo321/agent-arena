@@ -94,8 +94,20 @@ func openCodePermissions(write bool) map[string]any {
 // openCodeDroppedEnv are the parent variables openCodeEnv does not pass on: the
 // two that would let the parent's configuration reach opencode, OPENCODE_PURE and
 // OPENCODE_DISABLE_LSP_DOWNLOAD (both set below, so each appears once) and
-// OPENCODE_AUTO_SHARE (see openCodeEnv).
-var openCodeDroppedEnv = map[string]bool{"OPENCODE_PERMISSION": true, "OPENCODE_CONFIG_CONTENT": true, "OPENCODE_PURE": true, "OPENCODE_AUTO_SHARE": true, "OPENCODE_DISABLE_LSP_DOWNLOAD": true}
+// OPENCODE_AUTO_SHARE (see openCodeEnv). OPENCODE_TEST_MANAGED_CONFIG_DIR moves
+// the managed-config directory, which opencode loads after OPENCODE_CONFIG_CONTENT,
+// so a parent value would let that directory override Arena's config.
+// OPENCODE_EXPERIMENTAL_WORKSPACES and OPENCODE_WORKSPACE_ID belong to the
+// experimental workspace sync, which no worker, probe or catalog call may join.
+// Every OTEL_* variable (openCodeDroppedEnvPrefix) is the OpenTelemetry SDK's
+// exporter, sampler or resource setting (OTEL_EXPORTER_OTLP_ENDPOINT and _HEADERS
+// among them, all named in the 1.19.3 binary), so no inherited telemetry export
+// reaches a call.
+var openCodeDroppedEnv = map[string]bool{"OPENCODE_PERMISSION": true, "OPENCODE_CONFIG_CONTENT": true, "OPENCODE_PURE": true, "OPENCODE_AUTO_SHARE": true, "OPENCODE_DISABLE_LSP_DOWNLOAD": true, "OPENCODE_TEST_MANAGED_CONFIG_DIR": true, "OPENCODE_EXPERIMENTAL_WORKSPACES": true, "OPENCODE_WORKSPACE_ID": true}
+
+// openCodeDroppedEnvPrefix is the prefix of the OpenTelemetry variables that
+// openCodeEnv drops.
+const openCodeDroppedEnvPrefix = "OTEL_"
 
 // The OPENCODE_CONFIG_CONTENT keys that switch off OpenCode's language servers and
 // formatters, and the variable that stops it downloading language servers. See
@@ -148,6 +160,19 @@ const (
 //     entries and default_agent survived. OPENCODE_DISABLE_PROJECT_CONFIG=1
 //     ignores the worktree's config entirely; the map is repeated under
 //     agent.build as well, for the user's own global config.
+//
+// Arena's values beat the user's global opencode.json and the OPENCODE_CONFIG and
+// OPENCODE_CONFIG_DIR configuration, but not managed configuration (the managed
+// directory, /etc/opencode or /Library/Application Support/opencode, and macOS MDM
+// preferences) or the active Console organisation's remote config: opencode loads
+// those after OPENCODE_CONFIG_CONTENT. Checked on 1.19.3 with
+// OPENCODE_TEST_MANAGED_CONFIG_DIR set to a directory whose opencode.json holds
+// {"lsp": true, "formatter": true, "share": "auto"}: `opencode debug config` then
+// printed formatter true, lsp true and share "auto" although Arena's config said
+// false, false and "disabled". Arena cannot override them, so readiness
+// (openCodeCheckSettings) refuses a setup in which the resolved configuration
+// enables lsp, formatter or sharing, and the parent's
+// OPENCODE_TEST_MANAGED_CONFIG_DIR is dropped.
 //
 // The user's own configuration is not isolated: it is where their providers,
 // models and OpenCode's sign-in live. It can still add tools to a worker. A
@@ -213,7 +238,7 @@ const (
 func openCodeEnv(write bool) []string {
 	env := []string{}
 	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); !openCodeDroppedEnv[name] {
+		if name, _, _ := strings.Cut(kv, "="); !openCodeDroppedEnv[name] && !strings.HasPrefix(name, openCodeDroppedEnvPrefix) {
 			env = append(env, kv)
 		}
 	}
@@ -299,7 +324,10 @@ func openCodeRuntimeError(r Runtime) error {
 //
 // The run prints other notices as plain lines, which streamNative skips.
 func invokeOpenCode(ctx context.Context, in Invocation) (map[string]any, error) {
-	if in.Commands { // adapterLimits records this for scoring and validation.
+	// An agent with run_commands is refused before the run starts (execute_cli.go);
+	// this check backs that up, and adapterLimits records the limit for scoring and
+	// validation.
+	if in.Commands {
 		return nil, fmt.Errorf("OpenCode has no command sandbox in Arena; remove run_commands from this agent or use another provider")
 	}
 	if err := openCodeRuntimeError(in.Runtime); err != nil {
@@ -906,6 +934,80 @@ func openCodeCheckPermissions(ctx context.Context) (state, detail string) {
 	return "unsupported", strings.Join(parts, "; ")
 }
 
+// openCodeSettings holds the keys of `opencode debug config` that Arena requires.
+// Recorded on the real 1.19.3 binary, run from a scratch git repository with
+// OPENCODE_CONFIG_CONTENT set (no model call): it prints one JSON object with
+// top-level keys agent, mode, plugin, command, share, lsp, formatter and username.
+// share is a string ("manual", "auto" or "disabled"), lsp and formatter are false
+// when disabled and true or an object when enabled; with Arena's config they print
+// "share": "disabled", "lsp": false and "formatter": false. A key the config does
+// not set can be absent, and a banner line can precede the object. The values are
+// the resolved ones: managed and Console-org config, loaded after
+// OPENCODE_CONFIG_CONTENT, show up here.
+type openCodeSettings struct {
+	LSP       json.RawMessage `json:"lsp"`
+	Formatter json.RawMessage `json:"formatter"`
+	Share     json.RawMessage `json:"share"`
+}
+
+var errOpenCodeSettings = errors.New("opencode debug config did not print a readable configuration")
+
+// parseOpenCodeSettings reads the JSON object after the banner, if any.
+func parseOpenCodeSettings(out string) (openCodeSettings, error) {
+	start := 0
+	if !strings.HasPrefix(strings.TrimLeft(out, " \t\r\n"), "{") {
+		if start = strings.Index(out, "\n{"); start < 0 {
+			return openCodeSettings{}, errOpenCodeSettings
+		}
+		start++
+	}
+	var settings openCodeSettings
+	if json.NewDecoder(strings.NewReader(out[start:])).Decode(&settings) != nil {
+		return openCodeSettings{}, errOpenCodeSettings
+	}
+	return settings, nil
+}
+
+// openCodeCheckSettings is the fail-closed readiness check on resolved values.
+// Managed configuration (the managed directory, macOS MDM preferences) and the
+// Console organisation's remote config are loaded after OPENCODE_CONFIG_CONTENT, so
+// Arena's lsp false, formatter false and share "disabled" can be overridden. It
+// runs `opencode debug config` in the worker's environment, without a model call,
+// and returns a non-empty state and detail unless all three resolve to Arena's
+// values. Unreadable output reads as a changed format and a failed call as
+// unavailable.
+func openCodeCheckSettings(ctx context.Context) (state, detail string) {
+	cmd := openCodeCommand(ctx, "debug", "config")
+	stderr := &cappedBuffer{}
+	cmd.Stderr = stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "unavailable", "opencode debug config failed" + Redact(openCodeStderrTail(stderr)) + "; Arena cannot confirm that language servers, formatters and sharing are off for workers"
+	}
+	settings, err := parseOpenCodeSettings(string(out))
+	if err != nil {
+		return "incompatible version", err.Error() + "; Arena cannot confirm that language servers, formatters and sharing are off for workers"
+	}
+	problems := []string{}
+	for _, check := range []struct {
+		key  string
+		got  json.RawMessage
+		want string
+	}{{openCodeLSPKey, settings.LSP, "false"}, {openCodeFormatterKey, settings.Formatter, "false"}, {openCodeShareKey, settings.Share, `"` + openCodeShareDisabled + `"`}} {
+		if got := strings.TrimSpace(string(check.got)); got != check.want {
+			if got == "" {
+				got = "unset"
+			}
+			problems = append(problems, fmt.Sprintf("%s resolves to %s, not %s", check.key, short(Redact(got), 60), check.want))
+		}
+	}
+	if len(problems) == 0 {
+		return "", ""
+	}
+	return "unsupported", "your OpenCode setup re-enables settings Arena turns off for workers: " + strings.Join(problems, "; ") +
+		". Arena's values beat your global opencode.json, OPENCODE_CONFIG and OPENCODE_CONFIG_DIR, but not managed configuration (/etc/opencode, /Library/Application Support/opencode, MDM) or your Console organisation's config. Change it there, then check again"
+}
+
 func probeOpenCode(ctx context.Context, r Runtime, result Readiness) Readiness {
 	if _, err := exec.LookPath("opencode"); err != nil {
 		result.State = "missing"
@@ -966,6 +1068,10 @@ func probeOpenCode(ctx context.Context, r Runtime, result Readiness) Readiness {
 	result.Auth = "OpenCode-owned sign-in present; credential validity unverified"
 	// The user's own OpenCode configuration still applies to workers. It must not
 	// give them anything Arena's map does not, so readiness fails closed here.
+	if state, detail := openCodeCheckSettings(ctx); state != "" {
+		result.State, result.Detail = state, detail
+		return result
+	}
 	if state, detail := openCodeCheckPermissions(ctx); state != "" {
 		result.State, result.Detail = state, detail
 		return result
@@ -990,7 +1096,7 @@ func probeOpenCode(ctx context.Context, r Runtime, result Readiness) Readiness {
 			return result
 		}
 		result.CanStart = true
-		result.Detail = "catalog discovery does not prove model access; live inference is unverified; workers get read tools (writers also edit), no commands and no Arena MCP bridge; opencode debug agent build shows no further tool allowed by your configuration"
+		result.Detail = "catalog discovery does not prove model access; live inference is unverified; workers get read tools (writers also edit), no commands and no Arena MCP bridge; opencode debug config shows language servers, formatters and sharing off; opencode debug agent build shows no further tool allowed by your configuration"
 		if skipped > 0 {
 			result.Detail += fmt.Sprintf("; %d unparseable catalog blocks skipped", skipped)
 		}

@@ -389,8 +389,8 @@ func TestOpenCodeProbeAndCatalogRunInTheWorkerConfiguration(t *testing.T) {
 		}
 		requireOpenCodeNoLSPOrFormatter(t, "opencode "+call.args, config)
 	}
-	// The probe's six calls and the catalog's own.
-	if len(calls) != 7 {
+	// The probe's seven calls and the catalog's own.
+	if len(calls) != 8 {
 		t.Fatalf("calls: %+v", calls)
 	}
 	seen := []string{}
@@ -406,14 +406,14 @@ func TestOpenCodeProbeAndCatalogRunInTheWorkerConfiguration(t *testing.T) {
 			t.Fatalf("opencode %s must run without external plugins, as the worker does: OPENCODE_PURE=%q", call.args, call.pure)
 		}
 	}
-	if want := []string{"--version", "run --help", "auth list", "debug agent build", "debug agent build", "models --verbose", "models --verbose"}; !reflect.DeepEqual(seen, want) {
+	if want := []string{"--version", "run --help", "auth list", "debug config", "debug agent build", "debug agent build", "models --verbose", "models --verbose"}; !reflect.DeepEqual(seen, want) {
 		t.Fatalf("calls: %q, want %q", seen, want)
 	}
 	// Everything runs as a reader, except the second resolution of the build agent,
 	// which runs as a writer.
 	for i, call := range calls {
 		want := reader
-		if i == 4 {
+		if i == 5 {
 			want = writer
 		}
 		if call.config != want {
@@ -442,7 +442,8 @@ const (
 	openCodeFixtureDataHome        = "/home/arena/.local/share" // XDG_DATA_HOME of those recordings
 	openCodeFixtureToolOutput      = openCodeFixtureDataHome + "/opencode/tool-output/*"
 	openCodeProbeThroughAuth       = "--version\nrun --help\nauth list\n"
-	openCodeProbeThroughReader     = openCodeProbeThroughAuth + "debug agent build\n"
+	openCodeProbeThroughConfig     = openCodeProbeThroughAuth + "debug config\n"
+	openCodeProbeThroughReader     = openCodeProbeThroughConfig + "debug agent build\n"
 	openCodeProbeThroughAgent      = openCodeProbeThroughReader + "debug agent build\n"
 	openCodeProbeThroughCatalog    = openCodeProbeThroughAgent + "models --verbose\n"
 )
@@ -468,9 +469,16 @@ func openCodeAgentJSON(rules ...openCodeRule) string {
 	return "cat <<'EOF'\n" + compactJSON(map[string]any{"name": "build", "permission": rules}) + "\nEOF"
 }
 
-type openCodeProbeCLI struct{ version, help, auth, models, agentReader, agentWriter string }
+// openCodeConfigOK is a fake `opencode debug config`: a banner line, then the
+// resolved configuration of Arena's own settings.
+const openCodeConfigOK = "printf 'banner line\\n'\ncat <<'EOF'\n{\"agent\":{},\"share\":\"disabled\",\"lsp\":false,\"formatter\":false,\"username\":\"unknown\"}\nEOF"
 
-// install fakes the five read-only calls a probe makes; zero fields answer as a
+// openCodeConfigWith is a fake `opencode debug config` that prints the given JSON.
+func openCodeConfigWith(json string) string { return "cat <<'EOF'\n" + json + "\nEOF" }
+
+type openCodeProbeCLI struct{ version, help, auth, models, agentReader, agentWriter, config string }
+
+// install fakes the six read-only calls a probe makes; zero fields answer as a
 // healthy, signed-in 1.19.3 with the recorded catalog and the recorded rules of
 // Arena's own map, which no user configuration widens. The fake tells the
 // reader's call from the writer's by the writer's "../*" edit rule in
@@ -479,7 +487,7 @@ type openCodeProbeCLI struct{ version, help, auth, models, agentReader, agentWri
 func (c openCodeProbeCLI) install(t *testing.T) (record, capture string) {
 	t.Helper()
 	t.Setenv("XDG_DATA_HOME", openCodeFixtureDataHome)
-	for field, fallback := range map[*string]string{&c.version: "echo " + openCodeVersion, &c.help: openCodeHelpOK, &c.auth: openCodeAuthSignedIn, &c.models: openCodeCat(t, openCodeFixture), &c.agentReader: openCodeCat(t, openCodeAgentReader), &c.agentWriter: openCodeCat(t, openCodeAgentWriter)} {
+	for field, fallback := range map[*string]string{&c.version: "echo " + openCodeVersion, &c.help: openCodeHelpOK, &c.auth: openCodeAuthSignedIn, &c.models: openCodeCat(t, openCodeFixture), &c.agentReader: openCodeCat(t, openCodeAgentReader), &c.agentWriter: openCodeCat(t, openCodeAgentWriter), &c.config: openCodeConfigOK} {
 		if *field == "" {
 			*field = fallback
 		}
@@ -487,7 +495,7 @@ func (c openCodeProbeCLI) install(t *testing.T) (record, capture string) {
 	if !strings.HasPrefix(c.auth, "cat <<") && !strings.HasPrefix(c.auth, "exit") && !strings.HasPrefix(c.auth, "echo") {
 		c.auth = "cat <<'EOF'\n" + c.auth + "EOF"
 	}
-	debug := "case \"$OPENCODE_CONFIG_CONTENT\" in\n*'\"../*\"'*) " + c.agentWriter + "\n;;\n*) " + c.agentReader + "\n;;\nesac"
+	debug := "if [ \"$2\" = config ]; then\n" + c.config + "\nexit 0\nfi\ncase \"$OPENCODE_CONFIG_CONTENT\" in\n*'\"../*\"'*) " + c.agentWriter + "\n;;\n*) " + c.agentReader + "\n;;\nesac"
 	return openCodeFake(t, "case \"$1\" in\n--version) "+c.version+"\n;;\nrun) "+c.help+"\n;;\nauth) "+c.auth+"\n;;\nmodels) "+c.models+"\n;;\ndebug) "+debug+"\n;;\nesac\n")
 }
 
@@ -521,6 +529,17 @@ func TestOpenCodeProbeStates(t *testing.T) {
 		// The user's own configuration can add tools to a worker, so readiness resolves
 		// the build agent for a reader and for a writer and fails closed, before the
 		// catalog is read.
+		// Managed and Console-org config load after OPENCODE_CONFIG_CONTENT, so readiness
+		// reads the resolved settings and fails closed before the build agent is resolved.
+		{"debug config call fails", openCodeProbeCLI{config: "echo 'Error: boom' >&2\nexit 1"}, cat, "unavailable", "opencode debug config failed; Error: boom", "", openCodeProbeThroughConfig},
+		{"debug config output unreadable", openCodeProbeCLI{config: "echo something new"}, cat, "incompatible version", "did not print a readable configuration", "", openCodeProbeThroughConfig},
+		{"debug config output truncated", openCodeProbeCLI{config: "echo banner; echo '{\"lsp\":'"}, cat, "incompatible version", "did not print a readable configuration", "", openCodeProbeThroughConfig},
+		{"lsp re-enabled", openCodeProbeCLI{config: openCodeConfigWith(`{"share":"disabled","lsp":true,"formatter":false}`)}, cat, "unsupported", "lsp resolves to true, not false", "", openCodeProbeThroughConfig},
+		{"lsp configured as an object", openCodeProbeCLI{config: openCodeConfigWith(`{"share":"disabled","lsp":{"gopls":{}},"formatter":false}`)}, cat, "unsupported", "lsp resolves to", "", openCodeProbeThroughConfig},
+		{"formatter re-enabled", openCodeProbeCLI{config: openCodeConfigWith(`{"share":"disabled","lsp":false,"formatter":true}`)}, cat, "unsupported", "formatter resolves to true, not false", "", openCodeProbeThroughConfig},
+		{"share re-enabled", openCodeProbeCLI{config: openCodeConfigWith(`{"share":"auto","lsp":false,"formatter":false}`)}, cat, "unsupported", `share resolves to "auto", not "disabled"`, "", openCodeProbeThroughConfig},
+		{"all three re-enabled by managed config", openCodeProbeCLI{config: openCodeConfigWith(`{"share":"auto","lsp":true,"formatter":true}`)}, cat, "unsupported", "managed configuration", "", openCodeProbeThroughConfig},
+		{"settings absent", openCodeProbeCLI{config: openCodeConfigWith(`{"agent":{}}`)}, cat, "unsupported", "lsp resolves to unset", "", openCodeProbeThroughConfig},
 		{"reader build agent widened by the user's configuration", openCodeProbeCLI{agentReader: openCodeCat(t, openCodeAgentReaderWidened)}, cat, "unsupported", "codesearch, mymcp_*", "", openCodeProbeThroughAgent},
 		{"writer build agent widened by the user's configuration", openCodeProbeCLI{agentWriter: openCodeCat(t, openCodeAgentWriterWidened)}, cat, "unsupported", "codesearch, mymcp_*", "", openCodeProbeThroughAgent},
 		{"both build agents widened", openCodeProbeCLI{agentReader: openCodeCat(t, openCodeAgentReaderWidened), agentWriter: openCodeCat(t, openCodeAgentWriterWidened)}, cat, "unsupported", "global agent definition", "", openCodeProbeThroughAgent},
@@ -584,13 +603,65 @@ func TestOpenCodeProbeReadyWithoutRunningInference(t *testing.T) {
 		if !strings.Contains(got.Detail, "1 unparseable catalog blocks skipped") {
 			t.Fatalf("skipped blocks must show in the detail: %s", got.Detail)
 		}
-		// Only the read-only calls ran: never a run with a prompt. The build agent
-		// is resolved once as a reader and once as a writer, without a model call.
+		// Only the read-only calls ran: never a run with a prompt. The resolved
+		// configuration is read once and the build agent is resolved once as a reader
+		// and once as a writer, without a model call.
 		if calls := recorded(t, capture, "calls"); calls != openCodeProbeThroughCatalog {
 			t.Fatalf("calls: %q", calls)
 		}
 		if !strings.Contains(got.Detail, "opencode debug agent build shows no further tool allowed") {
 			t.Fatalf("the detail must say what was checked: %s", got.Detail)
+		}
+	}
+}
+
+// A parent's managed-config directory, workspace sync and OpenTelemetry export
+// settings must not reach any call: the managed directory is loaded after Arena's
+// config, and the others would send telemetry or join a workspace.
+func TestOpenCodeCallsDropManagedConfigTelemetryAndWorkspaceVariables(t *testing.T) {
+	dropped := []string{"OPENCODE_TEST_MANAGED_CONFIG_DIR", "OPENCODE_EXPERIMENTAL_WORKSPACES", "OPENCODE_WORKSPACE_ID", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TIMEOUT", "OTEL_TRACES_EXPORTER", "OTEL_SERVICE_NAME", "OTEL_RESOURCE_ATTRIBUTES"}
+	for _, name := range dropped {
+		t.Setenv(name, "parent-"+name)
+	}
+	t.Setenv("KEPT_BY_ARENA", "yes")
+	for _, write := range []bool{false, true} {
+		env := openCodeEnv(write)
+		kept := false
+		for _, kv := range env {
+			name, _, _ := strings.Cut(kv, "=")
+			if Has(dropped, name) {
+				t.Fatalf("writer %v: %s reached an opencode call", write, name)
+			}
+			kept = kept || kv == "KEPT_BY_ARENA=yes"
+		}
+		if !kept {
+			t.Fatal("unrelated variables must still be passed on")
+		}
+	}
+	// And through real calls: a probe, a catalog call, and the worker.
+	_, capture := openCodeFake(t, `env > "$OPENCODE_FAKE_CAPTURE/env-$$"
+case "$1" in
+--version) echo `+openCodeVersion+`;;
+models) echo;;
+esac
+`)
+	probeOpenCode(context.Background(), Runtime{Provider: "opencode", Model: "opencode/x"}, openCodeReadiness(Runtime{Provider: "opencode", Model: "opencode/x"}))
+	_, _ = openCodeCatalog(context.Background())
+	_, _ = invokeOpenCode(context.Background(), Invocation{Runtime: Runtime{Provider: "opencode", Model: "opencode/x"}, Dir: t.TempDir(), Prompt: "hi"})
+	files, _ := filepath.Glob(filepath.Join(capture, "env-*"))
+	if len(files) < 3 {
+		t.Fatalf("expected probe, catalog and worker calls, got %d env records", len(files))
+	}
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			name, _, _ := strings.Cut(line, "=")
+			if Has(dropped, name) {
+				t.Fatalf("%s reached an opencode call (%s)", name, filepath.Base(file))
+			}
 		}
 	}
 }
