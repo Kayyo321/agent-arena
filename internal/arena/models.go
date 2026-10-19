@@ -71,6 +71,8 @@ func DiscoverModels(ctx context.Context, root string, r Runtime) ([]ModelOption,
 		return models, nil
 	case "antigravity":
 		return antigravityCatalog(ctx)
+	case "opencode":
+		return openCodeCatalog(ctx)
 	case "claude-code":
 		return nil, fmt.Errorf("the Claude Code CLI exposes no model catalog; enter an exact model ID or alias it accepts")
 	}

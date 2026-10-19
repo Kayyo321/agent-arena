@@ -99,7 +99,7 @@ func Doctor(ctx context.Context, h doctorHost) DoctorReport {
 		gitRepoChecks(ctx, h, add)
 	}
 
-	for _, p := range []struct{ id, bin string }{{"codex", "codex"}, {"claude-code", "claude"}, {"antigravity", "agy"}} {
+	for _, p := range []struct{ id, bin string }{{"codex", "codex"}, {"claude-code", "claude"}, {"antigravity", "agy"}, {"opencode", "opencode"}} {
 		if _, err := h.LookPath(p.bin); err != nil {
 			add("provider-"+p.id, "warn", "%s not found; needed only by arenas that use %s", p.bin, p.id)
 			continue

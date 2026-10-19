@@ -105,7 +105,9 @@ func ValidateRuntime(r Runtime) error {
 	if (r.Provider == "codex" || r.Provider == "claude-code") && r.ReasoningEffort == "" {
 		return fmt.Errorf("%s: select reasoning effort explicitly (status shows verifiable choices)", r.Provider)
 	}
-	if _, ok := r.Options["commandApproval"]; ok && r.Provider != "antigravity" {
+	// OpenCode has no command sandbox, so this message would be untrue for it;
+	// openCodeRuntimeError refuses the option below.
+	if _, ok := r.Options["commandApproval"]; ok && r.Provider != "antigravity" && r.Provider != "opencode" {
 		return fmt.Errorf("commandApproval is an Antigravity option; %s has its own command sandbox", r.Provider)
 	}
 	switch r.Provider {
@@ -122,6 +124,10 @@ func ValidateRuntime(r Runtime) error {
 			if value != antigravityBlanketApproval {
 				return fmt.Errorf("antigravity commandApproval must be %q (or omit it to keep commands refused)", antigravityBlanketApproval)
 			}
+		}
+	case "opencode":
+		if err := openCodeRuntimeError(r); err != nil {
+			return err
 		}
 	case "gemini":
 		a, _ := r.Options["authMethod"].(string)

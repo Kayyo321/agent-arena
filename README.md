@@ -9,7 +9,7 @@ The Go implementation includes workflow authoring, the permanent project control
 agent, teams, reviewers, deterministic routers, on-call agents, workflow context,
 and a Bubble Tea terminal interface. A real Codex read-only workflow has passed, and the live multi-provider exit passed
 with Codex and Antigravity (each under its own sign-in) in the production-readiness
-sweep. Claude Code, Gemini and local adapters have contract or probe coverage only;
+sweep. Claude Code, Gemini, OpenCode and local adapters have contract or probe coverage only;
 that coverage does not establish live readiness.
 See [roadmap and exit checks](docs/ROADMAP.md), the [final TODOs](docs/ROADMAP.md#final-todos)
 and [validation evidence](docs/VALIDATION.md). To keep runs going over SSH, see
@@ -142,13 +142,14 @@ Concurrency is capped by `maxConcurrentAgents` in `.arena/settings.arena.json`. 
 - Codex uses the installed CLI's documented app-server interface and provider-owned authentication.
 - Claude Code uses bare programmatic mode with API-key or supported cloud authentication, or, when you select `claude-code-sign-in`, runs in the background under its own sign-in like Codex.
 - Antigravity (`agy`, Linux with bubblewrap 0.11+) runs in the background under its own sign-in, inside a write fence: the filesystem is read-only except a writer's own worktree, a private `/tmp` and a throwaway copy of agy's own state. It runs commands only when you opt its runtime into sandboxed blanket approval (Linux): agy keeps the network for inference, but each command it runs is re-sandboxed with an emptied home and no network at all.
+- OpenCode (`opencode` 1.19.3) runs headless under OpenCode's own sign-in (`opencode auth login`), a user choice under your own terms. It is an execution adapter with contract and probe coverage only; live inference is unverified. Its workers have no Arena MCP bridge, no shell commands and no language servers or formatters (OpenCode's own would run repository code outside any sandbox, so Arena turns them off), and readiness refuses to start them when your own OpenCode configuration allows tools beyond Arena's read (and, for writers, edit) permissions, MCP tools included, or reverses Arena's `.env` refusal for reads or its outside-the-worktree deny for edits. OpenCode workers can also read other OpenCode sessions' tool output on the same machine (see [OpenCode limitations](docs/PROVIDERS.md#opencode)).
 - Gemini uses the official Google GenAI SDK with an explicitly selected API-key or Vertex AI route.
 - Local agents use loopback Ollama or OpenAI-compatible services with an explicitly selected model.
 
 Arena does not collect passwords, read or copy provider tokens, pool subscriptions,
 or bypass usage limits. Gemini CLI personal OAuth is not an Arena authentication
-route. The Claude Code and Antigravity sign-in routes are explicit user choices:
-Arena starts the official CLI, which keeps its own credentials, and the plan's
+route. The Claude Code, Antigravity and OpenCode sign-in routes are explicit user choices:
+Arena starts the official CLI, which keeps its own credentials, and the applicable
 terms are the user's to check. Readiness distinguishes interface, auth,
 advertised models and verified inference. See [provider boundaries and evidence](docs/PROVIDERS.md).
 
@@ -167,7 +168,7 @@ advertised models and verified inference. See [provider boundaries and evidence]
 The canonical portable skill is [arena-orchestrator](.agents/skills/arena-orchestrator/SKILL.md).
 `arena skill targets` lists supported project/user host locations. Installations
 come from that single embedded source and preserve modified files through backups.
-Copilot and OpenCode are skill hosts; execution adapters are not advertised for them.
+Copilot is a skill host; no execution adapter is advertised for it. OpenCode is both a skill host and an execution adapter (see [providers](docs/PROVIDERS.md)).
 
 Product contracts: [product](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [interoperability](docs/INTEROPERABILITY.md), [configuration](docs/CONFIGURATION.md),

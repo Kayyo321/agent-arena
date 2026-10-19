@@ -35,6 +35,7 @@ func TestCommandApprovalOptionValidation(t *testing.T) {
 		{Runtime{Provider: "codex", Model: "m", ReasoningEffort: "high", Options: map[string]any{"commandApproval": antigravityBlanketApproval}}, false},
 		{Runtime{Provider: "claude-code", Model: "m", ReasoningEffort: "high", Options: map[string]any{"authMethod": claudeSignInAuth, "commandApproval": antigravityBlanketApproval}}, false},
 		{Runtime{Provider: "local", Model: "m", Options: map[string]any{"backend": "ollama", "commandApproval": antigravityBlanketApproval}}, false},
+		{Runtime{Provider: "opencode", Model: "opencode/m", Options: map[string]any{"commandApproval": antigravityBlanketApproval}}, false},
 	}
 	for _, tc := range cases {
 		if err := ValidateRuntime(tc.runtime); (err == nil) != tc.ok {
@@ -51,6 +52,34 @@ func TestBlanketApprovalStillRefusedWithoutTheOption(t *testing.T) {
 	_, err := invokeAntigravity(context.Background(), in)
 	if err == nil || !strings.Contains(err.Error(), "refuses command permissions") || !strings.Contains(err.Error(), "commandApproval") {
 		t.Fatalf("commands without the option: %v", err)
+	}
+}
+
+// An OpenCode agent with run_commands is refused when the run starts, like the
+// Antigravity one without blanket approval, and not when its worker starts after
+// the other agents have spent inference. The refusal does not depend on an OS
+// command sandbox being available. Contract coverage through the fake CLI of
+// opencode_cli_test.go; nothing here runs OpenCode.
+func TestOpenCodeRunCommandsRefusedBeforeTheRunStarts(t *testing.T) {
+	p := testProject(t)
+	openCodeProbeCLI{}.install(t)
+	settings := DefaultSettings(Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", ReasoningEffort: "high"})
+	run := func(caps ...string) error {
+		w := NewWorkflow("oc", "OpenCode arena")
+		w.HeadAgent = "head"
+		scoreAgent(&w, "head", 0, "opencode", "opencode/cat-jam-free")
+		_, err := executionReadiness(context.Background(), p, Run{Workflow: w, Profiles: map[string]Profile{"head": scoreProfile("head", "coordinator", caps...)}, Settings: settings})
+		return err
+	}
+	if err := run("read"); err != nil {
+		t.Fatalf("an OpenCode agent without run_commands must start: %v", err)
+	}
+	err := run("read", "run_commands")
+	if err == nil || !strings.Contains(err.Error(), "head runs on OpenCode, which has no command sandbox in Arena") || !strings.Contains(err.Error(), "remove run_commands") {
+		t.Fatalf("run_commands on OpenCode: %v", err)
+	}
+	if strings.Contains(err.Error(), "OS command sandbox") {
+		t.Fatalf("the refusal must name OpenCode, not a missing OS sandbox: %v", err)
 	}
 }
 

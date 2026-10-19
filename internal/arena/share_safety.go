@@ -208,6 +208,10 @@ func checkShareOptions(r Runtime, path string) error {
 		"antigravity": {"commandApproval"},
 		"gemini":      {"authMethod", "generation"},
 		"local":       {"backend", "endpoint", "generation"},
+		// OpenCode's effort is the runtime's reasoningEffort, which is not an
+		// option, and openCodeRuntimeError refuses every key in options. A code
+		// that carried one would be refused on import, so none is shared.
+		"opencode": {},
 	}[r.Provider]
 	for key, value := range r.Options {
 		if !Has(allowed, key) {

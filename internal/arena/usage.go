@@ -24,11 +24,18 @@ type RunUsage struct {
 }
 
 // usageFields lists the key names providers use for each count: Codex and
-// Claude Code (camelCase and snake_case), Ollama and Gemini.
+// Claude Code (camelCase and snake_case), Ollama, Gemini and, last, the bare
+// input and output of OpenCode's step-finish tokens. A key that holds anything
+// but a number, such as an object, is not a count and is skipped.
 var usageFields = [2][]string{
-	{"inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "promptTokenCount"},
-	{"outputTokens", "output_tokens", "completionTokens", "completion_tokens", "candidatesTokenCount"},
+	{"inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "promptTokenCount", "input"},
+	{"outputTokens", "output_tokens", "completionTokens", "completion_tokens", "candidatesTokenCount", "output"},
 }
+
+// usageBareFields are the last entries of usageFields: the bare input and output
+// of OpenCode's step-finish tokens. When one of them supplies the count,
+// usageBareExtras adds the counts OpenCode reports beside it.
+var usageBareFields = [2]string{"input", "output"}
 
 // Some providers report a category beside, not inside, the headline count, so
 // it adds to it; others report a subset of the headline count, which must not
@@ -39,12 +46,27 @@ var usageFields = [2][]string{
 //	additive to input:  Claude cache_read_input_tokens, cache_creation_input_tokens
 //	                    (input_tokens excludes both); Gemini toolUsePromptTokenCount
 //	                    (tool results fed back, not in promptTokenCount)
-//	additive to output: Gemini thoughtsTokenCount (not in candidatesTokenCount)
+//	                    OpenCode tokens.cache.read and tokens.cache.write (the bare
+//	                    input excludes both)
+//	additive to output: Gemini thoughtsTokenCount (not in candidatesTokenCount);
+//	                    OpenCode tokens.reasoning (the bare output excludes it)
 //	subsets, not added: Codex cachedInputTokens, cacheWriteInputTokens and
 //	                    reasoningOutputTokens; Gemini cachedContentTokenCount
 //	                    (promptTokenCount includes the cached content); Claude
 //	                    output_tokens_details.thinking_tokens and the cache_creation
 //	                    ephemeral breakdown; every *TokensDetails modality list
+//
+// OpenCode's semantics come from the opencode 1.19.3 bundle, not from a live run
+// (none exists yet; the sandbox the adapter was written in had no inference
+// access). The Session namespace exports getUsage, and the session processor
+// writes its result as the step-finish part's tokens. getUsage takes the
+// provider's totals, inputTokens (Y) and outputTokens (W), with reasoningTokens (H),
+// cacheReadInputTokens (Z) and cacheWriteInputTokens (J), and returns
+// input = max(0, Y-Z-J), output = max(0, W-H), reasoning = H and
+// cache = {read: Z, write: J}. The bare input and output therefore leave out the
+// cache and the reasoning, and adding them back (usageBareExtras) restores the
+// provider's own totals, Y and W. This is read from the formula; no recorded
+// step-finish from a live run has been compared with it.
 //
 // The journal keeps each provider's whole usage map, so the categories a price
 // needs stay recoverable from the usage.reported events; the roll-up only sums.
@@ -72,6 +94,9 @@ func usageTokens(usage map[string]any) (in, out int64, found [2]bool) {
 		for _, key := range keys {
 			if n, ok := usageCount(usage[key]); ok {
 				found[i] = true
+				if key == usageBareFields[i] {
+					n += usageBareExtras(i, usage)
+				}
 				if i == 0 {
 					in = n
 				} else {
@@ -94,6 +119,30 @@ func usageTokens(usage map[string]any) (in, out int64, found [2]bool) {
 		}
 	}
 	return in, out, found
+}
+
+// usageBareExtras are the counts an OpenCode step-finish reports beside its bare
+// input (i 0) or output (i 1) that the bare count leaves out: tokens.cache.read and
+// tokens.cache.write for input, tokens.reasoning for output (see the comment on
+// additiveInputFields). A value that is not a number adds nothing. They are read
+// only when the bare key supplied the count, so another provider's named count is
+// never topped up, and they do not make a usage map count as reported by
+// themselves: found is set by the headline key alone.
+func usageBareExtras(i int, usage map[string]any) int64 {
+	var extra int64
+	if i == 0 {
+		cache, _ := usage["cache"].(map[string]any)
+		for _, key := range []string{"read", "write"} {
+			if n, ok := usageCount(cache[key]); ok {
+				extra += n
+			}
+		}
+		return extra
+	}
+	if n, ok := usageCount(usage["reasoning"]); ok {
+		extra = n
+	}
+	return extra
 }
 
 func usageCount(v any) (int64, bool) {

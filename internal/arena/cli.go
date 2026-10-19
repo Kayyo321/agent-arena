@@ -241,7 +241,7 @@ func (cli *CLI) runtimeChoice(ctx context.Context, p *Project, r Runtime, o Opti
 	}
 	if r.Provider == "" {
 		fmt.Fprintln(cli.Out, "Provider:")
-		r.Provider, e = cli.choose("Provider", []string{"codex", "claude-code", "antigravity", "gemini", "local"}, []string{"Codex CLI, its own sign-in", "Claude Code CLI, its own sign-in or API key/cloud auth", "Antigravity CLI (agy), its own sign-in", "Google GenAI SDK, API key or Vertex AI", "Ollama or OpenAI-compatible server on this machine"}, true)
+		r.Provider, e = cli.choose("Provider", []string{"codex", "claude-code", "antigravity", "gemini", "local", "opencode"}, []string{"Codex CLI, its own sign-in", "Claude Code CLI, its own sign-in or API key/cloud auth", "Antigravity CLI (agy), its own sign-in", "Google GenAI SDK, API key or Vertex AI", "Ollama or OpenAI-compatible server on this machine", "OpenCode CLI, its own sign-in; no shell commands"}, true)
 		if e != nil {
 			return r, e
 		}

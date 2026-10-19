@@ -158,3 +158,43 @@ func TestDoctorTmuxVersionStates(t *testing.T) {
 		}
 	}
 }
+
+func checkDetail(r DoctorReport, id string) string {
+	for _, c := range r.Checks {
+		if c.ID == id {
+			return c.Detail
+		}
+	}
+	return ""
+}
+
+// Every provider CLI gets a provider-<id> check that only warns, so a machine
+// without OpenCode still passes; the version is compared with the manifest.
+func TestDoctorChecksOpenCode(t *testing.T) {
+	r := Doctor(context.Background(), fakeHost("linux", "/p", nil, "", goodGit))
+	if got := status(r, "provider-opencode"); got != "warn" || !r.OK || !strings.Contains(checkDetail(r, "provider-opencode"), "opencode not found") {
+		t.Fatalf("missing opencode: %s %q ok=%v", got, checkDetail(r, "provider-opencode"), r.OK)
+	}
+	r = Doctor(context.Background(), fakeHost("linux", "/p", nil, "", with(goodGit, map[string]string{"opencode --version": openCodeVersion})))
+	if got := status(r, "provider-opencode"); got != "ok" || !strings.Contains(checkDetail(r, "provider-opencode"), "matches a version inspected") {
+		t.Fatalf("pinned opencode: %s %q", got, checkDetail(r, "provider-opencode"))
+	}
+	// A newer release is drift, reported but never a failure.
+	r = Doctor(context.Background(), fakeHost("linux", "/p", nil, "", with(goodGit, map[string]string{"opencode --version": "1.20.0"})))
+	if got := status(r, "provider-opencode"); got != "ok" || !r.OK || !strings.Contains(checkDetail(r, "provider-opencode"), "version drift") {
+		t.Fatalf("drifted opencode: %s %q ok=%v", got, checkDetail(r, "provider-opencode"), r.OK)
+	}
+	// The binary is there but cannot say what it is.
+	host := fakeHost("linux", "/p", nil, "", with(goodGit, map[string]string{"opencode --version": "x"}))
+	run := host.Output
+	host.Output = func(ctx context.Context, dir, name string, args ...string) (string, error) {
+		if name == "opencode" {
+			return "", fmt.Errorf("probe failed")
+		}
+		return run(ctx, dir, name, args...)
+	}
+	r = Doctor(context.Background(), host)
+	if got := status(r, "provider-opencode"); got != "warn" || !strings.Contains(checkDetail(r, "provider-opencode"), "version probe failed") {
+		t.Fatalf("failed version probe: %s %q", got, checkDetail(r, "provider-opencode"))
+	}
+}

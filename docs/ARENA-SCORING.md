@@ -2,7 +2,7 @@
 
 Arena grades every arena against this score sheet (rubric v3). The score is computed by Arena, not by a model, from the workflow and its agent profiles only. Project settings, provider readiness and the background shader do not change it, so the person who shares an arena and the person who pastes it see the same grade.
 
-Capabilities count only where the agent's provider adapter can exercise them. These adapter limits are fixed per provider and runtime options in Arena, not probed, so they keep the score a pure function of the arena. Today one applies: Antigravity's headless mode cannot execute commands, so `run_commands` on an Antigravity agent earns nothing (it does not satisfy V5, for example) and costs C6, unless that agent's runtime sets `options.commandApproval: "sandboxed-blanket"` (see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)). With the option the grant counts like any other provider's. Every arena that was valid before the option existed scores the same, so the rubric version is unchanged. `arena workflow validate` and `arena workflow create` print a warning for each such grant, because that agent fails when it starts.
+Capabilities count only where the agent's provider adapter can exercise them. These adapter limits are fixed per provider and runtime options in Arena, not probed, so they keep the score a pure function of the arena. Two apply today. Antigravity's headless mode cannot execute commands, so `run_commands` on an Antigravity agent earns nothing (it does not satisfy V5, for example) and costs C6, unless that agent's runtime sets `options.commandApproval: "sandboxed-blanket"` (see [Antigravity command approval](CONFIGURATION.md#antigravity-command-approval)). With the option the grant counts like any other provider's. OpenCode's adapter has no command support, so `run_commands` on an OpenCode agent earns nothing and costs C6 in the same way, and no runtime option changes that. Every arena that was valid before the option existed scores the same, and an arena with no OpenCode agent scores as before, so the rubric version is unchanged. `arena workflow validate` and `arena workflow create` print a warning for each such grant, because that agent fails when it starts.
 
 Rubric v3 counts fan-out nodes at their cap: a fan-out stands for its planner plus `maxChildren` worker instances wherever the sheet counts agents. Arenas without a fan-out score exactly as they did under v2.
 
@@ -87,7 +87,7 @@ The five categories add up to 100 points. Each finding deducts points from its c
 | C3 | A generic agent ID or name such as `agent1`, `worker-2` or `bot` | −1 each | minor |
 | C4 | The head agent has role `review`, so the run starts with nothing to review | −3 | moderate |
 | C5 | The arena has no `description` | −1 | minor |
-| C6 | A capability the agent's provider adapter cannot exercise, such as `run_commands` on Antigravity without `commandApproval: "sandboxed-blanket"` | −2 each | minor |
+| C6 | A capability the agent's provider adapter cannot exercise, such as `run_commands` on Antigravity without `commandApproval: "sandboxed-blanket"` or `run_commands` on OpenCode | −2 each | minor |
 
 ### R — Resilience & cost (10)
 

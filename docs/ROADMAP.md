@@ -105,7 +105,7 @@ Open findings from the integration-wave review that are not closed. Each says wh
 
 ## M6 — Skill distribution and additional adapters
 
-**Status: skill/compatibility implementation complete; adapter portability exit met for Codex and Antigravity with the M3 live run; other adapters remain fixture-covered.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. No unsupported execution adapter is advertised; audit export/import and expanded team policies remain deferred considerations.
+**Status: skill/compatibility implementation complete; adapter portability exit met for Codex and Antigravity with the M3 live run; OpenCode 1.19.3 has an execution adapter with contract and probe coverage only, and its live inference is unverified; other adapters remain fixture-covered.** Project/user targets include Codex, Claude, Gemini, Copilot and OpenCode, using one embedded skill source with modified-file protection. A versioned compatibility manifest reports drift. Copilot stays skill-only: no execution adapter is advertised for it. Audit export/import and expanded team policies remain deferred considerations.
 
 - Extend the bootstrap/skill installer to more supported project/user skill locations beyond the initial Codex, Claude Code, and Gemini CLI targets.
 - Add adapter compatibility manifests and version drift reporting.

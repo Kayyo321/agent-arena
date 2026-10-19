@@ -221,6 +221,9 @@ func executionReadiness(ctx context.Context, p *Project, r Run) ([]Readiness, er
 			if a.Runtime.Provider == "antigravity" && !antigravityBlanket(a.Runtime) {
 				return readiness, fmt.Errorf("%s runs on Antigravity, whose headless mode cannot run commands without blanket approval; remove run_commands, opt in with runtime.options.commandApproval %q, or choose another provider", a.Id, antigravityBlanketApproval)
 			}
+			if a.Runtime.Provider == "opencode" {
+				return readiness, fmt.Errorf("%s runs on OpenCode, which has no command sandbox in Arena; remove run_commands or choose another provider", a.Id)
+			}
 			if a.Runtime.Provider != "codex" && !claudeSignIn(a.Runtime) && !sandboxAvailable() {
 				return readiness, fmt.Errorf("%s needs a supported OS command sandbox before launch", a.Id)
 			}

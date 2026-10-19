@@ -301,3 +301,43 @@ func TestScoreIgnoresCapabilitiesTheAdapterCannotExercise(t *testing.T) {
 		t.Fatalf("capable adapter: %v", ids)
 	}
 }
+
+// OpenCode workers have no command sandbox in Arena, so invokeOpenCode refuses
+// run_commands. Granting it to an OpenCode reviewer must not satisfy V5 or lift
+// the grade, and no runtime option opts out of the limit.
+func TestScoreIgnoresRunCommandsOnOpenCode(t *testing.T) {
+	openCodeReviewer := func(options map[string]any, caps ...string) (Workflow, map[string]Profile) {
+		w, profiles := idealArena()
+		w.Agents[2].Runtime = Runtime{Provider: "opencode", Model: "opencode/big-pickle", ReasoningEffort: "high", Options: options}
+		profiles["reviewer"] = scoreProfile("reviewer", "review", caps...)
+		return w, profiles
+	}
+	w, profiles := openCodeReviewer(nil, "read", "review")
+	without := scored(t, w, profiles)
+	if !Has(findingIDs(without), "V5") || len(WorkflowWarnings(w, profiles)) != 0 {
+		t.Fatalf("reviewer without run_commands: %v %v", findingIDs(without), WorkflowWarnings(w, profiles))
+	}
+	w, profiles = openCodeReviewer(nil, "read", "review", "run_commands")
+	with := scored(t, w, profiles)
+	ids := findingIDs(with)
+	if !Has(ids, "V5") || !Has(ids, "C6") || with.Points >= without.Points || gradeRank(with.Grade) < gradeRank(without.Grade) {
+		t.Fatalf("unusable run_commands raised the score: %s %d %v (was %s %d)", with.Grade, with.Points, ids, without.Grade, without.Points)
+	}
+	warnings := WorkflowWarnings(w, profiles)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "reviewer has run_commands") || !strings.Contains(warnings[0], "opencode has no command sandbox") {
+		t.Fatalf("warnings: %v", warnings)
+	}
+	// Antigravity's opt-in means nothing here (and ValidateRuntime refuses it).
+	w, profiles = openCodeReviewer(map[string]any{"commandApproval": antigravityBlanketApproval}, "read", "review", "run_commands")
+	if reason, limited := adapterLimit(w.Agents[2].Runtime, "run_commands"); !limited || reason == "" {
+		t.Fatalf("an option lifted the OpenCode limit: %q %v", reason, limited)
+	}
+	// Other capabilities are not limited, and other adapters still run commands.
+	if _, limited := adapterLimit(w.Agents[2].Runtime, "read"); limited {
+		t.Fatal("read is not an OpenCode limit")
+	}
+	w.Agents[2].Runtime = Runtime{Provider: "gemini", Model: "gemini-test", Options: map[string]any{"authMethod": "vertex-ai"}}
+	if ids := findingIDs(scored(t, w, profiles)); Has(ids, "V5") || Has(ids, "C6") {
+		t.Fatalf("capable adapter: %v", ids)
+	}
+}
