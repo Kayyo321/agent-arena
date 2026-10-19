@@ -41,6 +41,8 @@ func (Providers) Invoke(ctx context.Context, in Invocation) (map[string]any, err
 		return invokeClaude(ctx, in)
 	case "antigravity":
 		return invokeAntigravity(ctx, in)
+	case "opencode":
+		return invokeOpenCode(ctx, in)
 	case "gemini":
 		return invokeGemini(ctx, in)
 	case "local":

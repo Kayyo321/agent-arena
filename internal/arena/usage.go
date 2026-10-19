@@ -24,10 +24,12 @@ type RunUsage struct {
 }
 
 // usageFields lists the key names providers use for each count: Codex and
-// Claude Code (camelCase and snake_case), Ollama and Gemini.
+// Claude Code (camelCase and snake_case), Ollama, Gemini and, last, the bare
+// input and output of OpenCode's step-finish tokens. A key that holds anything
+// but a number, such as an object, is not a count and is skipped.
 var usageFields = [2][]string{
-	{"inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "promptTokenCount"},
-	{"outputTokens", "output_tokens", "completionTokens", "completion_tokens", "candidatesTokenCount"},
+	{"inputTokens", "input_tokens", "promptTokens", "prompt_tokens", "promptTokenCount", "input"},
+	{"outputTokens", "output_tokens", "completionTokens", "completion_tokens", "candidatesTokenCount", "output"},
 }
 
 // Some providers report a category beside, not inside, the headline count, so
@@ -45,6 +47,11 @@ var usageFields = [2][]string{
 //	                    (promptTokenCount includes the cached content); Claude
 //	                    output_tokens_details.thinking_tokens and the cache_creation
 //	                    ephemeral breakdown; every *TokensDetails modality list
+//	not added, unverified: OpenCode reasoning and cache.read / cache.write beside
+//	                    input and output in a step-finish. Their field names come
+//	                    from its bundled source and no live run has shown whether
+//	                    its input excludes the cache, so only input and output
+//	                    are summed and the rest stays in the journal's map
 //
 // The journal keeps each provider's whole usage map, so the categories a price
 // needs stay recoverable from the usage.reported events; the roll-up only sums.

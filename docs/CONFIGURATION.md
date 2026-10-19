@@ -50,7 +50,7 @@ Other useful settings include:
 - `limits.maxConcurrentAgents`, `maxTeamRounds`, `maxOnCallInvocationsPerRun`, `maxCoworkerAdditionsPerRun`, and `maxAgentRunMinutes` bound parallelism, deliberation, escalations, config growth, and execution time.
 - `limits.maxFanOutChildrenPerRun` (1-64, default 8) caps the fan-out children one run may start, across every fan-out node and loop pass. New settings write 8; older settings files that omit it get 8. Validation rejects a fan-out whose `maxChildren` exceeds it, and at run time a fan-out may start only what the run has left (see [Fan-out nodes](#fan-out-nodes)).
 - `limits.maxRunTokens` (1 to 1000000000000) and `limits.maxRunMinutes` (1-10080) are optional run budgets and are off when absent, so existing `settings.arena.json` files stay valid. Tokens are the input plus output tokens providers reported for the run (see `/usage`); a provider that reports none adds nothing. Minutes count the time the run spent working, not time paused or waiting for you.
-  - **How tokens are counted.** Every input token once. Claude Code's `input_tokens` excludes its cache reads and cache creation, so both are added to input. Gemini's prompt count already includes cached content, so that is not added again, but its tool-use prompt tokens (added to input) and thinking tokens (added to output) are separate counts. Codex's input count includes cached input and its output count includes reasoning, so neither is added again; its `cacheWriteInputTokens` is assumed to be inside the input count, which no live run has confirmed. A provider that streams running totals (Codex, Gemini) counts once, at its highest. Local models, Gemini and Claude through an API key make one model call per tool turn, each re-sending the conversation, so their calls add up. Arena keeps two numbers, input and output, and computes no price. Cache reads, cache writes and thinking tokens are priced differently, so each `usage.reported` event keeps the provider's whole usage map; a price has to be worked out from those, not from the totals.
+  - **How tokens are counted.** Every input token once. Claude Code's `input_tokens` excludes its cache reads and cache creation, so both are added to input. Gemini's prompt count already includes cached content, so that is not added again, but its tool-use prompt tokens (added to input) and thinking tokens (added to output) are separate counts. Codex's input count includes cached input and its output count includes reasoning, so neither is added again; its `cacheWriteInputTokens` is assumed to be inside the input count, which no live run has confirmed. OpenCode's `step-finish` events report `input` and `output` counts; Arena uses those two, does not add its cache or reasoning counts, and their field names are not verified against a live run. A provider that streams running totals (Codex, Gemini) counts once, at its highest. Local models, Gemini and Claude through an API key make one model call per tool turn, each re-sending the conversation, so their calls add up. Arena keeps two numbers, input and output, and computes no price. Cache reads, cache writes and thinking tokens are priced differently, so each `usage.reported` event keeps the provider's whole usage map; a price has to be worked out from those, not from the totals.
   - **Where it is checked.** Before the scheduler launches a node, before every agent invocation (each fan-out child, planner and team member, since one node can start many), and before an approved retry starts the provider again. Callers that arrive together share one question.
   - **What happens.** A reached budget does not kill the run: Arena journals `budget.exceeded` (`budget`, `limit`, `used`), pauses the run and raises a `budget` decision with the choices `continue` and `stop`. `continue` journals `budget.continued`, lifts that budget, and only that one, for the rest of the run, and resumes; if the other budget is also reached it is asked about next, before anything launches. `stop` leaves the run paused and every waiting launch held; resuming it later asks again, once. A supervisor that stopped while the question was open leaves it pending, and the resumed run waits on that question instead of asking again. The orchestrator cannot answer this decision.
   - **On-call agents** run beside a paused or failed run and cannot wait for an answer, so while a budget is reached they are skipped (`on-call.skipped` with the `budget`) and a retry of one is refused.
@@ -150,6 +150,18 @@ Example Gemini runtime fragment (the model ID must come from the selected adapte
   "options": {
     "authMethod": "vertex-ai"
   }
+}
+```
+
+For OpenCode, use `provider: "opencode"` with a `provider/model` ID that `opencode models --verbose` reports. Effort is optional. When set, it must be a variant that the selected model lists in that catalog; Arena passes it as `opencode run --variant` and checks it before launch. OpenCode runtimes take no `options`: effort is the runtime's `reasoningEffort` field, an opaque variant name, and every key in `options` (`authMethod`, `commandApproval` and `effort` included) is refused. Sign-in is OpenCode's own `opencode auth login`, a user choice under the user's own terms and never a default; Arena never reads OpenCode's credential file. An agent with `run_commands` fails when it starts, and OpenCode workers have no Arena MCP bridge. Readiness resolves OpenCode's build-agent permissions with `opencode debug agent build` and reports `unsupported` when your own OpenCode configuration allows a tool beyond the read tools (and `edit` for writers), MCP tools included. External OpenCode plugins are disabled for workers, readiness probes and the model catalog alike, so a model, variant or tool that only a plugin adds is not available to Arena. See [OpenCode](PROVIDERS.md#opencode).
+
+Example OpenCode runtime fragment (the model ID must come from `opencode models --verbose` or the user):
+
+```json
+{
+  "provider": "opencode",
+  "model": "<provider/model-reported-by-opencode-models>",
+  "reasoningEffort": "<variant-from-the-catalog, optional>"
 }
 ```
 
@@ -311,7 +323,7 @@ Runtime options must be ones the adapter documents, with plain values:
 - Gemini `authMethod` and generation settings;
 - local `backend`, a loopback `endpoint` and generation settings;
 - Antigravity `commandApproval` (the import preview names every agent that uses it);
-- no options for Claude Code.
+- no options for Claude Code or OpenCode (OpenCode's effort travels as `reasoningEffort`, not as an option).
 
 Values are never redacted inside a code: the receiver gets exactly what the
 author saw, or no code. Import runs the same checks, so a code carrying any of

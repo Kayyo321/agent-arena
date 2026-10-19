@@ -143,9 +143,12 @@ func has(p Profile, capability string) bool { return Has(p.Capabilities, capabil
 // reason. They are fixed per adapter and runtime options, unlike readiness, so
 // scores stay a pure function of the arena. Antigravity's headless mode has no
 // per-command approval, so invokeAntigravity refuses run_commands unless the
-// runtime opts into sandboxed blanket approval (antigravityBlanket).
+// runtime opts into sandboxed blanket approval (antigravityBlanket). OpenCode
+// has no command sandbox in Arena and no option to opt in, so invokeOpenCode
+// always refuses run_commands.
 var adapterLimits = map[string]map[string]string{
 	"antigravity": {"run_commands": "headless runs cannot execute commands without commandApproval \"" + antigravityBlanketApproval + "\""},
+	"opencode":    {"run_commands": "has no command sandbox in Arena, so it cannot run commands"},
 }
 
 // adapterLimit is the reason r's adapter cannot exercise capability, if any.

@@ -28,6 +28,9 @@ import (
 //     GenerateContentResponseUsageMetadata, whose field documentation defines
 //     prompt, cached, tool-use and thoughts counts.
 //   - Local models: Ollama's /api/chat final frame (prompt_eval_count, eval_count).
+//   - OpenCode: the step-finish part of `opencode run --format json`, read from
+//     the 1.19.3 binary's bundled source: tokens {input, output, reasoning,
+//     cache: {read, write}}. No live run has confirmed these field names.
 //
 // The values are made up; a live capture of each provider's usage is still owed
 // (see docs/VALIDATION.md).
@@ -243,4 +246,45 @@ func TestUsageJournalKeepsEveryCategoryTheProviderSent(t *testing.T) {
 	}
 	all, _ := p.Events(r.ID)
 	requireUsage(t, SumUsage(all), 5+27565+308401, 5865)
+}
+
+// OpenCode ends every model call of a run with a step-finish whose tokens count
+// that call alone. Each step reports under its own turn key, so the steps add up
+// instead of the largest hiding the rest; input and output are summed, and the
+// reasoning and cache counts stay in the report without being added again.
+func TestUsageOpenCodeStepsAddUp(t *testing.T) {
+	openCodeFake(t, `cat <<'EOF'
+{"type":"step_start","timestamp":1,"sessionID":"ses_1","part":{"type":"step-start"}}
+{"type":"step_finish","timestamp":2,"sessionID":"ses_1","part":{"type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":120,"output":30,"reasoning":10,"cache":{"read":9000,"write":0}}}}
+{"type":"step_finish","timestamp":3,"sessionID":"ses_1","part":{"type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":40,"output":20,"reasoning":0,"cache":{"read":9500,"write":300}}}}
+{"type":"text","timestamp":4,"sessionID":"ses_1","part":{"type":"text","text":"{\"summary\":\"fixture\"}","time":{"start":3,"end":4}}}
+{"type":"step_finish","timestamp":5,"sessionID":"ses_1","part":{"type":"step-finish","reason":"stop","cost":0,"tokens":{"total":9990,"input":5,"output":7,"reasoning":0,"cache":{"read":9900,"write":0}}}}
+EOF
+`)
+	var r reported
+	in := openCodeInvocation(t)
+	in.Usage = r.usage
+	if out, err := invokeOpenCode(context.Background(), in); err != nil || out["summary"] != "fixture" {
+		t.Fatalf("opencode run: %v %v", out, err)
+	}
+	if len(r.maps) != 3 {
+		t.Fatalf("%d usage reports, want one per step", len(r.maps))
+	}
+	requireUsage(t, r.total("builder"), 120+40+5, 30+20+7)
+	for i, m := range r.maps {
+		if _, ok := m["reasoning"]; !ok {
+			t.Fatalf("report %d dropped reasoning: %v", i, m)
+		}
+		if cache, ok := m["cache"].(map[string]any); !ok || cache["read"] == nil {
+			t.Fatalf("report %d dropped the cache counts: %v", i, m)
+		}
+	}
+	// Cache and reasoning counts alone are not a usage count: unreported, not zero.
+	if got := (&reported{maps: []map[string]any{{"cache": map[string]any{"read": 5}, "reasoning": 3, turnKey: 1}}}).total("builder"); got.Reported {
+		t.Fatalf("cache and reasoning alone are not a usage count: %+v", got)
+	}
+	// The bare keys come last: another provider's named counts win.
+	if in, out, _ := usageTokens(map[string]any{"input_tokens": 7, "input": 99, "output_tokens": 3, "output": 98}); in != 7 || out != 3 {
+		t.Fatalf("named keys must win over the bare ones: %d %d", in, out)
+	}
 }

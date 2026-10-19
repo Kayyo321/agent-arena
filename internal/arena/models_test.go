@@ -3,6 +3,7 @@ package arena
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -118,5 +119,73 @@ func TestStallBannerClearsWhenRunEnds(t *testing.T) {
 	m.State.Status = "running"
 	if lines := m.attentionLines(100, false); len(lines) == 0 {
 		t.Fatal("running run hides the stall note")
+	}
+}
+
+// DiscoverModels reads OpenCode's catalog from `opencode models --verbose`: exact
+// provider/model IDs with the variants each model accepts as efforts. Contract
+// coverage on a fake CLI that prints the recorded fixture.
+func TestDiscoverModelsListsTheOpenCodeCatalog(t *testing.T) {
+	fixture, err := filepath.Abs(openCodeFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _ := openCodeFake(t, "cat '"+fixture+"'\n")
+	models, err := DiscoverModels(context.Background(), t.TempDir(), Runtime{Provider: "opencode"})
+	if err != nil || len(models) != 6 {
+		t.Fatalf("catalog: %d models, %v", len(models), err)
+	}
+	if models[0].ID != "opencode/big-pickle" || len(models[0].Efforts) != 0 || strings.Join(models[1].Efforts, ",") != "low,medium,high,xhigh,max" {
+		t.Fatalf("catalog entries: %+v", models[:2])
+	}
+	if args := recorded(t, record, "args"); args != "models\n--verbose\n" {
+		t.Fatalf("argv: %q", args)
+	}
+	openCodeFake(t, "exit 1\n")
+	if _, err := DiscoverModels(context.Background(), t.TempDir(), Runtime{Provider: "opencode"}); err == nil || !strings.Contains(err.Error(), "could not list models") {
+		t.Fatalf("failed listing: %v", err)
+	}
+	if _, err := DiscoverModels(context.Background(), t.TempDir(), Runtime{Provider: "opencode-cloud"}); err == nil || !strings.Contains(err.Error(), "unsupported provider") {
+		t.Fatalf("unknown providers must stay refused: %v", err)
+	}
+}
+
+// The provider menu lists OpenCode after the providers that already had numbers,
+// so a script that answers "4" or "5" still gets Gemini or a local model. OpenCode
+// asks for no effort: it is optional, and the catalog check at readiness covers it.
+func TestRuntimeChoiceOffersOpenCodeWithoutRenumberingOthers(t *testing.T) {
+	fixture, err := filepath.Abs(openCodeFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openCodeFake(t, "cat '"+fixture+"'\n")
+	var out bytes.Buffer
+	// "6" picks the provider; the catalog then lists models with their efforts,
+	// and typing an exact ID finishes the choice. Nothing else is read.
+	cli := NewCLI(strings.NewReader("6\nopencode/cat-jam-free\n"), &out, &out)
+	r, err := cli.runtimeChoice(context.Background(), &Project{t.TempDir()}, Runtime{}, Options{})
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if r.Provider != "opencode" || r.Model != "opencode/cat-jam-free" || r.ReasoningEffort != "" || len(r.Options) != 0 {
+		t.Fatalf("runtime: %+v", r)
+	}
+	for _, want := range []string{" 4) gemini", " 5) local", " 6) opencode", "efforts: low, medium, high, xhigh, max"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("menu lacks %q:\n%s", want, out.String())
+		}
+	}
+	// Flags skip the menu, and an effort that is not given stays unset.
+	cli = NewCLI(strings.NewReader(""), &out, &out)
+	r, err = cli.runtimeChoice(context.Background(), &Project{t.TempDir()}, Runtime{}, Options{"provider": {"opencode"}, "model": {"opencode/big-pickle"}})
+	if err != nil || r.Provider != "opencode" || r.ReasoningEffort != "" {
+		t.Fatalf("flags: %+v %v", r, err)
+	}
+	r, err = cli.runtimeChoice(context.Background(), &Project{t.TempDir()}, Runtime{}, Options{"provider": {"opencode"}, "model": {"opencode/cat-jam-free"}, "effort": {"high"}})
+	if err != nil || r.ReasoningEffort != "high" {
+		t.Fatalf("flags with effort: %+v %v", r, err)
+	}
+	if _, err = cli.runtimeChoice(context.Background(), &Project{t.TempDir()}, Runtime{}, Options{"provider": {"opencode"}, "model": {"big-pickle"}}); err == nil {
+		t.Fatal("a model without a provider prefix was accepted")
 	}
 }

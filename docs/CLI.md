@@ -46,7 +46,7 @@ arena setup --project ~/my-new-project
 Setup can create that directory and initialize Git. It asks for the permanent
 orchestrator's provider, exact model and supported effort before writing anything,
 then confirms initialization. The model prompt lists the exact IDs the provider
-reports (Codex app-server catalog, Gemini SDK, local `/api/tags` or `/models`) with
+reports (Codex app-server catalog, Gemini SDK, local `/api/tags` or `/models`, OpenCode `opencode models --verbose`) with
 their supported efforts; enter a number or type an exact ID. Claude Code exposes
 no catalog, so its model is typed. A listed model is not proof of inference access. It installs the skill and launches the selected
 default orchestrator: describe what you want to build and answer its questions
@@ -82,7 +82,8 @@ Git commit, and refuses conflicting runtime flags on an already initialized proj
 
 Run `arena init` inside a Git repository. Select the provider, exact model ID and
 supported effort explicitly. API/local providers also require the named auth route
-or backend/endpoint. Settings select the permanent project control agent, not a
+or backend/endpoint. OpenCode's effort is optional; if given, it must be a variant that the
+catalog lists for the model. Settings select the permanent project control agent, not a
 default for workers. Init installs its skill and starts Arena's embedded setup
 conversation. `arena bootstrap` starts another setup conversation.
 
@@ -120,7 +121,7 @@ needs. The score sheet is [docs/ARENA-SCORING.md](ARENA-SCORING.md).
 
 `workflow validate` and `workflow create` also print a `warning:` line for each
 capability an agent's provider adapter cannot exercise, such as `run_commands` on
-Antigravity, whose headless mode cannot execute commands. Such an agent fails when it
+Antigravity, whose headless mode cannot execute commands, or on OpenCode, which this adapter cannot run. Such an agent fails when it
 starts, and the score gives the grant no credit. `--command-approval sandboxed-blanket`
 on an Antigravity runtime opts it into blanket command approval inside Arena's command
 fence (Linux only); `workflow create` then names each agent that uses it before asking
@@ -164,7 +165,7 @@ environment values (it only notices that `WSL_DISTRO_NAME` is set). Each line is
 | --- | --- | --- |
 | `platform` | Linux or macOS | any other OS (Windows uses WSL2) |
 | `git`, `git-repo` | Git version; the project is a work tree with a commit; uncommitted path count | Git is missing, the directory is not a repository, or there is no commit |
-| `provider-codex`, `provider-claude-code`, `provider-antigravity` | CLI on PATH, its version, and drift from `providers/compatibility.json` | never (warns: needed only by arenas that use it; sign-in is `arena status`) |
+| `provider-codex`, `provider-claude-code`, `provider-antigravity`, `provider-opencode` | CLI on PATH, its version, and drift from `providers/compatibility.json` | never (warns: needed only by arenas that use it; sign-in is `arena status`) |
 | `bubblewrap` (Linux) | `bwrap` 0.11 or newer, needed for the Antigravity command fence | never (warns) |
 | `sandbox-exec` (macOS) | present for sandboxed commands | never (warns) |
 | `wsl`, `wsl-filesystem` | WSL2 detected from `WSL_DISTRO_NAME` or `/proc/version`; warns when the project is under `/mnt/` (a Windows drive) | never (warns) |

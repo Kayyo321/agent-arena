@@ -424,3 +424,16 @@ func TestLiveLocalBackendReadOnlyWorkflow(t *testing.T) {
 	liveReadOnlyWorkflow(t, runtime, 5*time.Minute, " Use Arena's read_file tool to read it.")
 	t.Log("REAL LOCAL BACKEND INFERENCE VERIFIED", sel[0], sel[1])
 }
+
+// Opt-in: OpenCode through its own stored sign-in (`opencode auth login`), the
+// explicit-choice route. ARENA_LIVE_OPENCODE_MODEL is a provider/model ID from
+// `opencode models --verbose`; ARENA_LIVE_OPENCODE_EFFORT is an optional variant
+// that the catalog lists for that model. OpenCode's credential file is never read
+// here, and Arena's readiness gate refuses a run with no stored sign-in, because
+// environment variables alone cannot be verified without running inference.
+func TestLiveOpenCode(t *testing.T) {
+	sel := liveEnv(t, "ARENA_LIVE_OPENCODE_MODEL")
+	runtime := Runtime{Provider: "opencode", Model: sel[0], ReasoningEffort: os.Getenv("ARENA_LIVE_OPENCODE_EFFORT")}
+	liveReadOnlyWorkflow(t, runtime, 5*time.Minute, "")
+	t.Log("REAL OPENCODE INFERENCE VERIFIED", sel[0], runtime.ReasoningEffort)
+}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -367,6 +368,14 @@ func TestExportRefusesSensitiveFields(t *testing.T) {
 		{"unknown option", "127.0.0.1:8080", "runtime.options.proxy", "does not document", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			w.Agents[0].Runtime.Options = map[string]any{"proxy": "http://127.0.0.1:8080"}
 		}},
+		// OpenCode's effort is reasoningEffort; its runtime accepts no options at
+		// all, so a code carrying one would be refused on import.
+		{"opencode effort option", "zz-effort-value", "runtime.options.effort", "does not document", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Agents[0].Runtime = Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", ReasoningEffort: "xhigh", Options: map[string]any{"effort": "zz-effort-value"}}
+		}},
+		{"opencode commandApproval", "sandboxed-blanket", "runtime.options.commandApproval", "does not document", func(w *Workflow, p map[string]Profile, s *ShareShader) {
+			w.Agents[0].Runtime = Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", Options: map[string]any{"commandApproval": "sandboxed-blanket"}}
+		}},
 		{"codex config", "danger-full-access", "options.config.sandbox_mode", "not documented", func(w *Workflow, p map[string]Profile, s *ShareShader) {
 			w.Agents[0].Runtime.Options = map[string]any{"config": map[string]any{"sandbox_mode": "danger-full-access"}}
 		}},
@@ -400,6 +409,18 @@ func TestExportRefusesSensitiveFields(t *testing.T) {
 	}
 	if _, err := (&Project{"../../examples/project"}).ExportArena("code-review"); err != nil {
 		t.Fatalf("example arena: %v", err)
+	}
+	// An OpenCode agent shares with its model and effort and no options, and the
+	// receiver's validation accepts the code.
+	w, profiles = idealArena()
+	w.Agents[0].Runtime = Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", ReasoningEffort: "xhigh"}
+	code, err := EncodeShare(ShareBundle{Format: shareFormat, Kind: "arena", Workflow: &w, Profiles: profiles, Shader: &ShareShader{shader.DefaultSource, "."}}, "/srv/projects/acme")
+	if err != nil {
+		t.Fatalf("OpenCode agent: %v", err)
+	}
+	decoded, err := DecodeShare(code)
+	if err != nil || !reflect.DeepEqual(decoded.Workflow.Agents[0].Runtime, w.Agents[0].Runtime) {
+		t.Fatalf("round trip: %+v %v", decoded.Workflow, err)
 	}
 }
 

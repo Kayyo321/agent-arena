@@ -35,6 +35,7 @@ func TestCommandApprovalOptionValidation(t *testing.T) {
 		{Runtime{Provider: "codex", Model: "m", ReasoningEffort: "high", Options: map[string]any{"commandApproval": antigravityBlanketApproval}}, false},
 		{Runtime{Provider: "claude-code", Model: "m", ReasoningEffort: "high", Options: map[string]any{"authMethod": claudeSignInAuth, "commandApproval": antigravityBlanketApproval}}, false},
 		{Runtime{Provider: "local", Model: "m", Options: map[string]any{"backend": "ollama", "commandApproval": antigravityBlanketApproval}}, false},
+		{Runtime{Provider: "opencode", Model: "opencode/m", Options: map[string]any{"commandApproval": antigravityBlanketApproval}}, false},
 	}
 	for _, tc := range cases {
 		if err := ValidateRuntime(tc.runtime); (err == nil) != tc.ok {

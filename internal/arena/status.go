@@ -39,13 +39,25 @@ func Probe(ctx context.Context, root string, r Runtime) Readiness {
 
 func probe(ctx context.Context, root string, r Runtime) Readiness {
 	result := Readiness{Provider: r.Provider, Model: r.Model, State: "unknown", Auth: "unknown", ModelState: "unknown", Efforts: []string{}, Skill: providerSkillState(root, r.Provider)}
-	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	budget := 12 * time.Second
+	if r.Provider == "opencode" {
+		// Six opencode starts of 1 to 3 seconds each (the build agent is resolved as a
+		// reader and as a writer, one after the other, because two first starts
+		// race on OpenCode's database), so 12 seconds could cut a healthy probe short.
+		budget = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if r.Provider == "local" {
 		return probeLocal(ctx, r, result)
 	}
 	if r.Provider == "antigravity" {
 		return probeAntigravity(ctx, r, result)
+	}
+	// Before the CLI table below: a provider with a binary but no branch of its
+	// own would fall through to the Codex app-server probe.
+	if r.Provider == "opencode" {
+		return probeOpenCode(ctx, r, result)
 	}
 	cli := map[string]string{"codex": "codex", "claude-code": "claude"}[r.Provider]
 

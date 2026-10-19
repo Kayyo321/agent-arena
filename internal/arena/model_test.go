@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,43 @@ func TestLocalEndpointBoundary(t *testing.T) {
 		if _, e := LocalEndpoint(Runtime{Options: map[string]any{"backend": "ollama", "endpoint": endpoint}}); e == nil {
 			t.Fatalf("accepted %s", endpoint)
 		}
+	}
+}
+
+// OpenCode takes a provider/model ID and an optional effort, and no options: its
+// CLI owns sign-in, and it has no command sandbox for commandApproval to opt into.
+func TestValidateRuntimeOpenCode(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		runtime Runtime
+		refused string // empty when the runtime is valid
+	}{
+		{"model only", Runtime{Provider: "opencode", Model: "opencode/big-pickle"}, ""},
+		{"effort is optional and opaque", Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", ReasoningEffort: "xhigh"}, ""},
+		{"empty options", Runtime{Provider: "opencode", Model: "amazon-bedrock/amazon.nova-2-lite-v1:0", Options: map[string]any{}}, ""},
+		{"no model", Runtime{Provider: "opencode"}, "provider and model must be explicitly selected"},
+		{"model without a provider", Runtime{Provider: "opencode", Model: "big-pickle"}, "provider/model"},
+		{"flag as model", Runtime{Provider: "opencode", Model: "-m/x"}, "must not start with -"},
+		{"flag as effort", Runtime{Provider: "opencode", Model: "opencode/big-pickle", ReasoningEffort: "--auto"}, "must not start with -"},
+		{"authMethod", Runtime{Provider: "opencode", Model: "opencode/big-pickle", Options: map[string]any{"authMethod": "api-key-or-cloud"}}, "takes no runtime options"},
+		{"unknown option", Runtime{Provider: "opencode", Model: "opencode/big-pickle", Options: map[string]any{"backend": "ollama"}}, "takes no runtime options"},
+		{"effort belongs in reasoningEffort", Runtime{Provider: "opencode", Model: "opencode/big-pickle", Options: map[string]any{"effort": "high"}}, "reasoningEffort"},
+		// The generic commandApproval message says the provider has its own
+		// command sandbox, which is untrue for OpenCode.
+		{"commandApproval", Runtime{Provider: "opencode", Model: "opencode/big-pickle", Options: map[string]any{"commandApproval": antigravityBlanketApproval}}, "takes no runtime options"},
+		{"secret-like option", Runtime{Provider: "opencode", Model: "opencode/big-pickle", Options: map[string]any{"apiKey": "sk-live-abcdefghijklmnopqrstuvwxyz123456"}}, "secret-like"},
+		{"other providers still fail closed", Runtime{Provider: "opencode-cloud", Model: "opencode/big-pickle"}, "no installed adapter"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRuntime(tc.runtime)
+			switch {
+			case tc.refused == "" && err != nil:
+				t.Fatalf("refused a valid runtime: %v", err)
+			case tc.refused != "" && (err == nil || !strings.Contains(err.Error(), tc.refused)):
+				t.Fatalf("error %v, want one containing %q", err, tc.refused)
+			case err != nil && strings.Contains(err.Error(), "own command sandbox"):
+				t.Fatalf("OpenCode has no command sandbox: %v", err)
+			}
+		})
 	}
 }
