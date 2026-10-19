@@ -159,6 +159,30 @@ func TestProbeRoutesOpenCodeToItsOwnProbe(t *testing.T) {
 	}
 }
 
+// OpenCode has an opencode skill install target, as Gemini has a gemini one, but a
+// worker does not read a host copy, so its readiness reports the embedded skill
+// that Gemini and the local provider report, not "unknown host", whether or not a
+// host copy exists.
+func TestProviderSkillStateOfOpenCodeMatchesGeminiAndLocal(t *testing.T) {
+	p := testProject(t)
+	want := providerSkillState(p.Root, "gemini")
+	if want != "canonical skill embedded for Arena control calls" || providerSkillState(p.Root, "local") != want {
+		t.Fatalf("gemini and local: %q", want)
+	}
+	if got := providerSkillState(p.Root, "opencode"); got != want {
+		t.Fatalf("opencode without a host copy: %q, want %q", got, want)
+	}
+	if _, err := p.InstallSkill("opencode", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := providerSkillState(p.Root, "opencode"); got != want {
+		t.Fatalf("opencode with a host copy: %q, want %q", got, want)
+	}
+	if got := providerSkillState(p.Root, "not-a-provider"); got != "unknown host" {
+		t.Fatalf("unknown providers must still read as unknown: %q", got)
+	}
+}
+
 // Providers.Invoke hands an OpenCode agent to invokeOpenCode.
 func TestProvidersInvokeRunsOpenCode(t *testing.T) {
 	record, capture := openCodeFake(t, openCodeFixtureStream)

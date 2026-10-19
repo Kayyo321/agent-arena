@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The OpenCode CLI (npm opencode-ai) owns its sign-in like Codex and Claude Code:
@@ -41,12 +42,19 @@ const openCodeWriteNote = "Shell commands, web access, subagents, user questions
 // One external_directory rule is not Arena's to deny. `opencode debug agent build`
 // on 1.19.3, with this exact map, resolves 59 rules and the last is an
 // external_directory allow for <XDG_DATA_HOME>/opencode/tool-output/*. OpenCode
-// appends it after the user's config and evaluates the last matching rule, and
-// read is allowed for "*", so a worker can still list and read the truncated tool
-// outputs of every OpenCode session on the machine. Config cannot override that
-// rule, and moving XDG_DATA_HOME would move OpenCode's own sign-in store, so the
-// adapter documents the read exposure as a residual risk (docs/PROVIDERS.md,
-// OpenCode limitations).
+// appends it after the user's config and evaluates the last matching rule. That
+// directory holds the complete, untruncated text of every tool output OpenCode cut
+// short in context (default limit 2,000 lines or 51,200 bytes, set by config
+// tool_output.max_lines and max_bytes), from every OpenCode session on the machine,
+// Arena OpenCode workers' own large reads and greps of their worktrees included.
+// OpenCode's cleanup removes only files older than 7 days. Read, glob, grep and
+// list are allowed, so a worker can list those files, read them and grep their
+// contents. Config cannot close it: a read rule "../*": "deny" would stop the read
+// tool, which asks with the path relative to the worktree, but grep asks its
+// permission on the search regex, not the path, and its directory check is the same
+// external_directory allow. Moving XDG_DATA_HOME would move OpenCode's own sign-in
+// store, so the adapter documents the read exposure as a residual risk
+// (docs/PROVIDERS.md, OpenCode limitations).
 //
 // Writes there are a separate check and Arena does deny them. The write, edit and
 // apply_patch tools pass the external_directory rule above, then ask the edit
@@ -83,10 +91,38 @@ func openCodePermissions(write bool) map[string]any {
 	return permission
 }
 
+// openCodeDroppedEnv are the parent variables openCodeEnv does not pass on: the
+// two that would let the parent's configuration reach opencode, OPENCODE_PURE and
+// OPENCODE_DISABLE_LSP_DOWNLOAD (both set below, so each appears once) and
+// OPENCODE_AUTO_SHARE (see openCodeEnv).
+var openCodeDroppedEnv = map[string]bool{"OPENCODE_PERMISSION": true, "OPENCODE_CONFIG_CONTENT": true, "OPENCODE_PURE": true, "OPENCODE_AUTO_SHARE": true, "OPENCODE_DISABLE_LSP_DOWNLOAD": true}
+
+// The OPENCODE_CONFIG_CONTENT keys that switch off OpenCode's language servers and
+// formatters, and the variable that stops it downloading language servers. See
+// openCodeEnv for why a worker may use none of them.
+const (
+	openCodeLSPKey       = "lsp"
+	openCodeFormatterKey = "formatter"
+)
+
+// openCodeShareKey is the key of OPENCODE_CONFIG_CONTENT that controls sharing and
+// openCodeShareDisabled the value Arena sets. The key and its three values
+// (manual, auto, disabled) are in the opencode 1.19.3 config schema (grep -a -o on
+// the binary: share: "manual" | "auto" | "disabled", "'disabled' disables all
+// sharing"). Verified with `opencode debug config`, run from a temporary git
+// repository with an isolated HOME and XDG_* and no model call: this key and value,
+// alone and inside the whole map openCodeEnv builds for a reader and for a writer,
+// resolve to share "disabled", also over a user-level opencode.json that sets share
+// "auto" and autoshare true (which on its own resolves to share "auto"). That shows
+// the resolved configuration only; no session was shared or attempted.
+const (
+	openCodeShareKey      = "share"
+	openCodeShareDisabled = "disabled"
+)
+
 // openCodeEnv is the environment of every opencode call Arena makes: the parent's,
-// minus the two variables that would let the parent's configuration reach it (and
-// OPENCODE_PURE, which is set below), plus a config that no file in the worktree
-// can loosen and OPENCODE_PURE=1. Checked on 1.19.3
+// minus openCodeDroppedEnv, plus a config that no file in the worktree can loosen
+// and OPENCODE_PURE=1. Checked on 1.19.3
 // against a hostile worktree with `opencode debug config` and
 // `opencode debug agent build`, which show the resolved configuration; no model
 // call was made:
@@ -96,6 +132,17 @@ func openCodePermissions(write bool) map[string]any {
 //     the parent's value is dropped too and replaced by Arena's own. A probe that
 //     kept it would approve a model or variant the worker cannot select, and an
 //     unknown --variant makes opencode run hang.
+//   - Session sharing is off for every call. A worker reads files and its session
+//     can hold their contents, so it must never be published to OpenCode's share
+//     service. The parent's OPENCODE_AUTO_SHARE is dropped: of the OPENCODE_* names
+//     in the 1.19.3 binary (grep -a -o) it is the only one that names sharing, and
+//     none other is a share, upload or publish switch (OPENCODE_EXPERIMENTAL_WORKSPACES
+//     and OPENCODE_WORKSPACE_ID belong to the experimental workspace sync). The
+//     config also sets share to "disabled" (openCodeShareKey), which wins over the
+//     user's own opencode.json. The 1.19.3 bundle already answers a share request
+//     with "Session sharing has been discontinued", so this is defence in depth that
+//     holds if a later or patched build brings sharing back, not a sign that 1.19.3
+//     shares. Only the resolved configuration was checked; no session was shared.
 //   - A worktree's opencode.json or .opencode/agent/build.md set
 //     agent.build.permission, which also beat the top-level map, and its mcp
 //     entries and default_agent survived. OPENCODE_DISABLE_PROJECT_CONFIG=1
@@ -114,7 +161,8 @@ func openCodePermissions(write bool) map[string]any {
 // read-only worker, while the keys Arena names (bash, edit, webfetch and the rest
 // of openCodeDenied) stayed denied. probeOpenCode therefore resolves the build
 // agent in the worker's environment and refuses to start (openCodeCheckPermissions)
-// when any other tool is left allowed.
+// when any other tool is left allowed, or when a user's edit or read object has
+// reordered Arena's pattern rules (openCodeFlippedRules).
 //
 // External plugins are off for every call, not only for `opencode run --pure`.
 // `--pure` is a root-level option whose middleware sets OPENCODE_PURE=1, and the
@@ -133,17 +181,45 @@ func openCodePermissions(write bool) map[string]any {
 // the resolved build agent is byte-identical with and without it (59 rules for a
 // reader), so the recorded fixtures hold.
 //
+// Language servers and formatters are off for every call (openCodeLSPKey and
+// openCodeFormatterKey are false). They are not covered by the permission map: they
+// run programs of their own, outside any sandbox and with network access, and the
+// programs read the worktree's contents. In the 1.19.3 bundle the read tool's
+// warm-up calls LSP.touchFile on every read, and the edit, write and apply_patch
+// tools call it after each change; the LSP layer then starts language servers
+// (the built-in ones include eslint and rust servers), which run the repository's
+// own code (eslint.config.js, Cargo build scripts and proc macros) and are
+// downloaded from the network unless OPENCODE_DISABLE_LSP_DOWNLOAD is set. The
+// Format service runs the formatters with the worktree as its working directory,
+// for example `prettier --write $FILE` when the worktree's package.json lists
+// prettier, which loads the repository's prettier config and plugins. A
+// user-level `"lsp": true` or `"formatter": true` (or the object form that
+// configures servers or formatters) in the global opencode.json would switch both
+// on for every worker, because those keys are not in Arena's map. Checked offline
+// on the real 1.19.3 binary, with an isolated HOME and XDG_*, no inference and this
+// exact kind of OPENCODE_CONFIG_CONTENT, PURE and DISABLE_PROJECT_CONFIG: with a
+// global {"lsp": true, "formatter": true}, `opencode debug config` printed
+// lsp true and formatter true, and `opencode debug lsp diagnostics a.go` in a
+// scratch Go repository started a fake `gopls` on PATH, which wrote its marker
+// file. With "lsp": false and "formatter": false added to OPENCODE_CONFIG_CONTENT,
+// both resolved to false, also over an object-shaped user lsp and formatter, and
+// the fake gopls was not started. OPENCODE_DISABLE_LSP_DOWNLOAD=1 is defence in
+// depth: it stops the download of a language server if one were ever enabled. The
+// parent's value is dropped so this one is the one that applies. Only the resolved
+// configuration and the language-server start were checked; no formatter ran and
+// no worker made an edit.
+//
 // Auto-update is off so the binary the probe inspected is the one that runs.
 func openCodeEnv(write bool) []string {
 	env := []string{}
 	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); name != "OPENCODE_PERMISSION" && name != "OPENCODE_CONFIG_CONTENT" && name != "OPENCODE_PURE" {
+		if name, _, _ := strings.Cut(kv, "="); !openCodeDroppedEnv[name] {
 			env = append(env, kv)
 		}
 	}
 	permission := openCodePermissions(write)
-	config := map[string]any{"permission": permission, "default_agent": "build", "agent": map[string]any{"build": map[string]any{"permission": permission}}}
-	return append(env, "OPENCODE_CONFIG_CONTENT="+compactJSON(config), "OPENCODE_PURE=1", "OPENCODE_DISABLE_PROJECT_CONFIG=1", "OPENCODE_DISABLE_AUTOUPDATE=1")
+	config := map[string]any{"permission": permission, "default_agent": "build", openCodeShareKey: openCodeShareDisabled, openCodeLSPKey: false, openCodeFormatterKey: false, "agent": map[string]any{"build": map[string]any{"permission": permission}}}
+	return append(env, "OPENCODE_CONFIG_CONTENT="+compactJSON(config), "OPENCODE_PURE=1", "OPENCODE_DISABLE_PROJECT_CONFIG=1", "OPENCODE_DISABLE_AUTOUPDATE=1", "OPENCODE_DISABLE_LSP_DOWNLOAD=1")
 }
 
 // openCodeCommand is a read-only opencode call for probes and the catalog. It runs
@@ -163,8 +239,20 @@ func openCodeCommand(ctx context.Context, args ...string) *exec.Cmd {
 func openCodeCommandFor(ctx context.Context, write bool, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "opencode", args...)
 	cmd.Env = openCodeEnv(write)
+	cmd.WaitDelay = openCodeWaitDelay
 	return cmd
 }
+
+// openCodeWaitDelay bounds how long a probe or catalog call keeps waiting for the
+// output pipes after opencode has exited or the context is done. Without it,
+// Output and CombinedOutput wait for the pipes to close, and a child that opencode
+// started and left running keeps them open past the probe budget (status.go), so
+// the probe would stall instead of reporting. No other exec call in the repository
+// sets a WaitDelay, so this is a short delay of its own: opencode has already
+// exited, or been killed by the context, when the clock starts, and its output is
+// then in the pipe. When the delay runs out Wait closes the pipes and returns
+// exec.ErrWaitDelay, which the callers report as a failed call.
+const openCodeWaitDelay = 2 * time.Second
 
 // openCodeArgError refuses a value that opencode's argument parser could read
 // as another flag (--variant --auto), or that carries whitespace or control
@@ -597,7 +685,9 @@ func openCodeToolOutputGlob() string {
 // and "mymcp_?" do not override "mymcp_*". Ask is not an
 // allow: a headless run rejects what would be asked. The one exemption is the
 // documented tool-output external_directory allow, which OpenCode adds last and no
-// configuration can remove (toolOutput is its pattern).
+// configuration can remove (toolOutput is its pattern). It skips every read rule
+// and, for a writer, every edit rule, because those are granted; their patterns
+// are held to Arena's guarantees by openCodeFlippedRules instead.
 func openCodeUnexpectedTools(rules []openCodeRule, write bool, toolOutput string) []string {
 	names := []string{}
 	for i, rule := range rules {
@@ -631,63 +721,189 @@ func openCodeUnexpectedTools(rules []openCodeRule, write bool, toolOutput string
 	return names
 }
 
-// openCodeResolvedTools resolves the build agent in the environment of a reader or
-// a writer, without a model call, and returns the tools the merged rules leave
-// allowed beyond Arena's grant.
-func openCodeResolvedTools(ctx context.Context, write bool) ([]string, error) {
+// openCodeWildcard reports whether input matches pattern the way OpenCode 1.19.3's
+// Wildcard.match reads it. In the bundle, both strings have "\" turned into "/",
+// the pattern's regular-expression characters are escaped, "*" becomes ".*" and
+// "?" becomes ".", a pattern ending in " *" also matches without that tail, and the
+// expression is anchored at both ends and matches newlines. So "*" is any run of
+// characters, "/" included ("*.env" matches "a/.env" and ".env"), and "?" is any
+// one. Unlike openCodeGlob, which compares two patterns, this matches one concrete
+// input.
+func openCodeWildcard(input, pattern string) bool {
+	input, pattern = strings.ReplaceAll(input, "\\", "/"), strings.ReplaceAll(pattern, "\\", "/")
+	if openCodeWildcardRunes([]rune(input), []rune(pattern)) {
+		return true
+	}
+	rest, ok := strings.CutSuffix(pattern, " *")
+	return ok && openCodeWildcardRunes([]rune(input), []rune(rest))
+}
+
+func openCodeWildcardRunes(input, pattern []rune) bool {
+	ii, pi, star, mark := 0, 0, -1, 0
+	for ii < len(input) {
+		switch {
+		case pi < len(pattern) && pattern[pi] == '*':
+			star, mark = pi, ii
+			pi++
+		case pi < len(pattern) && (pattern[pi] == '?' || pattern[pi] == input[ii]):
+			pi++
+			ii++
+		case star >= 0:
+			mark++
+			ii, pi = mark, star+1
+		default:
+			return false
+		}
+	}
+	for pi < len(pattern) && pattern[pi] == '*' {
+		pi++
+	}
+	return pi == len(pattern)
+}
+
+// openCodeDecide is OpenCode's Permission.evaluate for one permission name and
+// pattern over the merged rule list: the last rule whose permission and pattern
+// both match decides (findLast, wildcards on both sides), and with no match the
+// action is ask. It returns the action and the index of the deciding rule, -1 when
+// none matched.
+func openCodeDecide(rules []openCodeRule, permission, pattern string) (action string, index int) {
+	for i := len(rules) - 1; i >= 0; i-- {
+		if openCodeWildcard(permission, rules[i].Permission) && openCodeWildcard(pattern, rules[i].Pattern) {
+			return rules[i].Action, i
+		}
+	}
+	return "ask", -1
+}
+
+// openCodeProbe is one concrete tool call and what Arena's map makes of it.
+type openCodeProbe struct{ permission, pattern, want string }
+
+// openCodeReadProbes and openCodeEditProbes are fixed inputs for the guarantees that
+// pattern rules carry, which openCodeUnexpectedTools cannot see because it skips
+// every read rule and, for a writer, every edit rule. The read tool and the edit
+// tools ask with the path relative to the worktree. Arena's read map refuses .env
+// files (a bare ".env", one in a directory, and a ".env.local" style name) and
+// allows ".env.example" and ordinary files; a writer's edit map allows a path inside
+// the worktree and denies one outside it, among them the relative path of a file in
+// <XDG_DATA_HOME>/opencode/tool-output/, which every OpenCode session reads back.
+// OpenCode merges a user's agent.build.permission objects key by key in the user's
+// key order, with Arena's values, so a user's own edit or read object can put an
+// Arena allow after an Arena deny; these probes evaluate the merged rules with
+// OpenCode's own last-match semantics (openCodeDecide) and catch that.
+var (
+	openCodeReadProbes = []openCodeProbe{
+		{"read", ".env", "deny"}, {"read", "a/.env", "deny"}, {"read", "a/.env.local", "deny"},
+		{"read", ".env.example", "allow"}, {"read", "src/a.go", "allow"},
+	}
+	openCodeEditProbes = []openCodeProbe{
+		{"edit", "src/a.go", "allow"}, {"edit", "../x", "deny"}, {"edit", "../../d/opencode/tool-output/tool_1", "deny"},
+	}
+)
+
+// openCodeFlippedRules lists, one sentence each, the probe inputs on which the
+// resolved rules do not give the action Arena's map intends: the read probes for
+// every worker and the edit probes for a writer. A sentence names the action the
+// rules give, the one expected and the rule that decides, so the user can find the
+// entry of their own configuration that reversed Arena's.
+func openCodeFlippedRules(rules []openCodeRule, write bool) []string {
+	probes := openCodeReadProbes
+	if write {
+		probes = append(append([]openCodeProbe{}, probes...), openCodeEditProbes...)
+	}
+	flipped := []string{}
+	for _, probe := range probes {
+		action, index := openCodeDecide(rules, probe.permission, probe.pattern)
+		if action == probe.want {
+			continue
+		}
+		by := "because no rule matches"
+		if index >= 0 {
+			rule := rules[index]
+			by = "by the rule " + short(Redact(rule.Permission+" "+rule.Pattern+" "+rule.Action), 80)
+		}
+		flipped = append(flipped, fmt.Sprintf("%s %q resolves to %s, not %s, %s", probe.permission, probe.pattern, action, probe.want, by))
+	}
+	return flipped
+}
+
+// openCodeResolved is what the merged rules of one build agent hold against Arena's
+// grant: the permission names left allowed beyond it, and the probe inputs on which
+// a pattern rule is reversed.
+type openCodeResolved struct{ tools, flipped []string }
+
+// openCodeResolve resolves the build agent in the environment of a reader or a
+// writer, without a model call, and checks the merged rules against Arena's grant.
+func openCodeResolve(ctx context.Context, write bool) (openCodeResolved, error) {
 	cmd := openCodeCommandFor(ctx, write, "debug", "agent", "build")
 	stderr := &cappedBuffer{}
 	cmd.Stderr = stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("opencode debug agent build failed%s", openCodeStderrTail(stderr))
+		return openCodeResolved{}, fmt.Errorf("opencode debug agent build failed%s", openCodeStderrTail(stderr))
 	}
 	rules, err := parseOpenCodeRules(string(out))
 	if err != nil {
-		return nil, err
+		return openCodeResolved{}, err
 	}
-	return openCodeUnexpectedTools(rules, write, openCodeToolOutputGlob()), nil
+	return openCodeResolved{openCodeUnexpectedTools(rules, write, openCodeToolOutputGlob()), openCodeFlippedRules(rules, write)}, nil
 }
 
 // openCodeCheckPermissions is the fail-closed readiness check for the user's own
 // OpenCode configuration, which openCodeEnv leaves in place. It resolves the build
 // agent as a reader and as a writer (the probe does not know which role will use
 // the runtime) and returns a non-empty state and detail when it cannot confirm
-// that workers get nothing beyond Arena's map. Unreadable output reads as a
-// changed format, a failed call as unavailable, and a widened map as unsupported.
-// The two calls run one after the other: started together on a data directory
-// OpenCode has not used yet, both create its database and one fails (seen on
-// 1.19.3 with an empty XDG_DATA_HOME).
+// that workers get nothing beyond Arena's map and keep its pattern rules. Unreadable
+// output reads as a changed format, a failed call as unavailable, and a widened or
+// reordered map as unsupported. The two calls run one after the other: started
+// together on a data directory OpenCode has not used yet, both create its database
+// and one fails (seen on 1.19.3 with an empty XDG_DATA_HOME).
 func openCodeCheckPermissions(ctx context.Context) (state, detail string) {
-	names := []string{}
+	names, flipped := []string{}, []string{}
 	for _, write := range []bool{false, true} {
-		tools, err := openCodeResolvedTools(ctx, write)
+		resolved, err := openCodeResolve(ctx, write)
 		switch {
 		case errors.Is(err, errOpenCodeRules):
 			return "incompatible version", Redact(err.Error()) + "; Arena cannot confirm that workers get nothing beyond its permission map"
 		case err != nil:
 			return "unavailable", Redact(err.Error()) + "; Arena cannot confirm that workers get nothing beyond its permission map"
 		}
-		for _, name := range tools {
+		for _, name := range resolved.tools {
 			if !Has(names, name) {
 				names = append(names, name)
 			}
 		}
+		for _, sentence := range resolved.flipped {
+			if !Has(flipped, sentence) {
+				flipped = append(flipped, sentence)
+			}
+		}
 	}
-	if len(names) == 0 {
+	if len(names) == 0 && len(flipped) == 0 {
 		return "", ""
 	}
 	sort.Strings(names)
-	shown := []string{}
-	for _, name := range names[:min(len(names), 5)] {
-		shown = append(shown, short(Redact(name), 60))
+	parts := []string{}
+	if len(names) > 0 {
+		shown := []string{}
+		for _, name := range names[:min(len(names), 5)] {
+			shown = append(shown, short(Redact(name), 60))
+		}
+		list := strings.Join(shown, ", ")
+		if len(names) > len(shown) {
+			list += fmt.Sprintf(" and %d more", len(names)-len(shown))
+		}
+		parts = append(parts, "your OpenCode configuration allows tools beyond Arena's permission map for workers: "+list+
+			". A user-level agent.build.permission (global opencode.json, an OPENCODE_CONFIG file or a global agent definition) that lists keys after \"*\" grants them, MCP tools included. Remove or deny them there, then check again")
 	}
-	list := strings.Join(shown, ", ")
-	if len(names) > len(shown) {
-		list += fmt.Sprintf(" and %d more", len(names)-len(shown))
+	if len(flipped) > 0 {
+		list := strings.Join(flipped[:min(len(flipped), 3)], "; ")
+		if len(flipped) > 3 {
+			list += fmt.Sprintf("; and %d more", len(flipped)-3)
+		}
+		parts = append(parts, "your OpenCode configuration reverses a pattern rule of Arena's permission map for workers: "+list+
+			". OpenCode merges a user-level agent.build.permission edit or read object with Arena's patterns in the user's key order, which can put an allow after Arena's deny. Remove the edit and read entries there, then check again")
 	}
-	return "unsupported", "your OpenCode configuration allows tools beyond Arena's permission map for workers: " + list +
-		". A user-level agent.build.permission (global opencode.json, an OPENCODE_CONFIG file or a global agent definition) that lists keys after \"*\" grants them, MCP tools included. Remove or deny them there, then check again"
+	return "unsupported", strings.Join(parts, "; ")
 }
 
 func probeOpenCode(ctx context.Context, r Runtime, result Readiness) Readiness {

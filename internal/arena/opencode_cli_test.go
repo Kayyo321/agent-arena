@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,15 +14,26 @@ import (
 	"time"
 )
 
-// Everything here is contract coverage for the OpenCode adapter. The catalog
-// fixture is a trimmed recording of `opencode models --verbose` from 1.19.3 (one
-// block is cut short on purpose); the auth listings are recorded from
-// `opencode auth list`; the run streams are built from the event shapes in the
-// bundled 1.19.3 source; the opencode-debug-agent-build fixtures are the output of
-// `opencode debug agent build` on the real 1.19.3 binary, offline and with an
-// isolated HOME and XDG_* (the data directory rewritten to /home/arena/.local/share).
-// No test here ran or claims live inference; the opt-in TestLiveOpenCode lives in
-// live_test.go with the other live tests.
+// Everything here is contract coverage for the OpenCode adapter. No test here ran
+// or claims live inference; the opt-in TestLiveOpenCode lives in live_test.go with
+// the other live tests. Where each fixture comes from:
+//   - testdata/opencode-models-verbose-1.19.3.txt: six blocks trimmed from a
+//     recording of `opencode models --verbose` on the real 1.19.3 binary, plus one
+//     SYNTHETIC block, opencode/truncated-example, which is not in any recording:
+//     it was cut short by hand so the parser has an unparseable block to skip.
+//   - openCodeAuthEnvOnly: recorded from `opencode auth list` on 1.19.3 (offline,
+//     isolated HOME and XDG_*, ANTHROPIC_API_KEY set), with the CLI's box-drawing
+//     marks and its path written as stand-ins.
+//   - openCodeAuthSignedOut: the Credentials half of that recording. Its no
+//     environment variables case (no Environment section) follows from the CLI
+//     source, which prints that section only when a variable is set; it was not
+//     recorded as a run of its own.
+//   - openCodeAuthSignedIn and openCodeAuthSignedInAndEnv: built from the bundled
+//     1.19.3 source, not recorded: recording one needs a stored sign-in.
+//   - the run streams: built from the event shapes in the bundled 1.19.3 source.
+//   - the opencode-debug-agent-build fixtures: the output of
+//     `opencode debug agent build` on the real 1.19.3 binary, offline and with an
+//     isolated HOME and XDG_* (the data directory rewritten to /home/arena/.local/share).
 
 const openCodeFixture = "testdata/opencode-models-verbose-1.19.3.txt"
 
@@ -48,6 +60,7 @@ printf '%s' "${OPENCODE_PERMISSION-unset}" > "$OPENCODE_FAKE_CAPTURE/permission"
 printf '%s' "${OPENCODE_DISABLE_PROJECT_CONFIG-unset}" > "$OPENCODE_FAKE_CAPTURE/projectconfig"
 printf '%s' "${OPENCODE_DISABLE_AUTOUPDATE-unset}" > "$OPENCODE_FAKE_CAPTURE/autoupdate"
 printf '%s' "${OPENCODE_PURE-unset}" > "$OPENCODE_FAKE_CAPTURE/pure"
+printf '%s' "${OPENCODE_DISABLE_LSP_DOWNLOAD-unset}" > "$OPENCODE_FAKE_CAPTURE/lspdownload"
 printf '%s\t%s\t%s\t%s\n' "$*" "${OPENCODE_PERMISSION-unset}" "${OPENCODE_PURE-unset}" "$OPENCODE_CONFIG_CONTENT" >> "$OPENCODE_FAKE_CAPTURE/envs"
 `
 	return fakeCLI(t, "opencode", prelude+body), capture
@@ -91,9 +104,12 @@ func openCodeNoCall(t *testing.T, capture string) {
 	}
 }
 
-// Recorded from opencode 1.19.3 `auth list` on a sandbox with no stored sign-in
-// (the section markers are the CLI's own; ANSI colour codes come with them even
-// when piped).
+// Recorded from opencode 1.19.3 `auth list` on a sandbox with no stored sign-in:
+// the wording, the counts and the dim ANSI code before the path and the variable
+// name come from the recording, which was piped. The box-drawing marks of the real
+// output are written here as T, |, the dash and the bullet, and the path is
+// shortened; the parser reads only the counts. See the provenance list above for
+// how openCodeAuthSignedOut relates to the recording.
 const openCodeAuthSignedOut = "\x1b[0m\nT  Credentials \x1b[90m~/.local/share/opencode/auth.json\n|\n\u2014  0 credentials\n"
 const openCodeAuthEnvOnly = openCodeAuthSignedOut + "\nT  Environment\n|\n\u2022  Anthropic \x1b[90mANTHROPIC_API_KEY\n|\n\u2014  1 environment variable\n"
 
@@ -133,6 +149,107 @@ func TestOpenCodeEnvDisablesPluginsOnce(t *testing.T) {
 			if !reflect.DeepEqual(values, []string{"1"}) {
 				t.Fatalf("parent %q, writer %v: OPENCODE_PURE entries %q, want one \"1\"", parent, write, values)
 			}
+		}
+	}
+}
+
+// A worker reads files, so its session must never reach OpenCode's share service.
+// Every opencode call drops the parent's OPENCODE_AUTO_SHARE and carries share
+// "disabled" in OPENCODE_CONFIG_CONTENT, also over a parent config that sets share
+// to auto. `opencode debug config` showed on 1.19.3 that this key and value resolve
+// to share "disabled" (see openCodeShareKey); the test pins what Arena puts in the
+// environment, which is contract coverage and not a run of OpenCode.
+func TestOpenCodeEnvDisablesSharing(t *testing.T) {
+	for _, parent := range []string{"1", "true", "0", ""} {
+		t.Setenv("OPENCODE_AUTO_SHARE", parent)
+		t.Setenv("OPENCODE_CONFIG_CONTENT", `{"share":"auto","autoshare":true}`)
+		for _, write := range []bool{false, true} {
+			for _, kv := range openCodeEnv(write) {
+				if name, _, _ := strings.Cut(kv, "="); name == "OPENCODE_AUTO_SHARE" {
+					t.Fatalf("parent %q, writer %v: the inherited %q reaches opencode", parent, write, kv)
+				}
+			}
+			var config map[string]any
+			if err := json.Unmarshal([]byte(openCodeWorkerConfig(t, write)), &config); err != nil {
+				t.Fatal(err)
+			}
+			if config["share"] != "disabled" {
+				t.Fatalf("parent %q, writer %v: share = %v, want \"disabled\"", parent, write, config["share"])
+			}
+			if _, ok := config["autoshare"]; ok {
+				t.Fatalf("writer %v: the config must not set the deprecated autoshare key: %v", write, config)
+			}
+		}
+	}
+}
+
+// requireOpenCodeNoLSPOrFormatter holds a captured OPENCODE_CONFIG_CONTENT to the
+// two keys that keep language servers and formatters off. Both must be the JSON
+// boolean false, not absent: an absent key leaves the user's own lsp or formatter
+// setting in force, and 1.19.3 resolved a user-level true (or an object that
+// configures servers or formatters) to itself when Arena's config did not set them.
+func requireOpenCodeNoLSPOrFormatter(t *testing.T, label string, config map[string]any) {
+	t.Helper()
+	for _, key := range []string{"lsp", "formatter"} {
+		if value, ok := config[key]; !ok || value != false {
+			t.Fatalf("%s: %q = %v (present %v), want false: the user's own setting would apply: %v", label, key, value, ok, config)
+		}
+	}
+}
+
+// Language servers and formatters run programs of their own outside any sandbox,
+// with the worktree's content, so every opencode call turns them off, also over a
+// parent configuration (and so a user-level one) that turns them on in boolean or
+// object form, and sets OPENCODE_DISABLE_LSP_DOWNLOAD once whatever the parent
+// holds. The offline check on the real 1.19.3 binary is in docs/VALIDATION.md; this
+// pins what Arena puts in the environment and is contract coverage.
+func TestOpenCodeEnvDisablesLanguageServersAndFormatters(t *testing.T) {
+	for _, parent := range []string{
+		`{"lsp":true,"formatter":true}`,
+		`{"lsp":{"gopls":{"command":["gopls"]}},"formatter":{"prettier":{"command":["prettier","--write","$FILE"]}}}`,
+	} {
+		for _, download := range []string{"0", "false", "1", ""} {
+			t.Setenv("OPENCODE_CONFIG_CONTENT", parent)
+			t.Setenv("OPENCODE_DISABLE_LSP_DOWNLOAD", download)
+			for _, write := range []bool{false, true} {
+				var config map[string]any
+				if err := json.Unmarshal([]byte(openCodeWorkerConfig(t, write)), &config); err != nil {
+					t.Fatal(err)
+				}
+				requireOpenCodeNoLSPOrFormatter(t, fmt.Sprintf("parent %s, writer %v", parent, write), config)
+				values := []string{}
+				for _, kv := range openCodeEnv(write) {
+					if value, ok := strings.CutPrefix(kv, "OPENCODE_DISABLE_LSP_DOWNLOAD="); ok {
+						values = append(values, value)
+					}
+				}
+				if !reflect.DeepEqual(values, []string{"1"}) {
+					t.Fatalf("parent %q, writer %v: OPENCODE_DISABLE_LSP_DOWNLOAD entries %q, want one \"1\"", download, write, values)
+				}
+			}
+		}
+	}
+}
+
+// A probe or catalog call must not stall on a child that opencode left running
+// with the output pipes open: the WaitDelay of openCodeCommandFor closes them
+// shortly after opencode exits, and the call reports a failure instead of waiting
+// out the probe budget. The fake exits at once and leaves a sleep holding its
+// stdout for longer than the test allows.
+func TestOpenCodeCallsDoNotWaitForALeftoverChild(t *testing.T) {
+	openCodeFake(t, "sleep 6 &\necho 1.19.3\n")
+	start := time.Now()
+	out, err := openCodeCommand(context.Background(), "--version").Output()
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("the call waited %v for a child that holds its pipes", elapsed)
+	}
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("want exec.ErrWaitDelay, got %v (output %q)", err, out)
+	}
+	// Reader and writer calls are built by the same function.
+	for _, write := range []bool{false, true} {
+		if cmd := openCodeCommandFor(context.Background(), write, "models", "--verbose"); cmd.WaitDelay <= 0 || cmd.WaitDelay > 10*time.Second {
+			t.Fatalf("writer %v: WaitDelay %v is not a short positive delay", write, cmd.WaitDelay)
 		}
 	}
 }
@@ -265,6 +382,13 @@ func TestOpenCodeProbeAndCatalogRunInTheWorkerConfiguration(t *testing.T) {
 		t.Fatal("a reader and a writer must run with different permission maps")
 	}
 	calls := openCodeCallEnvs(t, capture)
+	for _, call := range calls {
+		var config map[string]any
+		if err := json.Unmarshal([]byte(call.config), &config); err != nil {
+			t.Fatalf("opencode %s: %v", call.args, err)
+		}
+		requireOpenCodeNoLSPOrFormatter(t, "opencode "+call.args, config)
+	}
 	// The probe's six calls and the catalog's own.
 	if len(calls) != 7 {
 		t.Fatalf("calls: %+v", calls)
@@ -303,18 +427,24 @@ const openCodeHelpOK = "cat <<'EOF'\nopencode run [message..]\n      --pure\n  -
 // The rule lists that `opencode debug agent build` printed on 1.19.3 for Arena's own
 // permission map, as a reader and as a writer, and for a reader whose global
 // $XDG_CONFIG_HOME/opencode/opencode.json holds
-// {"agent":{"build":{"permission":{"*":"allow","codesearch":"allow","mymcp_*":"allow"}}}}.
+// {"agent":{"build":{"permission":{"*":"allow","codesearch":"allow","mymcp_*":"allow"}}}},
+// and the two flipped recordings named below.
 const (
-	openCodeAgentReader         = "testdata/opencode-debug-agent-build-1.19.3-reader.json"
-	openCodeAgentWriter         = "testdata/opencode-debug-agent-build-1.19.3-writer.json"
-	openCodeAgentReaderWidened  = "testdata/opencode-debug-agent-build-1.19.3-reader-widened.json"
-	openCodeAgentWriterWidened  = "testdata/opencode-debug-agent-build-1.19.3-writer-widened.json"
-	openCodeFixtureDataHome     = "/home/arena/.local/share" // XDG_DATA_HOME of those recordings
-	openCodeFixtureToolOutput   = openCodeFixtureDataHome + "/opencode/tool-output/*"
-	openCodeProbeThroughAuth    = "--version\nrun --help\nauth list\n"
-	openCodeProbeThroughReader  = openCodeProbeThroughAuth + "debug agent build\n"
-	openCodeProbeThroughAgent   = openCodeProbeThroughReader + "debug agent build\n"
-	openCodeProbeThroughCatalog = openCodeProbeThroughAgent + "models --verbose\n"
+	openCodeAgentReader        = "testdata/opencode-debug-agent-build-1.19.3-reader.json"
+	openCodeAgentWriter        = "testdata/opencode-debug-agent-build-1.19.3-writer.json"
+	openCodeAgentReaderWidened = "testdata/opencode-debug-agent-build-1.19.3-reader-widened.json"
+	openCodeAgentWriterWidened = "testdata/opencode-debug-agent-build-1.19.3-writer-widened.json"
+	// A writer with a global agent.build.permission {"*":"ask","edit":{"../*":"ask"}},
+	// and a reader with {"*":"allow","read":{"*.env":"ask","*":"allow"}}: the user's
+	// key order puts Arena's allow after its deny.
+	openCodeAgentWriterFlippedEdit = "testdata/opencode-debug-agent-build-1.19.3-writer-flipped-edit.json"
+	openCodeAgentReaderFlippedRead = "testdata/opencode-debug-agent-build-1.19.3-reader-flipped-read.json"
+	openCodeFixtureDataHome        = "/home/arena/.local/share" // XDG_DATA_HOME of those recordings
+	openCodeFixtureToolOutput      = openCodeFixtureDataHome + "/opencode/tool-output/*"
+	openCodeProbeThroughAuth       = "--version\nrun --help\nauth list\n"
+	openCodeProbeThroughReader     = openCodeProbeThroughAuth + "debug agent build\n"
+	openCodeProbeThroughAgent      = openCodeProbeThroughReader + "debug agent build\n"
+	openCodeProbeThroughCatalog    = openCodeProbeThroughAgent + "models --verbose\n"
 )
 
 // openCodeCat is a fake-CLI body that prints a testdata file.
@@ -395,6 +525,10 @@ func TestOpenCodeProbeStates(t *testing.T) {
 		{"writer build agent widened by the user's configuration", openCodeProbeCLI{agentWriter: openCodeCat(t, openCodeAgentWriterWidened)}, cat, "unsupported", "codesearch, mymcp_*", "", openCodeProbeThroughAgent},
 		{"both build agents widened", openCodeProbeCLI{agentReader: openCodeCat(t, openCodeAgentReaderWidened), agentWriter: openCodeCat(t, openCodeAgentWriterWidened)}, cat, "unsupported", "global agent definition", "", openCodeProbeThroughAgent},
 		{"reader gets edit from the user's configuration", openCodeProbeCLI{agentReader: openCodeCat(t, openCodeAgentWriter)}, cat, "unsupported", "allows tools beyond Arena's permission map for workers: edit.", "", openCodeProbeThroughAgent},
+		// The pattern rules of read and edit, which the tool check skips: a user's
+		// edit or read object can put Arena's allow after its deny.
+		{"writer edit allow after the outside deny", openCodeProbeCLI{agentWriter: openCodeCat(t, openCodeAgentWriterFlippedEdit)}, cat, "unsupported", `edit "../x" resolves to allow, not deny, by the rule edit * allow`, "", openCodeProbeThroughAgent},
+		{"reader read allow after the .env deny", openCodeProbeCLI{agentReader: openCodeCat(t, openCodeAgentReaderFlippedRead)}, cat, "unsupported", `read ".env" resolves to allow, not deny, by the rule read * allow`, "", openCodeProbeThroughAgent},
 		{"build agent resolution fails", openCodeProbeCLI{agentReader: "echo 'Error: config invalid' >&2\nexit 1"}, cat, "unavailable", "opencode debug agent build failed; Error: config invalid", "", openCodeProbeThroughReader},
 		{"build agent output unrecognised", openCodeProbeCLI{agentWriter: "echo something new"}, cat, "incompatible version", "did not print a readable permission list", "", openCodeProbeThroughAgent},
 		{"writer build agent resolution fails", openCodeProbeCLI{agentWriter: "exit 1"}, cat, "unavailable", "opencode debug agent build failed", "", openCodeProbeThroughAgent},
@@ -470,7 +604,7 @@ func TestOpenCodeVersionMatchesCompatibilityManifest(t *testing.T) {
 			return
 		}
 	}
-	t.Skip("providers/compatibility.json has no opencode adapter yet")
+	t.Fatal("providers/compatibility.json has no opencode adapter; the pinned version must be recorded there")
 }
 
 func TestOpenCodeRuntimeOptionsAndArguments(t *testing.T) {
@@ -541,7 +675,7 @@ func openCodeCapturedConfig(t *testing.T, capture string) (config, permission ma
 
 func TestOpenCodeReaderRunsRestrictedHeadlessCLI(t *testing.T) {
 	t.Setenv("OPENCODE_PERMISSION", `{"bash":"allow"}`) // the parent's value must not reach a worker
-	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"permission":{"bash":"allow"}}`)
+	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"permission":{"bash":"allow"},"lsp":true,"formatter":true}`)
 	t.Setenv("OPENCODE_PURE", "0")
 	record, capture := openCodeFake(t, openCodeFixtureStream)
 	in := openCodeInvocation(t)
@@ -595,7 +729,11 @@ func TestOpenCodeReaderRunsRestrictedHeadlessCLI(t *testing.T) {
 	if config["default_agent"] != "build" || !reflect.DeepEqual(build["permission"], permission) {
 		t.Fatalf("build agent: %v", config)
 	}
-	for file, want := range map[string]string{"permission": "unset", "projectconfig": "1", "autoupdate": "1", "pure": "1"} {
+	// The parent's config above turns lsp and formatter on, as a user's global
+	// opencode.json could: Arena's config turns both off, so no language server or
+	// formatter runs the worktree's code outside the permission map.
+	requireOpenCodeNoLSPOrFormatter(t, "reader", config)
+	for file, want := range map[string]string{"permission": "unset", "projectconfig": "1", "autoupdate": "1", "pure": "1", "lspdownload": "1"} {
 		if got := recorded(t, capture, file); got != want {
 			t.Fatalf("%s: %q, want %q", file, got, want)
 		}
@@ -621,6 +759,8 @@ func TestOpenCodeReaderRunsRestrictedHeadlessCLI(t *testing.T) {
 }
 
 func TestOpenCodeWriterGetsEditAndOmitsVariantWithoutEffort(t *testing.T) {
+	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"lsp":{"gopls":{"command":["gopls"]}},"formatter":true}`)
+	t.Setenv("OPENCODE_DISABLE_LSP_DOWNLOAD", "0")
 	record, capture := openCodeFake(t, openCodeFixtureStream)
 	in := openCodeInvocation(t)
 	in.Write, in.Runtime.ReasoningEffort = true, ""
@@ -633,6 +773,13 @@ func TestOpenCodeWriterGetsEditAndOmitsVariantWithoutEffort(t *testing.T) {
 	config, permission := openCodeCapturedConfig(t, capture)
 	if permission["bash"] != "deny" || permission["*"] != "deny" || permission["external_directory"] != "deny" {
 		t.Fatalf("writer permission: %v", permission)
+	}
+	// A writer's edits would otherwise make OpenCode start a language server and run
+	// a formatter on the changed file (a user-level lsp or formatter setting applies
+	// unless Arena's config sets the keys), so both stay off for a writer too.
+	requireOpenCodeNoLSPOrFormatter(t, "writer", config)
+	if got := recorded(t, capture, "lspdownload"); got != "1" {
+		t.Fatalf("OPENCODE_DISABLE_LSP_DOWNLOAD = %q, want 1", got)
 	}
 	build, _ := config["agent"].(map[string]any)["build"].(map[string]any)
 	if !reflect.DeepEqual(build["permission"], permission) {
@@ -864,7 +1011,7 @@ func openCodeRecordedRules(t *testing.T, name string) []openCodeRule {
 func TestOpenCodeParsesRecordedBuildAgent(t *testing.T) {
 	// Arena's own map resolves to 59 rules for a reader and 61 for a writer, and the
 	// user's widening adds two keys (codesearch and mymcp_*), as recorded on 1.19.3.
-	for name, want := range map[string]int{openCodeAgentReader: 59, openCodeAgentWriter: 61, openCodeAgentReaderWidened: 61, openCodeAgentWriterWidened: 63} {
+	for name, want := range map[string]int{openCodeAgentReader: 59, openCodeAgentWriter: 61, openCodeAgentReaderWidened: 61, openCodeAgentWriterWidened: 63, openCodeAgentReaderFlippedRead: 59, openCodeAgentWriterFlippedEdit: 61} {
 		rules := openCodeRecordedRules(t, name)
 		if len(rules) != want {
 			t.Fatalf("%s: %d rules, want %d", name, len(rules), want)
@@ -1044,6 +1191,209 @@ func TestOpenCodeUnexpectedToolsRules(t *testing.T) {
 	} {
 		if got := openCodeUnexpectedTools(c.rules, c.write, openCodeFixtureToolOutput); !reflect.DeepEqual(got, c.want) {
 			t.Fatalf("%s: %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+// OpenCode's Wildcard.match, as read from the 1.19.3 bundle: "*" is any run of
+// characters, "/" included, "?" is any one, the match is anchored, "\\" reads as "/",
+// and a pattern ending in " *" also matches without that tail.
+func TestOpenCodeWildcardMatchesLikeOpenCode(t *testing.T) {
+	for _, c := range []struct {
+		input, pattern string
+		want           bool
+	}{
+		{".env", "*.env", true},
+		{"a/.env", "*.env", true},
+		{"a/b/.env", "*.env", true},
+		{"a.env", "*.env", true},
+		{".envrc", "*.env", false},
+		{"a/.env.local", "*.env.*", true},
+		{".env.local", "*.env.*", true},
+		{".env", "*.env.*", false},
+		{".env.example", "*.env.example", true},
+		{"a/.env.example", "*.env.example", true},
+		{".env.example", "*.env.*", true},
+		{"src/a.go", "*", true},
+		{"", "*", true},
+		{"../x", "../*", true},
+		{"../../d/opencode/tool-output/tool_1", "../*", true},
+		{"src/a.go", "../*", false},
+		{"x/../y", "../*", false},
+		{"..", "../*", false},
+		{"edit", "edit", true},
+		{"edit", "*", true},
+		{"edit", "ed?t", true},
+		{"edit", "ed?", false},
+		{"edit", "edit*", true},
+		{"edit", "e*t", true},
+		{"edit", "bash", false},
+		{"a.go", "a.go", true},
+		{"abgo", "a.go", false}, // "." is a literal dot, not any character
+		{"a+b", "a+b", true},
+		{"a(b)", "a(b)", true},
+		{"ls", "ls *", true}, // a trailing " *" is optional
+		{"ls -la", "ls *", true},
+		{"lsx", "ls *", false},
+		{"a\\b", "a/b", true},
+		{"a/b", "a\\b", true},
+		{"a\nb", "a*b", true}, // matches newlines
+	} {
+		if got := openCodeWildcard(c.input, c.pattern); got != c.want {
+			t.Fatalf("openCodeWildcard(%q, %q) = %v, want %v", c.input, c.pattern, got, c.want)
+		}
+	}
+}
+
+// Permission.evaluate takes the last rule whose permission and pattern both match,
+// with wildcards on both sides, and asks when none does.
+func TestOpenCodeDecideTakesTheLastMatch(t *testing.T) {
+	rules := []openCodeRule{
+		{"*", "*", "allow"},
+		{"edit", "*", "deny"},
+		{"edit", "src/*", "allow"},
+		{"e*", "src/gen/*", "ask"},
+		{"read", "*", "allow"},
+	}
+	for _, c := range []struct {
+		permission, pattern, action string
+		index                       int
+	}{
+		{"edit", "README.md", "deny", 1},
+		{"edit", "src/a.go", "allow", 2},
+		{"edit", "src/gen/a.go", "ask", 3}, // a wildcard permission matches the name
+		{"read", "src/gen/a.go", "allow", 4},
+		{"bash", "ls", "allow", 0},
+	} {
+		if action, index := openCodeDecide(rules, c.permission, c.pattern); action != c.action || index != c.index {
+			t.Fatalf("%s %q: %s at rule %d, want %s at rule %d", c.permission, c.pattern, action, index, c.action, c.index)
+		}
+	}
+	if action, index := openCodeDecide(nil, "edit", "a"); action != "ask" || index != -1 {
+		t.Fatalf("no rule asks: %s %d", action, index)
+	}
+	if action, index := openCodeDecide([]openCodeRule{{"read", "*", "allow"}}, "edit", "a"); action != "ask" || index != -1 {
+		t.Fatalf("no matching rule asks: %s %d", action, index)
+	}
+}
+
+// The recorded rule lists of Arena's own map give every guarantee; the two flipped
+// recordings (a user's agent.build.permission edit or read object listed before
+// Arena's keys, so OpenCode puts Arena's allow after its deny) do not. Those are
+// the shapes openCodeUnexpectedTools cannot see, because it skips every read rule
+// and every edit rule of a writer: it reports nothing for either.
+func TestOpenCodeFlippedRulesOnRecordedBuildAgents(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		write   bool
+		flipped []string
+	}{
+		{openCodeAgentReader, false, nil},
+		{openCodeAgentWriter, true, nil},
+		{openCodeAgentReaderWidened, false, nil},
+		{openCodeAgentWriterWidened, true, nil},
+		// edit * allow (rule 39) comes after edit ../* deny (rule 38): a writer may edit
+		// outside the worktree, tool-output included.
+		{openCodeAgentWriterFlippedEdit, true, []string{
+			`edit "../x" resolves to allow, not deny, by the rule edit * allow`,
+			`edit "../../d/opencode/tool-output/tool_1" resolves to allow, not deny, by the rule edit * allow`,
+		}},
+		// read * allow (rule 38) comes after read *.env deny (rule 37): .env is readable.
+		{openCodeAgentReaderFlippedRead, false, []string{
+			`read ".env" resolves to allow, not deny, by the rule read * allow`,
+			`read "a/.env" resolves to allow, not deny, by the rule read * allow`,
+		}},
+	} {
+		rules := openCodeRecordedRules(t, c.name)
+		got := openCodeFlippedRules(rules, c.write)
+		if len(c.flipped) == 0 && len(got) == 0 {
+			continue
+		}
+		if !reflect.DeepEqual(got, c.flipped) {
+			t.Fatalf("%s (writer %v): %q, want %q", c.name, c.write, got, c.flipped)
+		}
+		if tools := openCodeUnexpectedTools(rules, c.write, openCodeFixtureToolOutput); len(tools) != 0 {
+			t.Fatalf("%s: the tool check was expected to miss these, it reports %v", c.name, tools)
+		}
+	}
+	// The edit probes belong to the writer's run: the reader's edit is the plain
+	// string deny and a reader that gets edit is the tool check's finding.
+	if got := openCodeFlippedRules(openCodeRecordedRules(t, openCodeAgentWriterFlippedEdit), false); len(got) != 0 {
+		t.Fatalf("a reader is not held to the edit probes: %q", got)
+	}
+}
+
+func TestOpenCodeFlippedRulesProbes(t *testing.T) {
+	deny := openCodeRule{"*", "*", "deny"}
+	// Arena's patterns in the right order, as OpenCode lists them.
+	arenaRead := []openCodeRule{{"read", "*", "allow"}, {"read", "*.env", "deny"}, {"read", "*.env.*", "deny"}, {"read", "*.env.example", "allow"}}
+	arenaEdit := []openCodeRule{{"edit", "*", "allow"}, {"edit", "../*", "deny"}}
+	list := func(parts ...[]openCodeRule) []openCodeRule {
+		rules := []openCodeRule{deny}
+		for _, part := range parts {
+			rules = append(rules, part...)
+		}
+		return rules
+	}
+	for name, c := range map[string]struct {
+		rules []openCodeRule
+		write bool
+		want  []string
+	}{
+		"Arena's order, reader": {list(arenaRead), false, nil},
+		"Arena's order, writer": {list(arenaRead, arenaEdit), true, nil},
+		// (a) the deny for ../* comes first, the allow for * last.
+		"writer, edit allow after the outside deny": {list(arenaRead, []openCodeRule{{"edit", "../*", "deny"}, {"edit", "*", "allow"}}), true, []string{
+			`edit "../x" resolves to allow, not deny, by the rule edit * allow`,
+			`edit "../../d/opencode/tool-output/tool_1" resolves to allow, not deny, by the rule edit * allow`,
+		}},
+		// (b) read * allow listed after the .env denies: .env, a/.env and a/.env.local.
+		"read allow after the .env denies": {list([]openCodeRule{{"read", "*.env", "deny"}, {"read", "*.env.*", "deny"}, {"read", "*", "allow"}, {"read", "*.env.example", "allow"}}), false, []string{
+			`read ".env" resolves to allow, not deny, by the rule read * allow`,
+			`read "a/.env" resolves to allow, not deny, by the rule read * allow`,
+			`read "a/.env.local" resolves to allow, not deny, by the rule read * allow`,
+		}},
+		// A user ask on .env after Arena's deny is not a refusal.
+		"read ask after the .env deny": {list(arenaRead, []openCodeRule{{"read", "*.env", "ask"}}), false, []string{
+			`read ".env" resolves to ask, not deny, by the rule read *.env ask`,
+			`read "a/.env" resolves to ask, not deny, by the rule read *.env ask`,
+		}},
+		// A user deny that closes ordinary files, or the example file, leaves the
+		// worker unable to do its job: readiness reports that too.
+		"read denied for source files": {list(arenaRead, []openCodeRule{{"read", "src/*", "deny"}}), false, []string{
+			`read "src/a.go" resolves to deny, not allow, by the rule read src/* deny`,
+		}},
+		"read of the example file asks": {list(arenaRead, []openCodeRule{{"read", "*.env.example", "ask"}}), false, []string{
+			`read ".env.example" resolves to ask, not allow, by the rule read *.env.example ask`,
+		}},
+		"writer cannot edit its worktree": {list(arenaRead, arenaEdit, []openCodeRule{{"edit", "src/*", "ask"}}), true, []string{
+			`edit "src/a.go" resolves to ask, not allow, by the rule edit src/* ask`,
+		}},
+		// A wildcard permission and pattern decide too.
+		"the catch-all allowed last": {list(arenaRead, arenaEdit, []openCodeRule{{"*", "*", "allow"}}), true, []string{
+			`read ".env" resolves to allow, not deny, by the rule * * allow`,
+			`read "a/.env" resolves to allow, not deny, by the rule * * allow`,
+			`read "a/.env.local" resolves to allow, not deny, by the rule * * allow`,
+			`edit "../x" resolves to allow, not deny, by the rule * * allow`,
+			`edit "../../d/opencode/tool-output/tool_1" resolves to allow, not deny, by the rule * * allow`,
+		}},
+		"no rule at all": {nil, true, []string{
+			`read ".env" resolves to ask, not deny, because no rule matches`,
+			`read "a/.env" resolves to ask, not deny, because no rule matches`,
+			`read "a/.env.local" resolves to ask, not deny, because no rule matches`,
+			`read ".env.example" resolves to ask, not allow, because no rule matches`,
+			`read "src/a.go" resolves to ask, not allow, because no rule matches`,
+			`edit "src/a.go" resolves to ask, not allow, because no rule matches`,
+			`edit "../x" resolves to ask, not deny, because no rule matches`,
+			`edit "../../d/opencode/tool-output/tool_1" resolves to ask, not deny, because no rule matches`,
+		}},
+	} {
+		got := openCodeFlippedRules(c.rules, c.write)
+		if len(c.want) == 0 && len(got) == 0 {
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Fatalf("%s:\n got %q\nwant %q", name, got, c.want)
 		}
 	}
 }

@@ -1,3 +1,4 @@
+Provenance: six blocks trimmed from a recording of `opencode models --verbose` on the real 1.19.3 binary, plus one SYNTHETIC block, opencode/truncated-example, cut short by hand and not in any recording, so the parser has an unparseable block to skip. The parser ignores text before the first header.
 opencode/big-pickle
 {
   "id": "big-pickle",

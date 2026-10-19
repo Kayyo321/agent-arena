@@ -60,7 +60,7 @@
     },
     {
       "id": "opencode",
-      "interface": "opencode run --pure --format json --dir <worktree> --model <provider/model> [--variant <effort>] headless with the prompt on stdin and permissions pinned by OPENCODE_CONFIG_CONTENT; model catalog from opencode models --verbose; no Arena MCP bridge and no shell commands",
+      "interface": "opencode run --pure --format json --dir <worktree> --model <provider/model> [--variant <effort>] headless with the prompt on stdin and permissions pinned by OPENCODE_CONFIG_CONTENT; model catalog from opencode models --verbose; no Arena MCP bridge, no shell commands and no language servers or formatters",
       "observedVersions": [
         "1.19.3"
       ],
@@ -72,7 +72,7 @@
         "--model"
       ],
       "auth": "OpenCode-owned sign-in (opencode auth login); Arena reads only the counts opencode auth list prints, never its credential file",
-      "verification": "1.19.3 flags, model catalog, auth list output and config resolution inspected; readiness resolves the build agent with opencode debug agent build, offline, and refuses a user configuration that allows tools beyond Arena's permission map; contract and probe coverage with fake CLIs and recorded fixtures only; live inference unverified (free tier refused, no paid credentials)",
+      "verification": "1.19.3 flags, model catalog, auth list output and config resolution inspected; readiness resolves the build agent with opencode debug agent build, offline, and refuses a user configuration that allows tools beyond Arena's permission map or reverses its read and edit pattern rules; language servers and formatters are disabled because they run repository code outside any sandbox; contract and probe coverage with fake CLIs and recorded fixtures only; live inference unverified (free tier refused, no paid credentials)",
       "source": "opencode run --help"
     },
     {

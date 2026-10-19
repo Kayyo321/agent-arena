@@ -10,7 +10,12 @@ import (
 var skillPaths = map[string]string{"codex": ".agents/skills/arena-orchestrator/SKILL.md", "claude": ".claude/skills/arena-orchestrator/SKILL.md", "gemini": ".agents/skills/arena-orchestrator/SKILL.md", "gemini-native": ".gemini/skills/arena-orchestrator/SKILL.md", "copilot": ".github/skills/arena-orchestrator/SKILL.md", "opencode": ".opencode/skills/arena-orchestrator/SKILL.md"}
 
 func providerSkillState(root, provider string) string {
-	if provider == "gemini" || provider == "local" {
+	// Providers with no host skill file of their own: Arena puts the canonical skill
+	// into the prompt of its control calls. OpenCode is one of them, although
+	// skillPaths lists an opencode install target for a user who runs Arena from
+	// OpenCode: its workers run with OPENCODE_DISABLE_PROJECT_CONFIG=1 and the skill
+	// permission denied (openCodePermissions), so a host copy never reaches them.
+	if provider == "gemini" || provider == "local" || provider == "opencode" {
 		return "canonical skill embedded for Arena control calls"
 	}
 	target := map[string]string{"codex": "codex", "claude-code": "claude", "antigravity": "gemini"}[provider]

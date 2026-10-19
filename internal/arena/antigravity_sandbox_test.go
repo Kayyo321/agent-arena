@@ -55,6 +55,34 @@ func TestBlanketApprovalStillRefusedWithoutTheOption(t *testing.T) {
 	}
 }
 
+// An OpenCode agent with run_commands is refused when the run starts, like the
+// Antigravity one without blanket approval, and not when its worker starts after
+// the other agents have spent inference. The refusal does not depend on an OS
+// command sandbox being available. Contract coverage through the fake CLI of
+// opencode_cli_test.go; nothing here runs OpenCode.
+func TestOpenCodeRunCommandsRefusedBeforeTheRunStarts(t *testing.T) {
+	p := testProject(t)
+	openCodeProbeCLI{}.install(t)
+	settings := DefaultSettings(Runtime{Provider: "opencode", Model: "opencode/cat-jam-free", ReasoningEffort: "high"})
+	run := func(caps ...string) error {
+		w := NewWorkflow("oc", "OpenCode arena")
+		w.HeadAgent = "head"
+		scoreAgent(&w, "head", 0, "opencode", "opencode/cat-jam-free")
+		_, err := executionReadiness(context.Background(), p, Run{Workflow: w, Profiles: map[string]Profile{"head": scoreProfile("head", "coordinator", caps...)}, Settings: settings})
+		return err
+	}
+	if err := run("read"); err != nil {
+		t.Fatalf("an OpenCode agent without run_commands must start: %v", err)
+	}
+	err := run("read", "run_commands")
+	if err == nil || !strings.Contains(err.Error(), "head runs on OpenCode, which has no command sandbox in Arena") || !strings.Contains(err.Error(), "remove run_commands") {
+		t.Fatalf("run_commands on OpenCode: %v", err)
+	}
+	if strings.Contains(err.Error(), "OS command sandbox") {
+		t.Fatalf("the refusal must name OpenCode, not a missing OS sandbox: %v", err)
+	}
+}
+
 func TestHiddenCredentialTableCoversTheReviewedMinimum(t *testing.T) {
 	for _, required := range []string{".codex", ".claude", ".claude.json", ".ssh", ".gnupg", ".aws", ".config/gh", ".netrc", ".docker", ".kube"} {
 		if !Has(hiddenCredentialPaths, required) {

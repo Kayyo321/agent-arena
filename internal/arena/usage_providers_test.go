@@ -250,15 +250,18 @@ func TestUsageJournalKeepsEveryCategoryTheProviderSent(t *testing.T) {
 
 // OpenCode ends every model call of a run with a step-finish whose tokens count
 // that call alone. Each step reports under its own turn key, so the steps add up
-// instead of the largest hiding the rest; input and output are summed, and the
-// reasoning and cache counts stay in the report without being added again.
+// instead of the largest hiding the rest. The 1.19.3 bundle's getUsage reports
+// input as the provider's input minus the cache read and write, and output as the
+// provider's output minus the reasoning, so the cache counts add to input and the
+// reasoning adds to output; the whole map stays in the report. The fixture is
+// built from that formula, not recorded from a live run.
 func TestUsageOpenCodeStepsAddUp(t *testing.T) {
 	openCodeFake(t, `cat <<'EOF'
 {"type":"step_start","timestamp":1,"sessionID":"ses_1","part":{"type":"step-start"}}
 {"type":"step_finish","timestamp":2,"sessionID":"ses_1","part":{"type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":120,"output":30,"reasoning":10,"cache":{"read":9000,"write":0}}}}
 {"type":"step_finish","timestamp":3,"sessionID":"ses_1","part":{"type":"step-finish","reason":"tool-calls","cost":0,"tokens":{"input":40,"output":20,"reasoning":0,"cache":{"read":9500,"write":300}}}}
 {"type":"text","timestamp":4,"sessionID":"ses_1","part":{"type":"text","text":"{\"summary\":\"fixture\"}","time":{"start":3,"end":4}}}
-{"type":"step_finish","timestamp":5,"sessionID":"ses_1","part":{"type":"step-finish","reason":"stop","cost":0,"tokens":{"total":9990,"input":5,"output":7,"reasoning":0,"cache":{"read":9900,"write":0}}}}
+{"type":"step_finish","timestamp":5,"sessionID":"ses_1","part":{"type":"step-finish","reason":"stop","cost":0,"tokens":{"total":9912,"input":5,"output":7,"reasoning":0,"cache":{"read":9900,"write":0}}}}
 EOF
 `)
 	var r reported
@@ -270,7 +273,10 @@ EOF
 	if len(r.maps) != 3 {
 		t.Fatalf("%d usage reports, want one per step", len(r.maps))
 	}
-	requireUsage(t, r.total("builder"), 120+40+5, 30+20+7)
+	// Input is the bare input plus the cache read and write of each step, output the
+	// bare output plus its reasoning: the three steps' cache reads (9000, 9500,
+	// 9900), the 300 cache write and the 10 reasoning tokens all count.
+	requireUsage(t, r.total("builder"), (120+9000+0)+(40+9500+300)+(5+9900+0), (30+10)+(20+0)+(7+0))
 	for i, m := range r.maps {
 		if _, ok := m["reasoning"]; !ok {
 			t.Fatalf("report %d dropped reasoning: %v", i, m)
@@ -286,5 +292,32 @@ EOF
 	// The bare keys come last: another provider's named counts win.
 	if in, out, _ := usageTokens(map[string]any{"input_tokens": 7, "input": 99, "output_tokens": 3, "output": 98}); in != 7 || out != 3 {
 		t.Fatalf("named keys must win over the bare ones: %d %d", in, out)
+	}
+	// The cache and reasoning counts add only to a count the bare key supplied: a
+	// named count beside them is left alone, and a value that is not a number adds
+	// nothing.
+	tokens := map[string]any{"input_tokens": 7, "output_tokens": 3, "reasoning": 4, "cache": map[string]any{"read": 5, "write": 6}}
+	if in, out, found := usageTokens(tokens); in != 7 || out != 3 || found != [2]bool{true, true} {
+		t.Fatalf("a named count must not be topped up with OpenCode's cache and reasoning: %d %d %v", in, out, found)
+	}
+	tokens = map[string]any{"input": 2, "output": 1, "reasoning": "many", "cache": map[string]any{"read": "lots", "write": -4}}
+	if in, out, _ := usageTokens(tokens); in != 2 || out != 1 {
+		t.Fatalf("a cache or reasoning value that is not a count adds nothing: %d %d", in, out)
+	}
+	tokens = map[string]any{"input": 2, "output": 1, "reasoning": 4, "cache": []any{5}}
+	if in, out, _ := usageTokens(tokens); in != 2 || out != 5 {
+		t.Fatalf("a cache that is not an object adds nothing, reasoning still adds to output: %d %d", in, out)
+	}
+	tokens = map[string]any{"input": 120, "output": 30, "reasoning": 10, "cache": map[string]any{"read": 9000, "write": 25}}
+	if in, out, found := usageTokens(tokens); in != 120+9000+25 || out != 30+10 || found != [2]bool{true, true} {
+		t.Fatalf("a step-finish counts its cache and reasoning: %d %d %v", in, out, found)
+	}
+	// Through the journal's JSON (numbers arrive as json.Number or float64).
+	var decoded map[string]any
+	if err := DecodeJSON([]byte(`{"input":1,"output":2,"reasoning":3,"cache":{"read":4,"write":5}}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if in, out, _ := usageTokens(decoded); in != 1+4+5 || out != 2+3 {
+		t.Fatalf("decoded step-finish tokens: %d %d", in, out)
 	}
 }
